@@ -30,6 +30,7 @@ typedef struct cpu_state_st {
 
 void exception(char *kind);
 void run_simple(int, char **);
+void run_sscalar_io(int, char **);
 
 static inline cpu_state_t *
 state_create(void)
@@ -45,6 +46,27 @@ state_destroy(cpu_state_t *state)
 {
         memory_destroy(state->mem);
         free(state);
+}
+
+static inline uint32_t
+load32(memory_t *m, uint64_t address)
+{
+    // assert((uint32_t)address == address);
+    return *(uint32_t *)memory_physical(m, (uint32_t)address, sizeof(uint32_t));
+}
+
+static inline uint64_t
+load64(memory_t *m, uint64_t address)
+{
+    // assert((uint32_t)address == address);
+    return *(uint64_t *)memory_physical(m, (uint32_t)address, sizeof(uint64_t));
+}
+
+static inline void
+store64(memory_t *m, uint64_t address, uint64_t v)
+{
+    // assert((uint32_t)address == address);
+    *(uint64_t *)memory_physical(m, (uint32_t)address, sizeof(uint64_t)) = v;
 }
 
 #endif

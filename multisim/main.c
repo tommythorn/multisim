@@ -14,9 +14,7 @@
 #include "alpha_opcode.h"
 #include "sim.h"
 
-struct timeval stat_start_time, stat_stop_time;
-
-static int run = '1';
+static int run = '2';
 
 
 static struct option long_options[] = {
@@ -87,12 +85,15 @@ int main(int argc, char **argv)
         images = argv + optind;
         num_images = argc - optind;
 
-        gettimeofday(&stat_start_time, NULL);
+        signal(SIGINT, exit);
 
         switch (run) {
         case '1':
-                signal(SIGINT, exit);
                 run_simple(num_images, images);
+                break;
+
+        case '2':
+                run_sscalar_io(num_images, images);
                 break;
 
         default:

@@ -200,24 +200,16 @@ inst_exec(uint32_t instruction, uint64_t op_a, uint64_t op_b,
         switch (i.iop.opcode) {
         case OP_LDAH: return op_a + i.mem.disp * 65536;
         case OP_LDBU:
-        case OP_LDA:  return ea;
-        case OP_LDQ:  printf("\t\t\t\t\t\t[0x%llx]\n",ea);
-                      return ea;
-        case OP_LDQ_U:
-                if (i.iop.ra != 31) {
-                        printf("\t\t\t\t\t\t[0x%llx]\n",ea);
-                }
-                return ea & ~7;
+        case OP_LDA:
+        case OP_LDQ:  return ea;
+        case OP_LDQ_U:return ea & ~7;
 
         case OP_STB:
-                printf("\t\t\t\t\t\t[0x%llx]b=0x%llx\n", ea, 255 & op_b);
                 *storev = (uint8_t)op_b * 0x0101010101010101ULL;
                 *storemask = 0xFFULL << 8 * (ea & 7);
                 return ea;
 
         case OP_STL: {
-                printf("\t\t\t\t\t\t[0x%llx]l=%d\n", ea, (uint32_t) op_b);
-
                 if (ea & 4) {
                         *storev = op_b << 32;
                         *storemask = 0xFFFFFFFF00000000ULL;

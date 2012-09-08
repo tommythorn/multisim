@@ -9,7 +9,7 @@ test_sieve: multisim
 install: multisim
 	cp multisim $(PREFIX)/bin
 
-multisim: main.o run_simple.o memory.o loadelf.o alpha-isa.o
+multisim: main.o run_simple.o run_sscalar_io.o memory.o loadelf.o alpha-isa.o
 	$(CC) $(LDFLAGS) $^ -o $@
 
 clean:
