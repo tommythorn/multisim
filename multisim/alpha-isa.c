@@ -130,8 +130,8 @@ decode(uint32_t inst,
         inst_t i = { .raw = inst };
 
         *dest_reg     = NO_REG;
-        *source_reg_a = NO_REG;
-        *source_reg_b = NO_REG;
+        *source_reg_a = 31;
+        *source_reg_b = 31;
         *b_is_imm     = false;
         *imm          = i.iop_imm.lit;
         *is_load      = false;
@@ -172,9 +172,8 @@ decode(uint32_t inst,
                 break;
         }
 
-        if (*source_reg_a == 31) *source_reg_a = NO_REG;
-        if (*source_reg_b == 31) *source_reg_b = NO_REG;
-        if (*dest_reg == 31) *dest_reg = NO_REG;
+        if (*dest_reg == 31)
+            *dest_reg = NO_REG;
 }
 
 static uint64_t

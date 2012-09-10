@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		651C98E915FD8DE800EBDB4D /* run_sscalar_oooe.c in Sources */ = {isa = PBXBuildFile; fileRef = 651C98E815FD8DE800EBDB4D /* run_sscalar_oooe.c */; };
 		6578DC4515F2928A00F19412 /* main.c in Sources */ = {isa = PBXBuildFile; fileRef = 6578DC4415F2928A00F19412 /* main.c */; };
 		6578DC4715F2928A00F19412 /* multisim.1 in CopyFiles */ = {isa = PBXBuildFile; fileRef = 6578DC4615F2928A00F19412 /* multisim.1 */; };
 		6581B43515FC0F4700CAA31A /* run_sscalar_io.c in Sources */ = {isa = PBXBuildFile; fileRef = 6581B43415FC0F4700CAA31A /* run_sscalar_io.c */; };
@@ -30,6 +31,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		651C98E815FD8DE800EBDB4D /* run_sscalar_oooe.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = run_sscalar_oooe.c; sourceTree = "<group>"; };
 		6578DC4015F2928A00F19412 /* multisim */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = multisim; sourceTree = BUILT_PRODUCTS_DIR; };
 		6578DC4415F2928A00F19412 /* main.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = main.c; sourceTree = "<group>"; };
 		6578DC4615F2928A00F19412 /* multisim.1 */ = {isa = PBXFileReference; lastKnownFileType = text.man; path = multisim.1; sourceTree = "<group>"; };
@@ -75,6 +77,7 @@
 		6578DC4315F2928A00F19412 /* multisim */ = {
 			isa = PBXGroup;
 			children = (
+				651C98E815FD8DE800EBDB4D /* run_sscalar_oooe.c */,
 				6581B43415FC0F4700CAA31A /* run_sscalar_io.c */,
 				65CA85CF15F297B400852623 /* alpha_opcode.h */,
 				65CA85D015F297B400852623 /* isa.h */,
@@ -148,6 +151,7 @@
 				65CA85DB15F297B400852623 /* memory.c in Sources */,
 				65CA85DC15F297B400852623 /* run_simple.c in Sources */,
 				6581B43515FC0F4700CAA31A /* run_sscalar_io.c in Sources */,
+				651C98E915FD8DE800EBDB4D /* run_sscalar_oooe.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
