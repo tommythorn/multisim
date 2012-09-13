@@ -165,3 +165,15 @@ int loadelf(memory_t *m, char *name, elf_info_t *elf_info)
 
     return 0;
 }
+
+int loadelfs(memory_t *m, int n, char *name[], elf_info_t *last_info)
+{
+    int i;
+    for (i = 0; i < n; ++i) {
+        int r = loadelf(m, name[i], last_info);
+        if (r)
+            break;
+    }
+
+    return i;
+}

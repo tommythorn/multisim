@@ -166,12 +166,10 @@ void run_sscalar_io(int num_images, char *images[])
 
         memset(scoreboard, 1, sizeof scoreboard);
 
-        for (int i = 0; i < num_images; ++i) {
-                int r = loadelf(state->mem, images[i], &info);
-                if (r)
-                        fatal("error: loading %s failed with %d", images[i], r);
-                loadelf(costate->mem, images[i], &info);
-        }
+        int r = loadelfs(state->mem, num_images, images, &info);
+        if (r != num_images)
+                fatal("error: loading %s failed", images[r]);
+        loadelfs(costate->mem, num_images, images, &info);
 
         isa->setup(state, &info);
         isa->setup(costate, &info);

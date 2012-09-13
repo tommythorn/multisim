@@ -256,6 +256,16 @@ run_sscalar_oooe(int num_images, char *images[])
 
         int cycle;
 
+        int r = loadelfs(state->mem, num_images, images, &info);
+        if (r != num_images)
+                fatal("error: loading %s failed", images[r]);
+        loadelfs(costate->mem, num_images, images, &info);
+
+        isa->setup(state, &info);
+        isa->setup(costate, &info);
+
+
+        /* Scoreboard and reservation station initialization */
         memset(scoreboard, 0, sizeof scoreboard);
         memset(rs, 0, sizeof rs);
 
@@ -268,18 +278,8 @@ run_sscalar_oooe(int num_images, char *images[])
 
         rs_size = rs_start = 0;
 
-
-        for (int i = 0; i < num_images; ++i) {
-                int r = loadelf(state->mem, images[i], &info);
-                if (r)
-                        fatal("error: loading %s failed with %d", images[i], r);
-                loadelf(costate->mem, images[i], &info);
-        }
-
-        isa->setup(state, &info);
-        isa->setup(costate, &info);
-
         memcpy(prf, state->r, sizeof state->r[0] * 32);
+
 
         for (cycle = 0;; ++cycle) {
                 printf("Cycle #%d (%d):\n", cycle, rs_size);

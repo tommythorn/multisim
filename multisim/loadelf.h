@@ -20,4 +20,6 @@ typedef struct elf_info_st {
 
 int loadelf(memory_t *m, char *name, elf_info_t *program_entry);
 
+/* loadelfs returns how many successfully loaded */
+int loadelfs(memory_t *m, int n, char *name[], elf_info_t *last_info);
 #endif

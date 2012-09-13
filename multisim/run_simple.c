@@ -72,11 +72,9 @@ void run_simple(int num_images, char *images[])
         const isa_t *isa = &alpha_isa;
         elf_info_t info;
 
-        for (int i = 0; i < num_images; ++i) {
-                int r = loadelf(state->mem, images[i], &info);
-                if (r)
-                        fatal("error: loading %s failed with %d", images[i], r);
-        }
+        int r = loadelfs(state->mem, num_images, images, &info);
+        if (r != num_images)
+                fatal("error: loading %s failed", images[r]);
 
         isa->setup(state, &info);
 
