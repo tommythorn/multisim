@@ -1,4 +1,24 @@
 /*
+ * Multisim: a microprocessor architecture exploration framework
+ * Copyright (C) 2012 Tommy Thorn
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the
+ * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
+ */
+
+/*
  * loadelf.c - binary image loader. Assumes only memory.h
  *
  * Copyright (C) 2004-2012 Tommy Thorn - All Rights Reserved
@@ -25,21 +45,21 @@ static void
 loadsection(FILE *f, unsigned f_offset, unsigned f_len,
             memory_t *m, uint32_t m_addr, size_t m_len, elf_info_t *info)
 {
-        memory_ensure_mapped_range(m, m_addr, m_len);
+    memory_ensure_mapped_range(m, m_addr, m_len);
 
-        info->section_start[info->nsections]  = m_addr;
-        info->section_size[info->nsections++] = m_len;
-        assert(info->nsections <
-               sizeof info->section_start / sizeof(unsigned));
+    info->section_start[info->nsections]  = m_addr;
+    info->section_size[info->nsections++] = m_len;
+    assert(info->nsections <
+           sizeof info->section_start / sizeof(unsigned));
 
-        /*
-         * We clear memory so that BBS doesn't need special
-         * initialization
-         */
-        void *buf = memory_physical(m, m_addr, m_len);
-        fseek(f, f_offset, SEEK_SET);
-        memset(buf, 0, m_len);
-        fread(buf, f_len, 1, f);
+    /*
+     * We clear memory so that BBS doesn't need special
+     * initialization
+     */
+    void *buf = memory_physical(m, m_addr, m_len);
+    fseek(f, f_offset, SEEK_SET);
+    memset(buf, 0, m_len);
+    fread(buf, f_len, 1, f);
 }
 
 int loadelf(memory_t *m, char *name, elf_info_t *elf_info)
@@ -177,3 +197,9 @@ int loadelfs(memory_t *m, int n, char *name[], elf_info_t *last_info)
 
     return i;
 }
+
+// Local Variables:
+// mode: C
+// c-style-variables-are-local-p: t
+// c-file-style: "stroustrup"
+// End:

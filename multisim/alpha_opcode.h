@@ -1,4 +1,24 @@
 /*
+ * Multisim: a microprocessor architecture exploration framework
+ * Copyright (C) 2012 Tommy Thorn
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the
+ * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
+ */
+
+/*
  *
  * Alpha opcode map
  *
@@ -13,46 +33,46 @@
 
 typedef unsigned opcode_t;
 typedef union alpha_instruction {
-        struct {
-                unsigned   number : 26;
-                opcode_t   opcode :  6;
-        } pal;
-        struct {
-                int        disp   : 21;
-                unsigned   ra     :  5;
-                opcode_t opcode :  6;
-        } br;
-        struct {
-                int        disp   : 16;
-                unsigned   rb     :  5;
-                unsigned   ra     :  5;
-                opcode_t   opcode :  6;
-        } mem;
-        struct {
-                unsigned   rc     :  5;
-                unsigned   func   : 11;
-                unsigned   rb     :  5;
-                unsigned   ra     :  5;
-                opcode_t   opcode :  6;
-        } fop;
-        struct {
-                unsigned   rc     :  5;
-                unsigned   func   :  7;
-                unsigned   isimm  :  1;
-                unsigned   sbz    :  3;
-                unsigned   rb     :  5;
-                unsigned   ra     :  5;
-                opcode_t   opcode :  6;
-        } iop;
-        struct {
-                unsigned   rc     :  5;
-                unsigned   func   :  7;
-                unsigned   isimm  :  1;
-                unsigned   lit    :  8;
-                unsigned   ra     :  5;
-                opcode_t   opcode :  6;
-        } iop_imm;
-        u_int32_t raw;
+    struct {
+        unsigned   number : 26;
+        opcode_t   opcode :  6;
+    } pal;
+    struct {
+        int        disp   : 21;
+        unsigned   ra     :  5;
+        opcode_t opcode :  6;
+    } br;
+    struct {
+        int        disp   : 16;
+        unsigned   rb     :  5;
+        unsigned   ra     :  5;
+        opcode_t   opcode :  6;
+    } mem;
+    struct {
+        unsigned   rc     :  5;
+        unsigned   func   : 11;
+        unsigned   rb     :  5;
+        unsigned   ra     :  5;
+        opcode_t   opcode :  6;
+    } fop;
+    struct {
+        unsigned   rc     :  5;
+        unsigned   func   :  7;
+        unsigned   isimm  :  1;
+        unsigned   sbz    :  3;
+        unsigned   rb     :  5;
+        unsigned   ra     :  5;
+        opcode_t   opcode :  6;
+    } iop;
+    struct {
+        unsigned   rc     :  5;
+        unsigned   func   :  7;
+        unsigned   isimm  :  1;
+        unsigned   lit    :  8;
+        unsigned   ra     :  5;
+        opcode_t   opcode :  6;
+    } iop_imm;
+    u_int32_t raw;
 } inst_t;
 
 #define mk_enum(O) OP_##O,
@@ -516,3 +536,9 @@ enum alpha_intl_opcode {
     F(70,FTOIT)                                 \
     F(78,FTOIS)
 #endif
+
+// Local Variables:
+// mode: C
+// c-style-variables-are-local-p: t
+// c-file-style: "stroustrup"
+// End:

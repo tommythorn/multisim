@@ -1,3 +1,23 @@
+/*
+ * Multisim: a microprocessor architecture exploration framework
+ * Copyright (C) 2012 Tommy Thorn
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the
+ * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
+ */
+
 #include "memory.h"
 #include <assert.h>
 #include <stdlib.h>
@@ -12,33 +32,33 @@
   approach is to divide the simulation space into 2^S segments with a
   mapping from segments to physical segments:
 
-    N = 32 - S
-    segment(x)   = x >> N
-    offset(x)    = x & ((1 << N) - 1)
-    Inv: for all x, (segment(x) << N) + offset(x) == x
+  N = 32 - S
+  segment(x)   = x >> N
+  offset(x)    = x & ((1 << N) - 1)
+  Inv: for all x, (segment(x) << N) + offset(x) == x
 
-    addr2phys(x) = memory_segment[segment(x)] + offset(x)
+  addr2phys(x) = memory_segment[segment(x)] + offset(x)
 
-   As we can't map all segments, we represent the "holes" as areas
-   laying outside the segment space:
+  As we can't map all segments, we represent the "holes" as areas
+  laying outside the segment space:
 
-    addr_mapped(x) = offset(x) < memory_segment_size[segment(x)]
+  addr_mapped(x) = offset(x) < memory_segment_size[segment(x)]
 
-   OPTIMIZATION
+  OPTIMIZATION
 
-   Note, the offset(x) can also be written
+  Note, the offset(x) can also be written
 
-     offset(x) = x - (segment(x) << N)
+  offset(x) = x - (segment(x) << N)
 
-   thus
+  thus
 
-     addr2phys(x) = memory_segment[segment(x)] + x - (segment(x) << N)
+  addr2phys(x) = memory_segment[segment(x)] + x - (segment(x) << N)
 
-   or by arranging for memory_segment'[s] = memory_segment[s] - (s << N)
+  or by arranging for memory_segment'[s] = memory_segment[s] - (s << N)
 
-     addr2phys(x) = memory_segment'[segment(x)] + x
+  addr2phys(x) = memory_segment'[segment(x)] + x
 
-   BUT we don't do it like that below, for clairity.
+  BUT we don't do it like that below, for clairity.
 */
 
 #define MEMORY_SEGMENTBITS 4
@@ -46,8 +66,8 @@
 #define MEMORY_NSEGMENT (1 << MEMORY_SEGMENTBITS)
 
 struct memory_st {
-     void    *segment[MEMORY_NSEGMENT];
-     unsigned segment_size[MEMORY_NSEGMENT];
+    void    *segment[MEMORY_NSEGMENT];
+    unsigned segment_size[MEMORY_NSEGMENT];
 };
 
 #define memory_segment(m, x)     (((unsigned)(x)) >> MEMORY_OFFSETBITS)
@@ -106,3 +126,9 @@ void memory_destroy(memory_t *m)
 {
     free(m);
 }
+
+// Local Variables:
+// mode: C
+// c-style-variables-are-local-p: t
+// c-file-style: "stroustrup"
+// End:
