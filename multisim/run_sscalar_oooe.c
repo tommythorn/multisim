@@ -107,11 +107,12 @@ step_sscalar_oooe(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
 
         int      wbr, ra, rb;
         bool     op_b_is_imm;
-        uint64_t op_imm;
+        uint64_t op_imm, br_target;
         int      p = (rs_size++ + rs_start) % WINDOW_SIZE;
 
-        isa->decode(i, &wbr, &ra, &rb, &op_b_is_imm, &op_imm,
-                    &rs[p].is_load, &rs[p].is_store, &rs[p].is_branch);
+        isa->decode(i, state->pc, &wbr, &ra, &rb, &op_b_is_imm, &op_imm,
+                    &rs[p].is_load, &rs[p].is_store, &rs[p].is_branch,
+                    &br_target);
 
         rs[p].valid = true;
         rs[p].issued = false;

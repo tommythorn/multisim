@@ -106,6 +106,11 @@ disass(uint64_t pc, uint32_t inst)
             if (i.raw ==  0x47ff041f) {
                 DIS(nop, barefmt, 31);
             }
+            else if (i.iop.ra == 31) {
+                printf("%016llx %-11sr%d,r%d\n",
+                       pc, "mov", i.iop.rb, i.iop.rc);
+                return;
+            }
             else {
                 DIS(bis, opfmt, i.iop.rc);
             }
@@ -142,10 +147,11 @@ disass(uint64_t pc, uint32_t inst)
 }
 
 static void
-decode(uint32_t inst,
+decode(uint32_t inst, uint64_t inst_addr,
        int *dest_reg, int *source_reg_a, int *source_reg_b,
        bool *b_is_imm, uint64_t *imm,
-       bool *is_load, bool *is_store, bool *is_branch)
+       bool *is_load, bool *is_store, bool *is_branch,
+       uint64_t *br_target)
 {
     inst_t i = { .raw = inst };
 
@@ -189,6 +195,7 @@ decode(uint32_t inst,
     case OP_BNE:
         *is_branch = true;
         *source_reg_a = i.iop.ra;
+        *br_target = inst_addr + 4 * (1 + i.br.disp);
         break;
     }
 

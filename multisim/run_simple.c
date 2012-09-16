@@ -34,7 +34,7 @@ step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
     uint64_t pc = state->pc;
     int      wbr, ra, rb;
     bool     op_b_is_imm;
-    uint64_t op_imm;
+    uint64_t op_imm, br_target;
     bool     is_load, is_store, is_branch;
     uint64_t storev, storemask;
 
@@ -43,8 +43,8 @@ step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
     if (verbose)
         isa->disass(pc, inst);
 
-    isa->decode(inst, &wbr, &ra, &rb, &op_b_is_imm, &op_imm,
-                &is_load, &is_store, &is_branch);
+    isa->decode(inst, pc, &wbr, &ra, &rb, &op_b_is_imm, &op_imm,
+                &is_load, &is_store, &is_branch, &br_target);
 
     uint64_t op_a = state->r[ra];
     uint64_t op_b = op_b_is_imm ? op_imm : state->r[rb];

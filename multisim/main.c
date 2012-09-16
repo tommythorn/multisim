@@ -34,7 +34,7 @@
 #include "alpha_opcode.h"
 #include "sim.h"
 
-static int run = '3';
+static int run = '4';
 
 
 static struct option long_options[] = {
@@ -118,6 +118,10 @@ int main(int argc, char **argv)
 
     case '3':
         run_sscalar_oooe(num_images, images);
+        break;
+
+    case '4':
+        run_sscalar_oooe_spec(num_images, images);
         break;
 
     default:

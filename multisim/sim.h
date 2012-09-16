@@ -52,6 +52,7 @@ void exception(char *kind);
 void run_simple(int, char **);
 void run_sscalar_io(int, char **);
 void run_sscalar_oooe(int, char **);
+void run_sscalar_oooe_spec(int, char **);
 
 static inline cpu_state_t *
 state_create(void)
