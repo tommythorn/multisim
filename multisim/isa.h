@@ -51,6 +51,17 @@ typedef struct isa_st {
 } isa_t;
 
 extern const isa_t alpha_isa;
+extern const isa_t lm32_isa;
+
+static inline const isa_t *
+get_isa(uint16_t machine)
+{
+    if (machine == EM_ALPHA)
+        return &alpha_isa;
+    if (machine == EM_LM32)
+        return &lm32_isa;
+    return NULL;
+}
 
 #endif
 

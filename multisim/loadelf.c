@@ -33,13 +33,8 @@
 #include <assert.h>
 #include <string.h>
 
-#if defined(__APPLE__)
-#include "libelf/sys_elf.h"
-#else
-#include "elf.h"
-#endif
-
-
+static const bool enable_verb_prog_sec = false;
+static const bool enable_verb_elf = false;
 
 static void
 loadsection(FILE *f, unsigned f_offset, unsigned f_len,
@@ -62,128 +57,63 @@ loadsection(FILE *f, unsigned f_offset, unsigned f_len,
     fread(buf, f_len, 1, f);
 }
 
+#ifdef _BIG_ENDIAN
+#error "I don't support this"
+#endif
+
+#define NATIVE(x)                                                       \
+    ((__typeof__(x)) (ehdr.e_ident[EI_DATA] == ELFDATA2LSB ? (x) :     \
+                      sizeof(x) == 2                       ? htons(x) : \
+                      sizeof(x) == 4                       ? htonl(x) : \
+                      sizeof(x) == 8                       ? swp64(x) : \
+                      (x)))
+
+static uint64_t
+swp64(uint64_t x)
+{
+    uint64_t lo = htonl(x);
+    uint64_t hi = htonl(x >> 32);
+
+    return (lo << 32) | hi;
+}
+
+#define SZ(x,y) x ## 32 ## y
+#include "loadelf_temp.c"
+#undef SZ
+#define SZ(x,y) x ## 64 ## y
+#include "loadelf_temp.c"
+
 int loadelf(memory_t *m, char *name, elf_info_t *elf_info)
 {
-    const bool enable_verb_prog_sec = false;
-    const bool enable_verb_elf = false;
-
     Elf64_Ehdr ehdr;
-    Elf64_Phdr *ph;
     FILE *f = fopen(name, "r");
 
-    if (!f)
+    if (!f) {
+        perror(name);
         return 1;
+    }
 
-    if (fread(&ehdr, sizeof ehdr, 1, f) != 1)
+    if (fread(&ehdr, sizeof ehdr, 1, f) != 1) {
+        fprintf(stderr, "%s: short header read, file corrupted?\n", name);
         return 2;
+    }
 
-    if (strncmp((char *)ehdr.e_ident, ELFMAG, SELFMAG))
+    if (strncmp((char *)ehdr.e_ident, ELFMAG, SELFMAG)) {
+        fprintf(stderr, "%s: Not an ELF file\n", name);
         return 3;
-
-    memset(elf_info, 0, sizeof *elf_info);
-
-    elf_info->endian_is_big = ehdr.e_ident[EI_DATA] == 2;
-
-    if (ehdr.e_type != ET_EXEC)
-        return 4;
-
-    // MacPorts' libelf gets this wrong, Linux elf.h gets it right
-    if (ehdr.e_machine != 0x9026 /*EM_ALPHA*/)
-        return 5;
-
-    if (elf_info->endian_is_big)
-        return 6;
-
-    if (enable_verb_prog_sec) {
-        printf("%s:\n", name);
-        printf("%sendian\n", elf_info->endian_is_big ? "big" : "little");
-        printf("Entry:             %016lx\n", ehdr.e_entry); /* Entry point virtual address */
-        printf("Proc Flags:        %08x\n", ehdr.e_flags); /* Processor-specific flags */
-        printf("Phdr.tbl entry cnt % 8d\n", ehdr.e_phnum);    /*Program header table entry count */
-        printf("Shdr.tbl entry cnt % 8d\n", ehdr.e_shnum);    /*Section header table entry count */
-        printf("Shdr.str tbl idx   % 8d\n", ehdr.e_shstrndx); /*Section header string table index */
     }
 
-    elf_info->program_entry = ehdr.e_entry;
+    rewind(f);
 
-    if (ehdr.e_ehsize != sizeof ehdr) {
-        return 7;
-    }
+    if (ehdr.e_ident[EI_CLASS] == ELFCLASS32)
+        return loadelf32(m, name, f, elf_info);
 
-    if (ehdr.e_shentsize != sizeof(Elf64_Shdr)) {
-        return 8;
-    }
+    if (ehdr.e_ident[EI_CLASS] == ELFCLASS64)
+        return loadelf64(m, name, f, elf_info);
 
-    // Allocate program headers
-    ph = alloca(sizeof *ph * ehdr.e_phnum);
-
-    for (int i = 0; i < ehdr.e_phnum; ++i) {
-
-        fseek(f, ehdr.e_phoff + i * ehdr.e_phentsize, SEEK_SET);
-
-        if (fread(ph + i, sizeof *ph, 1, f) != 1)
-            return 9;
-
-        if (enable_verb_prog_sec) {
-            printf("\nProgram header #%d (%lx)\n", i, ftell(f));
-            printf(" type             %08x\n",   ph[i].p_type);
-            printf(" filesz           %016lx\n", ph[i].p_filesz);
-            printf(" offset           %016lx\n", ph[i].p_offset);
-            printf(" vaddr            %016lx\n", ph[i].p_vaddr);
-            printf(" paddr            %016lx\n", ph[i].p_paddr);
-            printf(" memsz            %016lx\n", ph[i].p_memsz);
-            printf(" flags            %08x\n",   ph[i].p_flags);
-            printf(" align            %016lx\n", ph[i].p_align);
-        }
-
-        if (ph[i].p_type == PT_LOAD && ph[i].p_filesz) {
-
-            if (enable_verb_prog_sec)
-                fprintf(stderr, "Loading section [%016lx; %016lx]\n",
-                        ph[i].p_vaddr, ph[i].p_vaddr + ph[i].p_memsz - 1);
-
-            // XXX memory_t only supports 32-bit address space - this depends on luck
-            // to work.
-            loadsection(f, (unsigned)ph[i].p_offset, (unsigned)ph[i].p_filesz,
-                        m, (uint32_t)ph[i].p_vaddr, (size_t)ph[i].p_memsz,
-                        elf_info);
-        }
-
-        if (ph[i].p_flags & 1) {
-            elf_info->text_segments++;
-            elf_info->text_start = ph[i].p_vaddr;
-            elf_info->text_size  = ph[i].p_memsz;
-        }
-    }
-
-    if (enable_verb_elf) {
-        printf("\n");
-
-        fseek(f, ehdr.e_shoff, SEEK_SET);
-
-        for (int i = 0; i < ehdr.e_shnum; ++i) {
-            Elf64_Shdr sh;
-
-            if (fread(&sh, sizeof sh, 1, f) != 1)
-                return 10;
-
-            printf("\nSection header #%d (%lx)\n", i, ftell(f));
-            printf(" name            %08x\n", sh.sh_name);
-            printf(" type            %08x\n", sh.sh_type);
-            printf(" flags           %016lx\n", sh.sh_flags);
-            printf(" addr            %016lx\n", sh.sh_addr);
-            printf(" offset          %016lx\n", sh.sh_offset);
-            printf(" size            %016lx\n", sh.sh_size);
-            printf(" link            %08x\n", sh.sh_link);
-            printf(" info            %08x\n", sh.sh_info);
-            printf(" addralign       %016lx\n", sh.sh_addralign);
-            printf(" entsize         %016lx\n", sh.sh_entsize);
-        }
-
-        printf(" (now at %lx)\n", ftell(f));
-    }
-
-    return 0;
+    fprintf(stderr, "%s: Not an ELF file? (EI_CLASS = %d)\n", name,
+            ehdr.e_ident[EI_CLASS]);
+    return 4;
 }
 
 int loadelfs(memory_t *m, int n, char *name[], elf_info_t *last_info)

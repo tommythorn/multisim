@@ -22,26 +22,13 @@
 #include <string.h>
 #include "sim.h"
 #include "isa.h"
-#include "alpha_opcode.h"
+#include "lm32_opcode.h"
 
 static void
 mfmt(char *buf, uint64_t pc, char *inst_string, inst_t i)
 {
     sprintf(buf, "%-11sr%d,%d(r%d)", inst_string, i.mem.ra, i.mem.disp, i.mem.rb);
 }
-
-#if 0
-static void
-brfmt(char *buf, uint64_t pc, char *inst_string, inst_t i)
-{
-    if (i.mem.ra == 31)
-        sprintf(buf, "%-11s0x%016llx", inst_string,
-                pc + 4 + i.br.disp * 4);
-    else
-        sprintf(buf, "%-11s0x%016llx,r%d", inst_string,
-                pc + 4 + i.br.disp * 4, i.mem.ra);
-}
-#endif
 
 static void
 cbrfmt(char *buf, uint64_t pc, char *inst_string, inst_t i)
@@ -62,12 +49,6 @@ static void
 barefmt(char *buf, uint64_t pc, char *inst_string, inst_t i)
 {
     strcpy(buf, inst_string);
-}
-
-/*static*/ void
-palfmt(char *buf, uint64_t pc, char *inst_string, inst_t i)
-{
-    sprintf(buf, "%-11s0x%x", inst_string, i.pal.number);
 }
 
 #define mk_opcode_name(O) #O,
@@ -293,11 +274,11 @@ inst_exec(uint32_t instruction, uint64_t op_a, uint64_t op_b,
 static void
 setup(cpu_state_t *state, elf_info_t *info)
 {
-    state->r[27] = state->pc = info->program_entry;
+    state->pc = info->program_entry;
     memory_ensure_mapped_range(state->mem, 0x200103f0, 1024*1024);
 }
 
-const isa_t alpha_isa = {
+const isa_t lm32_isa = {
     .setup = setup,
     .decode = decode,
     .inst_exec = inst_exec,

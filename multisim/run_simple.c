@@ -89,13 +89,14 @@ step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
 void run_simple(int num_images, char *images[])
 {
     cpu_state_t *state = state_create();
-    const isa_t *isa = &alpha_isa;
+    const isa_t *isa;
     elf_info_t info;
 
     int r = loadelfs(state->mem, num_images, images, &info);
     if (r != num_images)
         fatal("error: loading %s failed", images[r]);
 
+    isa = get_isa(info.machine);
     isa->setup(state, &info);
 
     int cycle;

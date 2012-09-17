@@ -20,6 +20,13 @@ WARN=-Wall -Werror -Wno-logical-op-parentheses -Wno-bitwise-op-parentheses
 CFLAGS=-g $(WARN) -MD -O0 -g -I/opt/local/include
 LDFLAGS=-g
 FLAGS=
+OBJS=main.o \
+	run_simple.o run_sscalar_io.o run_sscalar_oooe.o \
+	memory.o loadelf.o alpha-isa.o lm32-isa.o
+
+test_lm32: multisim
+	./multisim ../workloads/vmlinux.lm32
+
 
 test_sieve: multisim
 	./multisim ../workloads/sieve.alpha
@@ -27,7 +34,7 @@ test_sieve: multisim
 install: multisim
 	cp multisim $(PREFIX)/bin
 
-multisim: main.o run_simple.o run_sscalar_io.o run_sscalar_oooe.o memory.o loadelf.o alpha-isa.o
+multisim: $(OBJS)
 	$(CC) $(LDFLAGS) $^ -o $@
 
 clean:

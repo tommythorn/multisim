@@ -24,14 +24,26 @@
 #include "memory.h"
 #include <stdbool.h>
 
+#if defined(__APPLE__)
+#include "libelf/sys_elf.h"
+/* MacPorts' libelf gets this wrong, Linux elf.h gets it right */
+#undef  EM_ALPHA
+#define EM_ALPHA	0x9026
+#else
+#include "elf.h"
+#endif
+/* Nobody have this */
+#define EM_LM32         0x0666 /* Lattice Mico32 */
+
 #define MAX_ELF_SECTIONS 32
 
 typedef struct elf_info_st {
+    uint32_t machine;
     bool     endian_is_big;
     uint64_t program_entry;
     unsigned nsections;
     uint64_t section_start[MAX_ELF_SECTIONS];
-    uint64_t   section_size[MAX_ELF_SECTIONS];
+    uint64_t section_size[MAX_ELF_SECTIONS];
 
     unsigned text_segments;
     uint64_t text_start;
