@@ -27,7 +27,7 @@ test_sieve: multisim
 install: multisim
 	cp multisim $(PREFIX)/bin
 
-multisim: main.o run_simple.o run_sscalar_io.o run_sscalar_oooe.o memory.o loadelf.o alpha-isa.o
+multisim: main.o run_simple.o run_sscalar_io.o run_sscalar_oooe.o memory.o loadelf.o alpha_isa.o
 	$(CC) $(LDFLAGS) $^ -o $@
 
 clean:
