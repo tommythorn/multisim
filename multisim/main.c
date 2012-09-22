@@ -34,7 +34,7 @@
 #include "alpha_opcode.h"
 #include "sim.h"
 
-static int run = '3';
+static int run = '1';
 
 
 static struct option long_options[] = {
