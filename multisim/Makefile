@@ -46,4 +46,9 @@ realclean: clean
 TAGS:
 	etags *.[hc]
 
+regress: multisim
+	./multisim -1 ../workloads/sieve.alpha
+	./multisim -2 ../workloads/sieve.alpha
+	./multisim -3 ../workloads/sieve.alpha
+
 -include *.d
