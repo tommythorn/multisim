@@ -20,108 +20,124 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 #include "sim.h"
 #include "isa.h"
 #include "lm32_opcode.h"
 
-static void
-mfmt(char *buf, uint64_t pc, char *inst_string, inst_t i)
-{
-    sprintf(buf, "%-11sr%d,%d(r%d)", inst_string, i.mem.ra, i.mem.disp, i.mem.rb);
-}
+#define _LM32_MK_NAME(O) #O,
 
-static void
-cbrfmt(char *buf, uint64_t pc, char *inst_string, inst_t i)
-{
-    sprintf(buf, "%-11sr%d,0x%016llx", inst_string, i.mem.ra, pc + 4 + i.br.disp * 4);
-}
-
-static void
-opfmt(char *buf, uint64_t pc, char *inst_string, inst_t i)
-{
-    if (i.iop.isimm)
-        sprintf(buf, "%-11sr%d,%d,r%d", inst_string, i.iop.ra, i.iop_imm.lit, i.iop.rc);
-    else
-        sprintf(buf, "%-11sr%d,r%d,r%d", inst_string, i.iop.ra, i.iop.rb, i.iop.rc);
-}
-
-static void
-barefmt(char *buf, uint64_t pc, char *inst_string, inst_t i)
-{
-    strcpy(buf, inst_string);
-}
-
-#define mk_opcode_name(O) #O,
-static char *opcode_name[] = {
-    all_opcode(mk_opcode_name)
-};
-
-#define mk_sub_opcode_name(sub,O) [0x##sub] = #O,
-static char *intl_opcode_name[] = {
-    all_intl_opcode(mk_sub_opcode_name)
-};
-
-static char *inta_opcode_name[] = {
-    all_inta_opcode(mk_sub_opcode_name)
+static const char *lm32_opcode_name[] = {
+    _LM32_OP_F(_LM32_MK_NAME)
 };
 
 static void
-disass(uint64_t pc, uint32_t inst)
+disass(uint64_t addr, uint32_t inst)
 {
-    inst_t i = {.raw = inst };
-    unsigned wbr;
-    char *inst_string;
-    void (*fmt)(char *, uint64_t, char *, inst_t) = 0;
+    inst = htonl(inst);
+    lm32_instruction_t i = {.raw = inst };
+    char op_buf[16], s[30];
+    uint32_t imm16 = i.ri.imm16;
 
-#define DIS(name, format, rd) inst_string = #name; fmt = format; wbr = rd; break
-
-    switch (i.iop.opcode) {
+    switch (i.ri.op) {
+    case ANDHI: case ANDI: case CMPGEUI: case CMPGUI:
+    case NORI: case ORHI: case ORI: case XNORI: case XORI:
+        imm16 = (uint16_t) imm16;
+        break;
     default:
-        warn("Opcode %s not implemented, inst 0x%08x\n", opcode_name[i.iop.opcode], inst);
-        return;
-    case OP_LDAH: DIS(ldah,  mfmt, i.iop.ra);
-    case OP_LDA:  DIS(lda,   mfmt, i.iop.ra);
-    case OP_LDQ:  DIS(ldq,   mfmt, i.iop.ra);
-    case OP_LDQ_U:DIS(ldq_u, mfmt, i.iop.ra);
-    case OP_INTL_:
-        switch (i.iop.func) {
-        case OP_INTL_BIS:
-            if (i.raw ==  0x47ff041f) {
-                DIS(nop, barefmt, 31);
-            }
-            else {
-                DIS(bis, opfmt, i.iop.rc);
-            }
-        default:
-            warn("%s not implemented", intl_opcode_name[i.iop.func]);
-            return;
-        }
-        break;
-
-    case OP_INTA_:
-        switch (i.iop.func) {
-        default:
-            warn("%s not implemented", inta_opcode_name[i.iop.func]);
-            return;
-        case OP_INTA_ADDQ: DIS(addq,opfmt, i.iop.rc);
-        case OP_INTA_ADDL: DIS(addl,opfmt, i.iop.rc);
-        case OP_INTA_CMPEQ: DIS(cmpeq,opfmt, i.iop.rc);
-        case OP_INTA_S4ADDQ: DIS(s4addl,opfmt, i.iop.rc);
-        case OP_INTA_CMPULT: DIS(cmpult,opfmt, i.iop.rc);
-        }
-        break;
-    case OP_LDBU: DIS(ldbu,mfmt, i.iop.ra);
-    case OP_BEQ: DIS(beq,cbrfmt, 31);
-    case OP_BNE: DIS(bne,cbrfmt, 31);
-    case OP_STB: DIS(stb,mfmt, 31);
-    case OP_STL: DIS(stl,mfmt, 31);
+        ;
     }
 
-    char buf[99];
-    if (fmt) {
-        fmt(buf, pc, inst_string, i);
-        printf("%016llx %s\n", pc, buf);
+    strcpy(op_buf, lm32_opcode_name[i.i.op]);
+
+    for (int i = 0; op_buf[i]; ++i)
+        op_buf[i] = tolower(op_buf[i]);
+
+    switch (i.ri.op) {
+    case ORHI: case ORI:
+        if (i.ri.r0 == 0) {
+            snprintf(s, sizeof s, "%-7s" "r%d=0x%04x",
+                     i.ri.op == ORI ? "mvi" : "mvhi", i.ri.rd, imm16);
+            break;
+        }
+        /* fall-through */
+    case ADDI:
+        if (i.ri.rd == 0 && i.ri.r0 == 0 && imm16 == 0) {
+            strcpy(s, "nop");
+            break;
+        }
+    case SRUI: case NORI: case MULI: case SRI:
+    case XORI: case ANDI: case XNORI:
+    case SLI:
+    case CMPEI: case CMPNEI:
+    case CMPGI: case CMPGEI: case CMPGEUI:
+    case ANDHI:
+        snprintf(s, sizeof s,
+                 "%-7s" "r%d=r%d,0x%04x", op_buf, i.ri.rd, i.ri.r0, imm16);
+        break;
+    case CMPGUI:
+
+    case OR:
+        if (i.rr.r1 == 0) {
+            snprintf(s, sizeof s,
+                     "%-7s" "r%d=r%d", "mv", i.rr.rd, i.rr.r0);
+            break;
+        }
+    case SRU: case NOR: case MUL: case SR:
+    case XOR: case AND: case XNOR: case ADD:
+    case SL:
+    case CMPE: case CMPNE:
+    case CMPG: case CMPGE: case CMPGEU: case CMPGU:
+    case MODU: case SUB: case MOD:
+    case DIVU: case DIV:
+        snprintf(s, sizeof s,
+                 "%-7s" "r%d=r%d,r%d", op_buf, i.rr.rd, i.rr.r0, i.rr.r1);
+        break;
+
+    case SEXTB:
+    case SEXTH:
+        snprintf(s, sizeof s,
+                 "%-7s" "r%d=r%d", op_buf, i.rr.rd, i.rr.r0);
+        break;
+
+    case LB: case LH: case LW: case LHU: case LBU:
+        snprintf(s, sizeof s,
+                 "%-7s" "r%d=(r%d+%d)", op_buf, i.ri.rd, i.ri.r0, imm16);
+        break;
+    case SH: case SB: case SW:
+        snprintf(s, sizeof s,
+                 "%-7s" "(r%d+%d)=r%d", op_buf, i.ri.r0, imm16, i.ri.rd);
+        break;
+
+    case BE: case BG: case BGE: case BGEU: case BGU: case BNE:
+        snprintf(s, sizeof s,
+                 "%-7s" "r%d,r%d,0x%08x", op_buf, i.ri.r0, i.ri.rd,
+                 (uint32_t) (addr + imm16 * 4));
+        break;
+
+
+    case SCALL: case RES1: case RES2:
+        snprintf(s, sizeof s, "%s", op_buf);
+        break;
+
+    case RCSR:
+        snprintf(s, sizeof s, "%-7s" "r%d=c%d", op_buf, i.rr.rd, i.rr.r0);
+        break;
+
+    case WCSR:
+        snprintf(s, sizeof s, "%-7s" "c%d=r%d", op_buf, i.rr.r0, i.rr.r1);
+        break;
+
+    case B: case CALL:
+        snprintf(s, sizeof s, "%-7s" "r%d", op_buf, i.ri.r0);
+        break;
+
+    case BI: case CALLI:
+        snprintf(s, sizeof s, "%-7s" "0x%08x", op_buf, (uint32_t) (addr + i.i.imm26 * 4));
+        break;
     }
+
+    printf("%08llx %08x %s", addr, inst, s);
 }
 
 static void
@@ -130,8 +146,8 @@ decode(uint32_t inst,
        bool *b_is_imm, uint64_t *imm,
        bool *is_load, bool *is_store, bool *is_branch)
 {
-    inst_t i = { .raw = inst };
-
+#if 0
+    lm32_instruction_t i = { .raw = inst };
     *dest_reg     = NO_REG;
     *source_reg_a = 31;
     *source_reg_b = 31;
@@ -177,17 +193,21 @@ decode(uint32_t inst,
 
     if (*dest_reg == 31)
         *dest_reg = NO_REG;
+#endif
 }
 
 static uint64_t
 inst_loadalign(uint32_t instruction, uint64_t address, uint64_t result)
 {
+#if 0
     inst_t i = { .raw = instruction };
 
     switch (i.iop.opcode) {
     case OP_LDBU: return (uint8_t) (result >> 8 * (address & 7));
     default: return result;
     }
+#endif
+    return result;
 }
 
 static uint64_t
@@ -195,6 +215,7 @@ inst_exec(uint32_t instruction, uint64_t op_a, uint64_t op_b,
           uint64_t *storev, uint64_t *storemask, uint64_t *pc,
           bool *fatal)
 {
+#if 0
     inst_t i = { .raw = instruction };
     uint64_t ea = op_a + i.mem.disp;
     *fatal = false;
@@ -263,10 +284,12 @@ inst_exec(uint32_t instruction, uint64_t op_a, uint64_t op_b,
         return 0;
 
     default:
-        warn("Opcode %s not implemented, inst 0x%08x\n", opcode_name[i.iop.opcode], i.raw);
+        warn("Opcode %s not implemented, inst 0x%08x", opcode_name[i.iop.opcode], i.raw);
         *fatal = true;
         return 0;
     }
+
+#endif
 
     return -1;
 }
