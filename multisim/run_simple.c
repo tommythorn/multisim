@@ -101,7 +101,7 @@ void run_simple(int num_images, char *images[])
 
     int cycle;
     for (cycle = 0;; ++cycle) {
-        printf("Cycle #%d:\n", cycle);
+        printf("%5d ", cycle);
         if (step_simple(isa, state, true))
             break;
     }
