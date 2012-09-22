@@ -70,12 +70,11 @@ disass(uint64_t addr, uint32_t inst)
     case XORI: case ANDI: case XNORI:
     case SLI:
     case CMPEI: case CMPNEI:
-    case CMPGI: case CMPGEI: case CMPGEUI:
+    case CMPGI: case CMPGEI: case CMPGEUI: case CMPGUI:
     case ANDHI:
         snprintf(s, sizeof s,
                  "%-7s" "r%d=r%d,0x%04x", op_buf, i.ri.rd, i.ri.r0, imm16);
         break;
-    case CMPGUI:
 
     case OR:
         if (i.rr.r1 == 0) {
