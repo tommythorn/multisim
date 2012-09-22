@@ -31,24 +31,32 @@ static const char *lm32_opcode_name[] = {
     _LM32_OP_F(_LM32_MK_NAME)
 };
 
+static bool
+is_imm16_signed(lm32_opcode_t op)
+{
+    switch (op) {
+    case ANDHI: case ANDI: case CMPGEUI: case CMPGUI:
+    case NORI: case ORHI: case ORI: case XNORI: case XORI:
+        return false;
+    default:
+        return true;
+    }
+}
+
+static bool
+is_imm16_shifted(lm32_opcode_t op)
+{
+    return op == ANDHI || op == ORHI;
+}
+
 static void
 disass(uint64_t addr, uint32_t inst)
 {
     inst = htonl(inst);
     lm32_instruction_t i = {.raw = inst };
     char op_buf[16], s[30];
-    uint32_t imm16 = i.ri.imm16;
-
-    switch (i.ri.op) {
-    case ANDHI: case ANDI: case CMPGEUI: case CMPGUI:
-    case NORI: case ORHI: case ORI: case XNORI: case XORI:
-        imm16 = (uint16_t) imm16;
-        break;
-    default:
-        ;
-    }
-
-    strcpy(op_buf, lm32_opcode_name[i.i.op]);
+    uint32_t imm16 = is_imm16_signed(i.ri.op) ? i.ri.imm16 : (uint16_t) i.ri.imm16;
+    strcpy(op_buf, lm32_opcode_name[i.ri.op]);
 
     for (int i = 0; op_buf[i]; ++i)
         op_buf[i] = tolower(op_buf[i]);
@@ -145,54 +153,58 @@ decode(uint32_t inst,
        bool *b_is_imm, uint64_t *imm,
        bool *is_load, bool *is_store, bool *is_branch)
 {
-#if 0
     lm32_instruction_t i = { .raw = inst };
-    *dest_reg     = NO_REG;
-    *source_reg_a = 31;
-    *source_reg_b = 31;
-    *b_is_imm     = false;
-    *imm          = i.iop_imm.lit;
+    *dest_reg     = i.ri.op < 32 ? i.ri.rd : i.rr.rd;
+    *source_reg_a = i.ri.r0;
+    *source_reg_b = i.ri.op < 32 ? 0       : i.rr.r1;
+    *b_is_imm     = i.ri.op < 32;
     *is_load      = false;
-    *is_store      = false;
-    *is_branch      = false;
+    *is_store     = false;
+    *is_branch    = false;
+    *imm =
+        is_imm16_signed(i.ri.op) ? i.ri.imm16 :
+        is_imm16_shifted(i.ri.op) ? i.ri.imm16 << 16 :
+        (uint16_t) i.ri.imm16;
 
-    switch (i.iop.opcode) {
-    case OP_LDQ:
-    case OP_LDQ_U:
-    case OP_LDBU:
-        *is_load      = i.iop.ra != 31;
-    case OP_LDAH:
-    case OP_LDA:
-        *source_reg_a = i.iop.rb;
-        *dest_reg     = i.iop.ra;
+    switch (i.ri.op) {
+    case SCALL: case RES1: case RES2:
+    case BI: case CALLI:
+        *source_reg_a = 0;
+        *source_reg_b = 0;
+        *dest_reg     = NO_REG;
+        break;
+    case B: case CALL:
+        *dest_reg     = NO_REG;
         break;
 
-    case OP_STB:
-    case OP_STL:
+    case BE: case BG: case BGE: case BGEU: case BGU: case BNE:
+        *is_branch    = true;
+        *b_is_imm     = false;
+        *source_reg_b = i.ri.rd;
+        *dest_reg     = NO_REG;
+        break;
+
+    case SH: case SB: case SW:
         *is_store = true;
-        *source_reg_a = i.iop.rb;
-        *source_reg_b = i.iop.ra;
+        *source_reg_b = i.ri.rd;
+        *dest_reg     = NO_REG;
         break;
 
-
-    case OP_INTA_:
-    case OP_INTL_:
-        *b_is_imm     = i.iop.isimm;
-        *dest_reg     = i.iop.rc;
-        *source_reg_b = i.iop.rb;
-        *source_reg_a = i.iop.ra;
+    case LB: case LH: case LW: case LHU: case LBU:
+        *is_load = true;
         break;
 
-    case OP_BEQ:
-    case OP_BNE:
-        *is_branch = true;
-        *source_reg_a = i.iop.ra;
+    case WCSR: // XXX deal with msrs
+        *dest_reg     = NO_REG;
+        break;
+
+    case RCSR: // XXX deal with msrs
+        *source_reg_a = 0;
+        break;
+
+    default:
         break;
     }
-
-    if (*dest_reg == 31)
-        *dest_reg = NO_REG;
-#endif
 }
 
 static uint64_t
