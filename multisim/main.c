@@ -31,13 +31,17 @@
 #include <netinet/in.h>
 #include <signal.h>
 #include <getopt.h>
+#include <ctype.h>
 #include "alpha_opcode.h"
 #include "sim.h"
 
-static int run = '3';
+static int run = '1';
 
 
 static struct option long_options[] = {
+    {"simple",         0, NULL, '1'},
+    {"sscalar",        0, NULL, '2'},
+    {"ooo-sscalar",    0, NULL, '3'},
     {"help",           0, NULL, '?'},
     {0, 0, 0, 0}
 };
@@ -80,7 +84,7 @@ int main(int argc, char **argv)
         int c;
         int option_index = 0;
 
-        c = getopt_long(argc, argv, "tf:i:o:",
+        c = getopt_long(argc, argv, "tf:i:o:123",
                         long_options, &option_index);
         if (c == -1)
             break;
@@ -94,7 +98,10 @@ int main(int argc, char **argv)
             break;
 
         default:
-            printf ("?? getopt returned character code 0%o ??\n", c);
+            if (isdigit(c))
+                run = c;
+            else
+                printf ("?? getopt returned character code 0%o ??\n", c);
         }
     }
 
