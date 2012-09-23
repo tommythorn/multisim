@@ -33,21 +33,31 @@
 #include "sim.h"
 #include "loadelf.h"
 
+typedef struct isa_decoded_st {
+    uint64_t    inst_addr;
+    uint32_t    inst;
+    int         dest_reg, source_reg_a, source_reg_b;
+    bool        b_is_imm;
+    uint64_t    imm;
+    bool        is_load, is_store, is_branch;
+} isa_decoded_t;
+
+typedef struct isa_result_st {
+    uint64_t    result;
+    uint64_t    storev, storemask, pc;
+    bool        fatal_error;
+} isa_result_t;
+
 typedef struct isa_st {
     void (*setup)(cpu_state_t *, elf_info_t *);
 
-    void (*decode)(uint32_t inst,
-                   int *dest_reg, int *source_reg_a, int *source_reg_b,
-                   bool *b_is_imm, uint64_t *imm,
-                   bool *is_load, bool *is_store, bool *is_branch);
+    isa_decoded_t (*decode)(uint64_t inst_addr, uint32_t inst);
 
-    uint64_t (*inst_exec)(uint32_t instruction, uint64_t op_a, uint64_t op_b,
-                          uint64_t *storev, uint64_t *storemask, uint64_t *pc,
-                          bool *fatal);
+    isa_result_t (*inst_exec)(isa_decoded_t dec, uint64_t op_a, uint64_t op_b);
 
-    uint64_t (*inst_loadalign)(uint32_t instruction, uint64_t address, uint64_t result);
+    uint64_t (*inst_loadalign)(isa_decoded_t dec, uint64_t address, uint64_t result);
 
-    void (*disass)(uint64_t pc, uint32_t inst);
+    void (*disass)(uint64_t inst_addr, uint32_t inst);
 } isa_t;
 
 extern const isa_t alpha_isa;

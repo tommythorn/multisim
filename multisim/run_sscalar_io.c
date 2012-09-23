@@ -32,15 +32,11 @@
  * Life of an entry: invalid -> valid & not issued -> valid & issued -> invalid
  */
 typedef struct {
-    bool     valid;
-    bool     issued;
-    unsigned number;
-    uint64_t pc;
-    uint32_t i;
-    uint64_t op_a;
-    uint64_t op_b;
-    int      wbr;
-    bool     is_load, is_store, is_branch;
+    bool          valid;
+    bool          issued;
+    unsigned      number;
+    isa_decoded_t dec;
+    uint64_t      op_a, op_b;
 } reservation_station_t;
 
 #define WINDOW_SIZE 128
@@ -50,7 +46,7 @@ unsigned fetch_number;
 unsigned issue_number;
 
 // XXX probably all state should be in "state" but I'm prototyping here...
-reservation_station_t rs[WINDOW_SIZE];
+reservation_station_t reservation_stations[WINDOW_SIZE];
 bool scoreboard[NO_REG + 1];
 
 bool
@@ -69,16 +65,10 @@ step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate
     while ((fetch_number + 1) % WINDOW_SIZE != issue_number % WINDOW_SIZE) {
         uint32_t i = load32(state->mem, state->pc);
 
-        int      wbr, ra, rb;
-        bool     op_b_is_imm;
-        uint64_t op_imm;
-        bool     is_load, is_store, is_branch;
+        isa_decoded_t dec = isa->decode(state->pc, i);
 
-        isa->decode(i, &wbr, &ra, &rb, &op_b_is_imm, &op_imm,
-                    &is_load, &is_store, &is_branch);
-
-        n_load += is_load;
-        n_store += is_store;
+        n_load += dec.is_load;
+        n_store += dec.is_store;
 
         /* do not */
         if (1 < n_store || 0 < n_store && 0 < n_load) {
@@ -87,32 +77,30 @@ step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate
             break;
         }
 
-        if (!scoreboard[wbr] || !scoreboard[ra] || !scoreboard[rb] && !op_b_is_imm)
+        if (!scoreboard[dec.dest_reg] ||
+            !scoreboard[dec.source_reg_a] ||
+            !scoreboard[dec.source_reg_b] && !dec.b_is_imm)
             break;
 
         int p = fetch_number % WINDOW_SIZE;
-        rs[p].valid = true;
-        rs[p].issued = false;
-        rs[p].number = fetch_number;
-        rs[p].pc = state->pc;
-        rs[p].i  = i;
-        rs[p].op_a = r[ra];
-        rs[p].op_b = op_b_is_imm ? op_imm : r[rb];
-        rs[p].wbr  = wbr;
-        rs[p].is_load = is_load;
-        rs[p].is_store = is_store;
-        rs[p].is_branch = is_branch;
+        reservation_station_t *rs = reservation_stations + p;
+        rs->valid = true;
+        rs->issued = false;
+        rs->number = fetch_number;
+        rs->dec = dec;
+        rs->op_a = r[dec.source_reg_a];
+        rs->op_b = dec.b_is_imm ? dec.imm : r[dec.source_reg_b];
 
         ++fetch_number;
 
         state->pc += 4;
 
-        if (wbr != NO_REG)
-            scoreboard[wbr] = false;
+        if (dec.dest_reg != NO_REG)
+            scoreboard[dec.dest_reg] = false;
 
         ++state->n_issue;
 
-        if (rs[p].is_branch)
+        if (rs->dec.is_branch)
             break;
     }
 
@@ -124,54 +112,45 @@ step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate
      */
 
     while (fetch_number % WINDOW_SIZE != issue_number % WINDOW_SIZE) {
-        unsigned k = issue_number++ % WINDOW_SIZE;
-        uint32_t i    = rs[k].i;
-        uint64_t pc   = rs[k].pc;
-        uint64_t op_a = rs[k].op_a;
-        uint64_t op_b = rs[k].op_b;
-        int      wbr  = rs[k].wbr;
-        bool     is_load = rs[k].is_load;
-        bool     is_store = rs[k].is_store;
-        bool     is_branch = rs[k].is_branch;
-        uint64_t storev;
-        uint64_t storemask;
-        bool     fatal;
+        reservation_station_t *rs = reservation_stations + issue_number++ % WINDOW_SIZE;
 
-        isa->disass(pc, i);
+        isa->disass(rs->dec.inst_addr, rs->dec.inst);
 
-        uint64_t wbv = isa->inst_exec(i, op_a, op_b, &storev, &storemask, &pc, &fatal);
-        if (fatal)
+        isa_result_t res = isa->inst_exec(rs->dec, rs->op_a, rs->op_b);
+
+        if (res.fatal_error)
             return true;
 
-        if (is_load) {
-            uint64_t loaded = load64(state->mem, wbv &~ 7);
-            printf("\t\t\t\t\t\t[0x%llx]\n", wbv);
-            wbv = isa->inst_loadalign(i, wbv, loaded);
+        if (rs->dec.is_load) {
+            uint64_t loaded = load64(state->mem, res.result &~ 7);
+            printf("\t\t\t\t\t\t[0x%llx]\n", res.result);
+            res.result = isa->inst_loadalign(rs->dec, res.result, loaded);
         }
 
-        if (is_store) {
-            uint64_t oldvalue = load64(state->mem, wbv &~ 7);
-            uint64_t newvalue = oldvalue & ~storemask | storev & storemask;
+        if (rs->dec.is_store) {
+            uint64_t oldvalue = load64(state->mem, res.result &~ 7);
+            uint64_t newvalue = oldvalue & ~res.storemask | res.storev & res.storemask;
 
             printf("\t\t\t\t\t\t[0x%llx] = 0x%llx & 0x%llx\n",
-                   wbv, storev, storemask);
+                   res.result, res.storev, res.storemask);
 
-            store64(state->mem, wbv &~ 7, newvalue);
+            store64(state->mem, res.result &~ 7, newvalue);
         }
 
-        if (is_branch & wbv) {
-            state->pc = pc;
+        if (rs->dec.is_branch & res.result) {
+            state->pc = res.pc;
         }
 
-        if (wbr != NO_REG) {
-            printf("\t\t\t\t\t\tr%d <- 0x%08llx\n", wbr, wbv);
-            r[wbr] = wbv;
-            scoreboard[wbr] = true;
+        if (rs->dec.dest_reg != NO_REG) {
+            printf("\t\t\t\t\t\tr%d <- 0x%08llx\n", rs->dec.dest_reg, res.result);
+            r[rs->dec.dest_reg] = res.result;
+            scoreboard[rs->dec.dest_reg] = true;
         }
 
         /* Co-simulate */
+        assert(rs->dec.inst_addr == costate->pc);
         step_simple(isa, costate, false);
-        assert(state->r[wbr] == costate->r[wbr]);
+        assert(state->r[rs->dec.dest_reg] == costate->r[rs->dec.dest_reg]);
     }
 
     return false;
