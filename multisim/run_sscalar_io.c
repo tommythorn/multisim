@@ -79,7 +79,7 @@ step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate
 
         if (!scoreboard[dec.dest_reg] ||
             !scoreboard[dec.source_reg_a] ||
-            !scoreboard[dec.source_reg_b] && !dec.b_is_imm)
+            !scoreboard[dec.source_reg_b])
             break;
 
         int p = fetch_number % WINDOW_SIZE;
@@ -89,7 +89,7 @@ step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate
         rs->number = fetch_number;
         rs->dec = dec;
         rs->op_a = r[dec.source_reg_a];
-        rs->op_b = dec.b_is_imm ? dec.imm : r[dec.source_reg_b];
+        rs->op_b = r[dec.source_reg_b];
 
         ++fetch_number;
 

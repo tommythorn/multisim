@@ -150,7 +150,6 @@ decode(uint64_t inst_addr, uint32_t inst)
     dec.dest_reg     = NO_REG;
     dec.source_reg_a = 31;
     dec.source_reg_b = 31;
-    dec.b_is_imm     = false;
     dec.imm          = i.iop_imm.lit;
     dec.is_load      = false;
     dec.is_store     = false;
@@ -180,7 +179,6 @@ decode(uint64_t inst_addr, uint32_t inst)
 
     case OP_INTA_:
     case OP_INTL_:
-        dec.b_is_imm     = i.iop.isimm;
         dec.dest_reg     = i.iop.rc;
         dec.source_reg_b = i.iop.rb;
         dec.source_reg_a = i.iop.ra;
@@ -205,6 +203,7 @@ inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b)
 {
     inst_t i = { .raw = dec.inst };
     uint64_t ea = op_a + i.mem.disp;
+    uint64_t op_b_imm = i.iop.isimm ? dec.imm : op_b;
     isa_result_t res = { 0 };
     res.fatal_error = false;
 
@@ -230,8 +229,8 @@ inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b)
     case OP_INTL_:
         switch (i.iop.func) {
         case OP_INTL_BIS:
-             res.result = op_a | op_b;
-             return res;
+            res.result = op_a | op_b_imm;
+            return res;
         default:
             warn("%s not implemented", intl_opcode_name[i.iop.func]);
             res.fatal_error = true;
@@ -243,15 +242,15 @@ inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b)
     case OP_INTA_:
         switch (i.iop.func) {
         case OP_INTA_ADDQ:
-            res.result = op_a + op_b;
+            res.result = op_a + op_b_imm;
             return res;
-        case OP_INTA_ADDL: res.result = (int32_t)(op_a + op_b);
+        case OP_INTA_ADDL: res.result = (int32_t)(op_a + op_b_imm);
             return res;
-        case OP_INTA_CMPEQ: res.result = op_a == op_b;
+        case OP_INTA_CMPEQ: res.result = op_a == op_b_imm;
             return res;
-        case OP_INTA_S4ADDQ: res.result = op_a * 4 + op_b;
+        case OP_INTA_S4ADDQ: res.result = op_a * 4 + op_b_imm;
             return res;
-        case OP_INTA_CMPULT: res.result = op_a < op_b;
+        case OP_INTA_CMPULT: res.result = op_a < op_b_imm;
             return res;
         default:
             warn("%s not implemented", inta_opcode_name[i.iop.func]);

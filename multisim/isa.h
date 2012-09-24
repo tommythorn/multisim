@@ -37,7 +37,6 @@ typedef struct isa_decoded_st {
     uint64_t    inst_addr;
     uint32_t    inst;
     int         dest_reg, source_reg_a, source_reg_b;
-    bool        b_is_imm;
     uint64_t    imm;
 
     /*
