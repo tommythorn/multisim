@@ -49,16 +49,15 @@ step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
     if (dec.is_load) {
         if (verbose)
             printf("\t\t\t\t\t\t[0x%llx]\n", res.result);
-        res.result = isa->inst_loadalign(dec, res.result,
-                                         load(state->mem, res.result, dec.access_size));
+        res.result = load(state->mem, res.result, dec.mem_access_size);
     }
 
     if (dec.is_store) {
         if (verbose)
-            printf("\t\t\t\t\t\t[0x%llx]%c = 0x%llx\n",
-                   res.result, "xBHxWxxxQ"[dec.access_size], res.storev);
+            printf("\t\t\t\t\t\t[0x%llx](%d) = 0x%llx\n",
+                   res.result, dec.mem_access_size, res.storev);
 
-        store(state->mem, res.result, res.storev, dec.access_size);
+        store(state->mem, res.result, res.storev, dec.mem_access_size);
     }
 
     if (dec.is_branch & res.result)

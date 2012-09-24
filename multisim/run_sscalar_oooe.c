@@ -180,16 +180,15 @@ step_sscalar_oooe(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
             return true;
 
         if (rs->dec.is_load) {
-            uint64_t loaded = load(state->mem, res.result, rs->dec.access_size);
             printf("\t\t\t\t\t\t[0x%llx]\n", res.result);
-            res.result = isa->inst_loadalign(rs->dec, res.result, loaded);
+            res.result = load(state->mem, res.result, rs->dec.mem_access_size);
         }
 
         if (rs->dec.is_store) {
-            printf("\t\t\t\t\t\t[0x%llx]%c = 0x%llx\n",
-                   res.result, "xBHxWxxxQ"[rs->dec.access_size], res.storev);
+            printf("\t\t\t\t\t\t[0x%llx](%d) = 0x%llx\n",
+                   res.result, rs->dec.mem_access_size, res.storev);
 
-            store(state->mem, res.result, res.storev, rs->dec.access_size);
+            store(state->mem, res.result, res.storev, rs->dec.mem_access_size);
         }
 
         if (rs->dec.is_branch) {

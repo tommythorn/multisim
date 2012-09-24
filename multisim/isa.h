@@ -40,7 +40,14 @@ typedef struct isa_decoded_st {
     bool        b_is_imm;
     uint64_t    imm;
     bool        is_load, is_store, is_branch;
-    int         access_size;
+
+    /*
+     * loads encode the access size and signed as follows: unsigned
+     * byte loads: 1, signed byte loads: -1, signed half word: -2,
+     * unsigned 64-bit: -8, etc. Store work similarly, except negative
+     * values are not meaningful and are thus not allowed.
+     */
+    int         mem_access_size;
 } isa_decoded_t;
 
 typedef struct isa_result_st {
@@ -56,8 +63,6 @@ typedef struct isa_st {
     isa_decoded_t (*decode)(uint64_t inst_addr, uint32_t inst);
 
     isa_result_t (*inst_exec)(isa_decoded_t dec, uint64_t op_a, uint64_t op_b);
-
-    uint64_t (*inst_loadalign)(isa_decoded_t dec, uint64_t address, uint64_t result);
 
     void (*disass)(uint64_t inst_addr, uint32_t inst);
 } isa_t;

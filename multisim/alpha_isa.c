@@ -155,12 +155,12 @@ decode(uint64_t inst_addr, uint32_t inst)
     dec.is_load      = false;
     dec.is_store     = false;
     dec.is_branch    = false;
-    dec.access_size  = 1;
+    dec.mem_access_size = 1;
 
     switch (i.iop.opcode) {
     case OP_LDQ:
     case OP_LDQ_U:
-        dec.access_size  = 8;
+        dec.mem_access_size = 8;
     case OP_LDBU:
         dec.is_load      = i.iop.ra != 31;
     case OP_LDAH:
@@ -170,7 +170,7 @@ decode(uint64_t inst_addr, uint32_t inst)
         break;
 
     case OP_STL:
-        dec.access_size  = 4;
+        dec.mem_access_size = 4;
     case OP_STB:
         dec.is_store     = true;
         dec.source_reg_a = i.iop.rb;
@@ -197,17 +197,6 @@ decode(uint64_t inst_addr, uint32_t inst)
         dec.dest_reg = NO_REG;
 
     return dec;
-}
-
-static uint64_t
-inst_loadalign(isa_decoded_t dec, uint64_t address, uint64_t result)
-{
-    inst_t i = { .raw = dec.inst };
-
-    switch (i.iop.opcode) {
-    case OP_LDBU: return (uint8_t) result;
-    default: return result;
-    }
 }
 
 static isa_result_t
@@ -311,7 +300,6 @@ const isa_t alpha_isa = {
     .setup = setup,
     .decode = decode,
     .inst_exec = inst_exec,
-    .inst_loadalign = inst_loadalign,
     .disass = disass,
 };
 
