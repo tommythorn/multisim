@@ -147,86 +147,106 @@ disass(uint64_t addr, uint32_t inst)
     printf("%08llx %08x %s", addr, inst, s);
 }
 
-static void
-decode(uint32_t inst,
-       int *dest_reg, int *source_reg_a, int *source_reg_b,
-       bool *b_is_imm, uint64_t *imm,
-       bool *is_load, bool *is_store, bool *is_branch)
+static isa_decoded_t
+decode(uint64_t inst_addr, uint32_t inst)
 {
     lm32_instruction_t i = { .raw = inst };
-    *dest_reg     = i.ri.op < 32 ? i.ri.rd : i.rr.rd;
-    *source_reg_a = i.ri.r0;
-    *source_reg_b = i.ri.op < 32 ? 0       : i.rr.r1;
-    *b_is_imm     = i.ri.op < 32;
-    *is_load      = false;
-    *is_store     = false;
-    *is_branch    = false;
-    *imm =
+    isa_decoded_t dec = { .inst_addr = inst_addr, .inst = inst };
+
+    dec.dest_reg     = i.ri.op < 32 ? i.ri.rd : i.rr.rd;
+    dec.source_reg_a = i.ri.r0;
+    dec.source_reg_b = i.ri.op < 32 ? 0       : i.rr.r1;
+    dec.b_is_imm     = i.ri.op < 32;
+    dec.is_load      = false;
+    dec.is_store     = false;
+    dec.is_branch    = false;
+    dec.imm =
         is_imm16_signed(i.ri.op) ? i.ri.imm16 :
         is_imm16_shifted(i.ri.op) ? i.ri.imm16 << 16 :
         (uint16_t) i.ri.imm16;
+    dec.mem_access_size = 1;
 
     switch (i.ri.op) {
     case SCALL: case RES1: case RES2:
     case BI: case CALLI:
-        *source_reg_a = 0;
-        *source_reg_b = 0;
-        *dest_reg     = NO_REG;
+        dec.source_reg_a = 0;
+        dec.source_reg_b = 0;
+        dec.dest_reg     = NO_REG;
         break;
     case B: case CALL:
-        *dest_reg     = NO_REG;
+        dec.dest_reg     = NO_REG;
         break;
 
     case BE: case BG: case BGE: case BGEU: case BGU: case BNE:
-        *is_branch    = true;
-        *b_is_imm     = false;
-        *source_reg_b = i.ri.rd;
-        *dest_reg     = NO_REG;
+        dec.is_branch    = true;
+        dec.b_is_imm     = false;
+        dec.source_reg_b = i.ri.rd;
+        dec.dest_reg     = NO_REG;
         break;
 
-    case SH: case SB: case SW:
-        *is_store = true;
-        *source_reg_b = i.ri.rd;
-        *dest_reg     = NO_REG;
+    case SB:
+        dec.is_store = true;
+        dec.source_reg_b = i.ri.rd;
+        dec.dest_reg     = NO_REG;
+        dec.mem_access_size = 1;
+        break;
+    case SH:
+        dec.is_store = true;
+        dec.source_reg_b = i.ri.rd;
+        dec.dest_reg     = NO_REG;
+        dec.mem_access_size = 2;
+        break;
+    case SW:
+        dec.is_store = true;
+        dec.source_reg_b = i.ri.rd;
+        dec.dest_reg     = NO_REG;
+        dec.mem_access_size = 4;
         break;
 
-    case LB: case LH: case LW: case LHU: case LBU:
-        *is_load = true;
+    case LB:
+        dec.mem_access_size = -1;
+        dec.is_load = true;
+        break;
+    case LH:
+        dec.mem_access_size = -2;
+        dec.is_load = true;
+        break;
+    case LBU:
+        dec.mem_access_size = 1;
+        dec.is_load = true;
+        break;
+    case LHU:
+        dec.mem_access_size = 2;
+        dec.is_load = true;
+        break;
+    case LW:
+        dec.mem_access_size = 4;
+        dec.is_load = true;
         break;
 
     case WCSR: // XXX deal with msrs
-        *dest_reg     = NO_REG;
+        dec.dest_reg     = NO_REG;
         break;
 
     case RCSR: // XXX deal with msrs
-        *source_reg_a = 0;
+        dec.source_reg_a = 0;
         break;
 
     default:
         break;
     }
+
+    return dec;
 }
 
-static uint64_t
-inst_loadalign(uint32_t instruction, uint64_t address, uint64_t result)
+static isa_result_t
+inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b)
 {
-#if 0
-    inst_t i = { .raw = instruction };
+    isa_result_t res = { 0 };
+    res.fatal_error = false;
 
-    switch (i.iop.opcode) {
-    case OP_LDBU: return (uint8_t) (result >> 8 * (address & 7));
-    default: return result;
-    }
-#endif
-    return result;
-}
-
-static uint64_t
-inst_exec(uint32_t instruction, uint64_t op_a, uint64_t op_b,
-          uint64_t *storev, uint64_t *storemask, uint64_t *pc,
-          bool *fatal)
-{
 #if 0
+    lm32_instruction_t i = { .raw = dec.inst };
     inst_t i = { .raw = instruction };
     uint64_t ea = op_a + i.mem.disp;
     *fatal = false;
@@ -302,7 +322,7 @@ inst_exec(uint32_t instruction, uint64_t op_a, uint64_t op_b,
 
 #endif
 
-    return -1;
+    return res;
 }
 
 static void
@@ -316,7 +336,6 @@ const isa_t lm32_isa = {
     .setup = setup,
     .decode = decode,
     .inst_exec = inst_exec,
-    .inst_loadalign = inst_loadalign,
     .disass = disass,
 };
 

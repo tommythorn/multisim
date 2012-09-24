@@ -37,6 +37,7 @@ int SZ(loadelf,)(memory_t *m, char *name, FILE *f, elf_info_t *elf_info)
     }
 
     elf_info->endian_is_big = ehdr.e_ident[EI_DATA] == ELFDATA2MSB;
+    memory_set_endian(m, elf_info->endian_is_big);
 
     if (NATIVE(ehdr.e_type) != ET_EXEC) {
         fprintf(stderr, "%s: Need a fully linked ELF executable, not type %d\n",

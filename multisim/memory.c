@@ -68,6 +68,7 @@
 struct memory_st {
     void    *segment[MEMORY_NSEGMENT];
     unsigned segment_size[MEMORY_NSEGMENT];
+    bool     endian_is_big;
 };
 
 #define memory_segment(m, x)     (((unsigned)(x)) >> MEMORY_OFFSETBITS)
@@ -126,6 +127,28 @@ void memory_destroy(memory_t *m)
 {
     free(m);
 }
+
+void memory_set_endian(memory_t *m, bool bigendian)
+{
+    m->endian_is_big = bigendian;
+}
+
+uint64_t memory_endian_fix64(memory_t *m, uint64_t v)
+{
+    assert(!m->endian_is_big);
+    return v;
+}
+
+uint32_t memory_endian_fix32(memory_t *m, uint32_t v)
+{
+    return m->endian_is_big ? htonl(v) : v;
+}
+
+uint16_t memory_endian_fix16(memory_t *m, uint16_t v)
+{
+    return m->endian_is_big ? htons(v) : v;
+}
+
 
 // Local Variables:
 // mode: C

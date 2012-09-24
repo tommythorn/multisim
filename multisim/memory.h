@@ -28,6 +28,7 @@
 #define _MEMORY_H 1
 
 #include <stdint.h>
+#include <stdbool.h>
 #include <sys/types.h>
 
 typedef struct memory_st memory_t;
@@ -36,6 +37,11 @@ memory_t *memory_create(void);
 void memory_ensure_mapped_range(memory_t *m, uint32_t addr, size_t len);
 void *memory_physical(memory_t *m, uint32_t addr, size_t len);
 void memory_destroy(memory_t *);
+
+void memory_set_endian(memory_t *m, bool bigendian);
+uint64_t memory_endian_fix64(memory_t *m, uint64_t v);
+uint32_t memory_endian_fix32(memory_t *m, uint32_t v);
+uint16_t memory_endian_fix16(memory_t *m, uint16_t v);
 
 #endif
 

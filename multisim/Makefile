@@ -22,7 +22,7 @@ LDFLAGS=-g
 FLAGS=
 OBJS=main.o \
 	run_simple.o run_sscalar_io.o run_sscalar_oooe.o \
-	memory.o loadelf.o alpha-isa.o lm32-isa.o
+	memory.o loadelf.o alpha_isa.o lm32_isa.o
 
 test_lm32: multisim
 	./multisim ../workloads/vmlinux.lm32

@@ -37,13 +37,7 @@ typedef struct {
     bool     valid;
     bool     issued;
     unsigned number;
-    uint64_t pc;
-    uint32_t i;
-    bool     is_load, is_store, is_branch;
-
-    int      wbr;
-    bool     op_b_is_imm;
-    uint64_t op_imm;
+    isa_decoded_t dec;
 
     unsigned pr_a;
     unsigned pr_b;
@@ -64,7 +58,7 @@ static unsigned issue_number;
 static uint64_t n_issue;
 
 // XXX probably all state should be in "state" but I'm prototyping here...
-static reservation_station_t rs[WINDOW_SIZE];
+static reservation_station_t reservation_stations[WINDOW_SIZE];
 static unsigned rs_size, rs_start;
 static bool     scoreboard[PHYSICAL_REGS+1]; // The +1 is for r31
 static bool     scoreboard_next[PHYSICAL_REGS+1]; // emulate flip-flops
@@ -104,37 +98,26 @@ step_sscalar_oooe(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
 
     while (!stop_fetching && rs_size < WINDOW_SIZE) {
         uint32_t i = load32(state->mem, state->pc);
+        reservation_station_t *rs =
+            reservation_stations + (rs_size++ + rs_start) % WINDOW_SIZE;
+        rs->dec = isa->decode(state->pc, i);
+        rs->valid = true;
+        rs->issued = false;
+        rs->number = fetch_number;
+        rs->pr_a = map[rs->dec.source_reg_a];
+        rs->pr_b = map[rs->dec.source_reg_b];
 
-        int      wbr, ra, rb;
-        bool     op_b_is_imm;
-        uint64_t op_imm;
-        int      p = (rs_size++ + rs_start) % WINDOW_SIZE;
-
-        isa->decode(i, &wbr, &ra, &rb, &op_b_is_imm, &op_imm,
-                    &rs[p].is_load, &rs[p].is_store, &rs[p].is_branch);
-
-        rs[p].valid = true;
-        rs[p].issued = false;
-        rs[p].number = fetch_number;
-        rs[p].pc = state->pc;
-        rs[p].i = i;
-        rs[p].wbr = wbr;
-        rs[p].op_b_is_imm = op_b_is_imm;
-        rs[p].op_imm = op_imm;
-
-        rs[p].pr_a = map[ra];
-        rs[p].pr_b = map[rb];
-        if (wbr != NO_REG) {
-            free_reg(map[wbr]); // XXX this is too soon!
-            rs[p].pr_wb = map[wbr] = alloc_reg();
+        if (rs->dec.dest_reg != NO_REG) {
+            free_reg(map[rs->dec.dest_reg]); // XXX this is too soon!
+            rs->pr_wb = map[rs->dec.dest_reg] = alloc_reg();
         }
         else {
-            rs[p].pr_wb = PHYSICAL_REGS;
+            rs->pr_wb = PHYSICAL_REGS;
         }
 
         ++fetch_number;
 
-        if (rs[p].is_branch) {
+        if (rs->dec.is_branch) {
             if (DEBUG_SB)
                 printf("stop fetching past %08llx\n", state->pc);
 
@@ -156,80 +139,72 @@ step_sscalar_oooe(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
     int issued = 0;
     unsigned k = rs_start;
     assert(rs_size);
-    assert(!rs[rs_start].issued);
+    assert(!reservation_stations[rs_start].issued);
 
     for (int n = rs_size; n; --n, k = (k + 1) % WINDOW_SIZE) {
-        assert(rs[k].valid);
+        reservation_station_t *rs = &reservation_stations[k];
+        assert(rs->valid);
 
-        if (rs[k].issued)
+        if (rs->issued)
             continue;
 
-        if (!scoreboard[rs[k].pr_a]) {
+        if (!scoreboard[rs->pr_a]) {
             if (DEBUG_SB)
                 printf("... skipping %08llx because op a (R%d) isn't ready\n",
-                       rs[k].pc, rs[k].pr_a);
+                       rs->dec.inst_addr, rs->pr_a);
             continue;
         }
 
-        if (!scoreboard[rs[k].pr_b]) {
+        if (!scoreboard[rs->pr_b]) {
             if (DEBUG_SB)
                 printf("... skipping %08llx because op b (R%d) isn't ready\n",
-                       rs[k].pc, rs[k].pr_b);
+                       rs->dec.inst_addr, rs->pr_b);
             continue;
         }
 
-        assert(rs[k].valid);
+        assert(rs->valid);
 
-        uint32_t i    = rs[k].i;
-        uint64_t pc   = rs[k].pc;
-        uint64_t op_a = prf[rs[k].pr_a];
-        uint64_t op_b = rs[k].op_b_is_imm ? rs[k].op_imm :
-            prf[rs[k].pr_b];
-        unsigned pwbr = rs[k].pr_wb;
-        unsigned wbr  = rs[k].wbr;
+        uint64_t op_a = prf[rs->pr_a];
+        uint64_t op_b = rs->dec.b_is_imm ? rs->dec.imm : prf[rs->pr_b];
+        unsigned pwbr = rs->pr_wb;
+        unsigned wbr  = rs->dec.dest_reg;
 
-        rs[k].issued  = true;
+        rs->issued  = true;
 
         printf("\t");
-        isa->disass(pc, i);
+        isa->disass(rs->dec.inst_addr, rs->dec.inst);
 
-        bool     fatal;
-        uint64_t storev, storemask;
-        uint64_t wbv = isa->inst_exec(i, op_a, op_b, &storev, &storemask, &pc, &fatal);
+        isa_result_t res = isa->inst_exec(rs->dec, op_a, op_b);
 
-        if (fatal)
+        if (res.fatal_error)
             return true;
 
-        if (rs[k].is_load) {
-            uint64_t loaded = load64(state->mem, wbv &~ 7);
-            printf("\t\t\t\t\t\t[0x%llx]\n", wbv);
-            wbv = isa->inst_loadalign(i, wbv, loaded);
+        if (rs->dec.is_load) {
+            printf("\t\t\t\t\t\t[0x%llx]\n", res.result);
+            res.result = load(state->mem, res.result, rs->dec.mem_access_size);
         }
 
-        if (rs[k].is_store) {
-            uint64_t oldvalue = load64(state->mem, wbv &~ 7);
-            uint64_t newvalue = oldvalue & ~storemask | storev & storemask;
+        if (rs->dec.is_store) {
+            printf("\t\t\t\t\t\t[0x%llx](%d) = 0x%llx\n",
+                   res.result, rs->dec.mem_access_size, res.storev);
 
-            printf("\t\t\t\t\t\t[0x%llx] = 0x%llx & 0x%llx\n",
-                   wbv, storev, storemask);
-
-            store64(state->mem, wbv &~ 7, newvalue);
+            store(state->mem, res.result, res.storev, rs->dec.mem_access_size);
         }
 
-        if (rs[k].is_branch) {
-            if (wbv)
-                state->pc = pc;
+        if (rs->dec.is_branch) {
+            if (res.result)
+                state->pc = res.pc;
             if (DEBUG_SB)
                 printf("resume fetching from %08llx\n", state->pc);
             stop_fetching = false;
         }
 
-        rs[k].wbv = wbv;
+        rs->wbv = res.result;
 
         if (wbr != NO_REG) {
             printf("\t\t\t\t\t\tr%d/R%d <- 0x%08llx\n",
-                   rs[k].wbr, pwbr, wbv);
-            prf[pwbr] = wbv;
+                   rs->dec.dest_reg, pwbr, res.result);
+            prf[pwbr] = res.result;
             scoreboard_next[pwbr] = true;
         }
 
@@ -238,21 +213,23 @@ step_sscalar_oooe(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
     }
 
     /* Retire */
-    while (rs[rs_start].issued) {
+    while (reservation_stations[rs_start].issued) {
+        reservation_station_t *rs = &reservation_stations[rs_start];
         /* Co-simulate */
+        assert(rs->dec.inst_addr == costate->pc);
         step_simple(isa, costate, false);
-        if (rs[rs_start].wbr != NO_REG &&
-            rs[rs_start].wbv != costate->r[rs[rs_start].wbr]) {
+        if (rs->dec.dest_reg != NO_REG &&
+            rs->wbv != costate->r[rs->dec.dest_reg]) {
             printf("%08llx got r%d <- %016llx, expected r%d <- %016llx\n",
-                   rs[rs_start].pc,
-                   rs[rs_start].wbr, rs[rs_start].wbv,
-                   rs[rs_start].wbr, costate->r[rs[rs_start].wbr]);
+                   rs->dec.inst_addr,
+                   rs->dec.dest_reg, rs->wbv,
+                   rs->dec.dest_reg, costate->r[rs->dec.dest_reg]);
 
             assert(0);
         }
 
-        rs[rs_start].valid = false;
-        rs[rs_start].issued = false;
+        rs->valid = false;
+        rs->issued = false;
         rs_start = (rs_start + 1) % WINDOW_SIZE;
         --rs_size;
     }
@@ -287,7 +264,7 @@ run_sscalar_oooe(int num_images, char *images[])
 
     /* Scoreboard and reservation station initialization */
     memset(scoreboard, 0, sizeof scoreboard);
-    memset(rs, 0, sizeof rs);
+    memset(reservation_stations, 0, sizeof reservation_stations);
 
     for (int i = 0; i < 32; ++i)
         map[i] = i, scoreboard[map[i]] = true;

@@ -31,56 +31,44 @@
 bool
 step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
 {
-    uint64_t pc = state->pc;
-    int      wbr, ra, rb;
-    bool     op_b_is_imm;
-    uint64_t op_imm;
-    bool     is_load, is_store, is_branch;
-    uint64_t storev, storemask;
-
-    uint32_t inst = load32(state->mem, pc);
+    uint64_t pc       = state->pc;
+    uint32_t inst     = load32(state->mem, pc);
 
     if (verbose)
         isa->disass(pc, inst);
 
-    isa->decode(inst, &wbr, &ra, &rb, &op_b_is_imm, &op_imm,
-                &is_load, &is_store, &is_branch);
+    isa_decoded_t dec = isa->decode(pc, inst);
+    uint64_t op_a     = state->r[dec.source_reg_a];
+    uint64_t op_b     = dec.b_is_imm ? dec.imm : state->r[dec.source_reg_b];
 
-    uint64_t op_a = state->r[ra];
-    uint64_t op_b = op_b_is_imm ? op_imm : state->r[rb];
-    bool     fatal;
+    isa_result_t res  = isa->inst_exec(dec, op_a, op_b);
 
-    uint64_t wbv = isa->inst_exec(inst, op_a, op_b, &storev, &storemask, &pc, &fatal);
-
-    if (fatal)
+    if (res.fatal_error)
         return true;
 
-    if (is_load) {
+    if (dec.is_load) {
         if (verbose)
-            printf("\t\t\t\t\t\t[0x%llx]\n", wbv);
-        wbv = isa->inst_loadalign(inst, wbv, load64(state->mem, wbv &~ 7));
+            printf("\t\t\t\t\t\t[0x%llx]\n", res.result);
+        res.result = load(state->mem, res.result, dec.mem_access_size);
     }
 
-    if (is_store) {
-        uint64_t oldvalue = load64(state->mem, wbv &~ 7);
-        uint64_t newvalue = oldvalue & ~storemask | storev & storemask;
-
+    if (dec.is_store) {
         if (verbose)
-            printf("\t\t\t\t\t\t[0x%llx] = 0x%llx & 0x%llx\n",
-                   wbv, storev, storemask);
+            printf("\t\t\t\t\t\t[0x%llx](%d) = 0x%llx\n",
+                   res.result, dec.mem_access_size, res.storev);
 
-        store64(state->mem, wbv &~ 7, newvalue);
+        store(state->mem, res.result, res.storev, dec.mem_access_size);
     }
 
-    if (is_branch & wbv)
-        state->pc = pc;
+    if (dec.is_branch & res.result)
+        state->pc = res.pc;
     else
-        state->pc = pc + 4;
+        state->pc += 4;
 
-    if (wbr != NO_REG) {
+    if (dec.dest_reg != NO_REG) {
         if (verbose)
-            printf("\t\t\t\t\t\tr%d <- 0x%08llx\n", wbr, wbv);
-        state->r[wbr] = wbv;
+            printf("\t\t\t\t\t\tr%d <- 0x%08llx\n", dec.dest_reg, res.result);
+        state->r[dec.dest_reg] = res.result;
     }
 
     return false;
