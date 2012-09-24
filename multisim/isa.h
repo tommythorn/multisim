@@ -37,13 +37,16 @@ typedef struct isa_decoded_st {
     uint64_t    inst_addr;
     uint32_t    inst;
     int         dest_reg, source_reg_a, source_reg_b;
-    uint64_t    imm;
+    uint64_t    imm; // XXX nuke from decoded
 
     /*
      * Call, returns, jumps, branches, computed jumps, conditional
      * branches, etc.  All control transfers are considered
      * "branches".  Those that are unconditional further sets
      * is_unconditional.
+     *
+     * XXX switch to inst_class: ALU, LOAD, STORE, (conditional)
+     * BRANCH, (unconditional) JUMP.
      */
     bool        is_branch;
     bool        is_unconditional;

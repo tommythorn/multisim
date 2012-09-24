@@ -84,7 +84,7 @@ load64(memory_t *m, uint64_t address)
 {
     // assert((uint32_t)address == address);
     uint64_t v = *(uint64_t *)memory_physical(m, (uint32_t)address, sizeof(uint64_t));
-    return memory_endian_fix32(m, v);
+    return memory_endian_fix64(m, v);
 }
 
 static inline void
@@ -122,8 +122,8 @@ store(memory_t *m, uint64_t address, uint64_t value, int mem_access_size)
     switch (mem_access_size) {
     case 1: *(uint8_t *)p = value; return;
     case 2: *(uint16_t *)p = memory_endian_fix16(m, value); return;
-    case 4: *(uint32_t *)p = memory_endian_fix32(m, value); return;
-    case 8: *(uint64_t *)p = memory_endian_fix64(m, value); return;
+    case 4: *(uint32_t *)p = memory_endian_fix32(m, (uint32_t)value); return;
+    case 8: *(uint64_t *)p = memory_endian_fix64(m, (uint64_t)value); return;
     default:
         assert(mem_access_size > 0);
         assert(mem_access_size == mem_access_size + 1);

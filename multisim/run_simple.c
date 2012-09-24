@@ -84,6 +84,8 @@ void run_simple(int num_images, char *images[])
         fatal("error: loading %s failed", images[r]);
 
     isa = get_isa(info.machine);
+    if (!isa)
+        fatal("error: unsupported architecture");
     isa->setup(state, &info);
 
     int cycle;

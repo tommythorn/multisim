@@ -1,7 +1,21 @@
-Finally, get back to creating
+General:
+  - drop imm from isa_decode_t
+  - classify instructions into alu, jump, branch, load, and store.
 
-- step_sscalar_renamed_oooe()
-- step_sscalar_renamed_speculative_oooe()
-- ... and other variants
+oooe:
+  - be careful about load/store reordering
 
-- LM32 (FULL) and MIPS (FULL) ISA
+runners:
+  - step_sscalar_renamed_speculative_oooe()
+  - ... and other variants
+
+LM32
+  - CSR support/simulation
+  - device simulation
+  - decode must check for illegal field values
+
+MIPS (FULL) ISA
+
+Symbol table support
+  - parse
+  - look up code addresses and display as sym[+offset]

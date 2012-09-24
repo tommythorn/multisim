@@ -8,14 +8,14 @@
 
 /* Begin PBXBuildFile section */
 		651C98E915FD8DE800EBDB4D /* run_sscalar_oooe.c in Sources */ = {isa = PBXBuildFile; fileRef = 651C98E815FD8DE800EBDB4D /* run_sscalar_oooe.c */; };
+		652A1A2516178FCB00BC6771 /* alpha_isa.c in Sources */ = {isa = PBXBuildFile; fileRef = 652A1A2316178FCB00BC6771 /* alpha_isa.c */; };
+		652A1A2616178FCB00BC6771 /* lm32_isa.c in Sources */ = {isa = PBXBuildFile; fileRef = 652A1A2416178FCB00BC6771 /* lm32_isa.c */; };
 		6578DC4515F2928A00F19412 /* main.c in Sources */ = {isa = PBXBuildFile; fileRef = 6578DC4415F2928A00F19412 /* main.c */; };
 		6578DC4715F2928A00F19412 /* multisim.1 in CopyFiles */ = {isa = PBXBuildFile; fileRef = 6578DC4615F2928A00F19412 /* multisim.1 */; };
 		6581B43515FC0F4700CAA31A /* run_sscalar_io.c in Sources */ = {isa = PBXBuildFile; fileRef = 6581B43415FC0F4700CAA31A /* run_sscalar_io.c */; };
-		65CA85D915F297B400852623 /* alpha-isa.c in Sources */ = {isa = PBXBuildFile; fileRef = 65CA85D415F297B400852623 /* alpha-isa.c */; };
 		65CA85DA15F297B400852623 /* loadelf.c in Sources */ = {isa = PBXBuildFile; fileRef = 65CA85D515F297B400852623 /* loadelf.c */; };
 		65CA85DB15F297B400852623 /* memory.c in Sources */ = {isa = PBXBuildFile; fileRef = 65CA85D615F297B400852623 /* memory.c */; };
 		65CA85DC15F297B400852623 /* run_simple.c in Sources */ = {isa = PBXBuildFile; fileRef = 65CA85D715F297B400852623 /* run_simple.c */; };
-		65E502991606F43D00A9F5E0 /* lm32-isa.c in Sources */ = {isa = PBXBuildFile; fileRef = 65E502981606F43D00A9F5E0 /* lm32-isa.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -33,6 +33,8 @@
 
 /* Begin PBXFileReference section */
 		651C98E815FD8DE800EBDB4D /* run_sscalar_oooe.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = run_sscalar_oooe.c; sourceTree = "<group>"; };
+		652A1A2316178FCB00BC6771 /* alpha_isa.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = alpha_isa.c; sourceTree = "<group>"; };
+		652A1A2416178FCB00BC6771 /* lm32_isa.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = lm32_isa.c; sourceTree = "<group>"; };
 		6578DC4015F2928A00F19412 /* multisim */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = multisim; sourceTree = BUILT_PRODUCTS_DIR; };
 		6578DC4415F2928A00F19412 /* main.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = main.c; sourceTree = "<group>"; };
 		6578DC4615F2928A00F19412 /* multisim.1 */ = {isa = PBXFileReference; lastKnownFileType = text.man; path = multisim.1; sourceTree = "<group>"; };
@@ -42,12 +44,10 @@
 		65CA85D115F297B400852623 /* loadelf.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = loadelf.h; sourceTree = "<group>"; };
 		65CA85D215F297B400852623 /* memory.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = memory.h; sourceTree = "<group>"; };
 		65CA85D315F297B400852623 /* sim.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = sim.h; sourceTree = "<group>"; };
-		65CA85D415F297B400852623 /* alpha-isa.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = "alpha-isa.c"; sourceTree = "<group>"; };
 		65CA85D515F297B400852623 /* loadelf.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = loadelf.c; sourceTree = "<group>"; };
 		65CA85D615F297B400852623 /* memory.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = memory.c; sourceTree = "<group>"; };
 		65CA85D715F297B400852623 /* run_simple.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = run_simple.c; sourceTree = "<group>"; };
-		65E502971606F43D00A9F5E0 /* lm32_opcode.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = lm32_opcode.h; path = multisim/lm32_opcode.h; sourceTree = "<group>"; };
-		65E502981606F43D00A9F5E0 /* lm32-isa.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = "lm32-isa.c"; path = "multisim/lm32-isa.c"; sourceTree = "<group>"; };
+		65E502971606F43D00A9F5E0 /* lm32_opcode.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = lm32_opcode.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -64,8 +64,6 @@
 		6578DC3515F2928A00F19412 = {
 			isa = PBXGroup;
 			children = (
-				65E502971606F43D00A9F5E0 /* lm32_opcode.h */,
-				65E502981606F43D00A9F5E0 /* lm32-isa.c */,
 				6578DC4315F2928A00F19412 /* multisim */,
 				6578DC4115F2928A00F19412 /* Products */,
 			);
@@ -82,6 +80,9 @@
 		6578DC4315F2928A00F19412 /* multisim */ = {
 			isa = PBXGroup;
 			children = (
+				652A1A2316178FCB00BC6771 /* alpha_isa.c */,
+				652A1A2416178FCB00BC6771 /* lm32_isa.c */,
+				65E502971606F43D00A9F5E0 /* lm32_opcode.h */,
 				651C98E815FD8DE800EBDB4D /* run_sscalar_oooe.c */,
 				6581B43415FC0F4700CAA31A /* run_sscalar_io.c */,
 				65CA85CF15F297B400852623 /* alpha_opcode.h */,
@@ -89,7 +90,6 @@
 				65CA85D115F297B400852623 /* loadelf.h */,
 				65CA85D215F297B400852623 /* memory.h */,
 				65CA85D315F297B400852623 /* sim.h */,
-				65CA85D415F297B400852623 /* alpha-isa.c */,
 				65CA85D515F297B400852623 /* loadelf.c */,
 				65CA85D615F297B400852623 /* memory.c */,
 				65CA85D715F297B400852623 /* run_simple.c */,
@@ -151,13 +151,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				6578DC4515F2928A00F19412 /* main.c in Sources */,
-				65CA85D915F297B400852623 /* alpha-isa.c in Sources */,
 				65CA85DA15F297B400852623 /* loadelf.c in Sources */,
 				65CA85DB15F297B400852623 /* memory.c in Sources */,
 				65CA85DC15F297B400852623 /* run_simple.c in Sources */,
 				6581B43515FC0F4700CAA31A /* run_sscalar_io.c in Sources */,
 				651C98E915FD8DE800EBDB4D /* run_sscalar_oooe.c in Sources */,
-				65E502991606F43D00A9F5E0 /* lm32-isa.c in Sources */,
+				652A1A2516178FCB00BC6771 /* alpha_isa.c in Sources */,
+				652A1A2616178FCB00BC6771 /* lm32_isa.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
