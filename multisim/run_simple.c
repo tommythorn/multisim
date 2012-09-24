@@ -39,8 +39,7 @@ step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
 
     isa_decoded_t dec = isa->decode(pc, inst);
     uint64_t op_a     = state->r[dec.source_reg_a];
-    uint64_t op_b     = dec.b_is_imm ? dec.imm : state->r[dec.source_reg_b];
-
+    uint64_t op_b     = state->r[dec.source_reg_b];
     isa_result_t res  = isa->inst_exec(dec, op_a, op_b);
 
     if (res.fatal_error)

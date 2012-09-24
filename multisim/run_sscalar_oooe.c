@@ -165,7 +165,7 @@ step_sscalar_oooe(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
         assert(rs->valid);
 
         uint64_t op_a = prf[rs->pr_a];
-        uint64_t op_b = rs->dec.b_is_imm ? rs->dec.imm : prf[rs->pr_b];
+        uint64_t op_b = prf[rs->pr_b];
         unsigned pwbr = rs->pr_wb;
         unsigned wbr  = rs->dec.dest_reg;
 
