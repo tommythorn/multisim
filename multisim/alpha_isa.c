@@ -189,6 +189,7 @@ decode(uint64_t inst_addr, uint32_t inst)
     case OP_BEQ:
     case OP_BNE:
         dec.is_branch    = true;
+        dec.is_unconditional = false;
         dec.source_reg_a = i.iop.ra;
         break;
     }
@@ -222,7 +223,7 @@ inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b)
 
     case OP_STB:
     case OP_STL:
-        res.storev = op_b;
+        res.store_value = op_b;
         res.result = ea;
         return res;
 
@@ -261,21 +262,13 @@ inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b)
         break;
 
     case OP_BEQ:
-        if (op_a == 0) {
-            res.pc = dec.inst_addr + 4 + i.br.disp * 4;
-            res.result = 1;
-            return res;
-        }
-        res.result = 0;
+        res.branch_taken = op_a == 0;
+        res.branch_target = dec.inst_addr + (i.br.disp + 1) * 4;
         return res;
 
     case OP_BNE:
-        if (op_a != 0) {
-            res.pc = dec.inst_addr + 4 + i.br.disp * 4;
-            res.result = 1;
-            return res;
-        }
-        res.result = 0;
+        res.branch_taken = op_a != 0;
+        res.branch_target = dec.inst_addr + (i.br.disp + 1) * 4;
         return res;
 
     default:

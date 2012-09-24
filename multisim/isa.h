@@ -39,7 +39,15 @@ typedef struct isa_decoded_st {
     int         dest_reg, source_reg_a, source_reg_b;
     bool        b_is_imm;
     uint64_t    imm;
-    bool        is_load, is_store, is_branch;
+
+    /*
+     * Call, returns, jumps, branches, computed jumps, conditional
+     * branches, etc.  All control transfers are considered
+     * "branches".  Those that are unconditional further sets
+     * is_unconditional.
+     */
+    bool        is_branch;
+    bool        is_unconditional;
 
     /*
      * loads encode the access size and signed as follows: unsigned
@@ -47,13 +55,37 @@ typedef struct isa_decoded_st {
      * unsigned 64-bit: -8, etc. Store work similarly, except negative
      * values are not meaningful and are thus not allowed.
      */
+    bool        is_load, is_store;;
     int         mem_access_size;
 } isa_decoded_t;
 
 typedef struct isa_result_st {
+    /*
+     * ALU results etc. The write-back value. Includes fx. the return
+     * address for a call instruction.
+     */
     uint64_t    result;
-    uint64_t    storev;
-    uint64_t    pc;
+
+    /*
+     * Loads and stores are handled outside the execution stage, but
+     * result holds the memory address.  In the case of stores we need
+     * an extra value which is communited with store_value.
+     */
+    uint64_t    store_value;
+
+    /*
+     * Control transfers (calls, returns, jumps, branches, computed
+     * jumps, conditional branches, etc) needs to communicate the
+     * target address.  Conditional branches (and only those) further
+     * communicates if the branch was taken (if not, the target
+     * address should be ignored).
+     */
+    bool        branch_taken;
+    uint64_t    branch_target;
+
+    /*
+     * Stop simulation on fatal errors.
+     */
     bool        fatal_error;
 } isa_result_t;
 
