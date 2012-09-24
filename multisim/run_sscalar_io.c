@@ -100,7 +100,7 @@ step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate
 
         ++state->n_issue;
 
-        if (rs->dec.is_branch)
+        if (rs->dec.is_branch) // XXX continue fetching across unconditional branches
             break;
     }
 
@@ -128,14 +128,13 @@ step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate
 
         if (rs->dec.is_store) {
             printf("\t\t\t\t\t\t[0x%llx](%d) = 0x%llx\n",
-                   res.result, rs->dec.mem_access_size, res.storev);
+                   res.result, rs->dec.mem_access_size, res.store_value);
 
-            store(state->mem, res.result, res.storev, rs->dec.mem_access_size);
+            store(state->mem, res.result, res.store_value, rs->dec.mem_access_size);
         }
 
-        if (rs->dec.is_branch & res.result) {
-            state->pc = res.pc;
-        }
+        if (rs->dec.is_branch & (rs->dec.is_unconditional | res.branch_taken))
+            state->pc = res.branch_target;
 
         if (rs->dec.dest_reg != NO_REG) {
             printf("\t\t\t\t\t\tr%d <- 0x%08llx\n", rs->dec.dest_reg, res.result);

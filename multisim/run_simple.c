@@ -55,13 +55,13 @@ step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
     if (dec.is_store) {
         if (verbose)
             printf("\t\t\t\t\t\t[0x%llx](%d) = 0x%llx\n",
-                   res.result, dec.mem_access_size, res.storev);
+                   res.result, dec.mem_access_size, res.store_value);
 
-        store(state->mem, res.result, res.storev, dec.mem_access_size);
+        store(state->mem, res.result, res.store_value, dec.mem_access_size);
     }
 
-    if (dec.is_branch & res.result)
-        state->pc = res.pc;
+    if (dec.is_branch & (dec.is_unconditional | res.branch_taken))
+        state->pc = res.branch_target;
     else
         state->pc += 4;
 
