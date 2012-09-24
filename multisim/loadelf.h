@@ -31,7 +31,7 @@ typedef struct elf_info_st {
     uint64_t program_entry;
     unsigned nsections;
     uint64_t section_start[MAX_ELF_SECTIONS];
-    uint64_t   section_size[MAX_ELF_SECTIONS];
+    uint64_t section_size[MAX_ELF_SECTIONS];
 
     unsigned text_segments;
     uint64_t text_start;

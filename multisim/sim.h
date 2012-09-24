@@ -24,6 +24,8 @@
 #include <sys/time.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdbool.h>
+#include <assert.h>
 #include "memory.h"
 
 /* "no register" - a generalization of MIPS's r0 and Alpha's r31. */
@@ -73,21 +75,54 @@ static inline uint32_t
 load32(memory_t *m, uint64_t address)
 {
     // assert((uint32_t)address == address);
-    return *(uint32_t *)memory_physical(m, (uint32_t)address, sizeof(uint32_t));
+    uint32_t v = *(uint32_t *)memory_physical(m, (uint32_t)address, sizeof(uint32_t));
+    return memory_endian_fix32(m, v);
 }
 
 static inline uint64_t
 load64(memory_t *m, uint64_t address)
 {
     // assert((uint32_t)address == address);
-    return *(uint64_t *)memory_physical(m, (uint32_t)address, sizeof(uint64_t));
+    uint64_t v = *(uint64_t *)memory_physical(m, (uint32_t)address, sizeof(uint64_t));
+    return memory_endian_fix32(m, v);
 }
 
 static inline void
 store64(memory_t *m, uint64_t address, uint64_t v)
 {
     // assert((uint32_t)address == address);
-    *(uint64_t *)memory_physical(m, (uint32_t)address, sizeof(uint64_t)) = v;
+    *(uint64_t *)memory_physical(m, (uint32_t)address, sizeof(uint64_t)) =
+        memory_endian_fix64(m, v);
+}
+
+
+static inline uint64_t
+load(memory_t *m, uint64_t address, int size)
+{
+    void *p = memory_physical(m, (uint32_t)address, size);
+    switch (size) {
+    case 1: return *(uint8_t *)p;
+    case 2: return memory_endian_fix16(m, *(uint16_t *)p);
+    case 4: return memory_endian_fix32(m, *(uint32_t *)p);
+    case 8: return memory_endian_fix64(m, *(uint64_t *)p);
+    default: assert(size == size + 1);
+    }
+
+    return 0;
+}
+
+static inline void
+store(memory_t *m, uint64_t address, uint64_t value, int size)
+{
+    void *p = memory_physical(m, (uint32_t)address, size);
+    switch (size) {
+    case 1: *(uint8_t *)p = value; return;
+    case 2: *(uint16_t *)p = memory_endian_fix16(m, value); return;
+    case 4: *(uint32_t *)p = memory_endian_fix32(m, value); return;
+    case 8: *(uint64_t *)p = memory_endian_fix64(m, value); return;
+    default:
+        assert(size == size + 1);
+    }
 }
 
 #endif

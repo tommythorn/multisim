@@ -83,6 +83,7 @@ int loadelf(memory_t *m, char *name, elf_info_t *elf_info)
     memset(elf_info, 0, sizeof *elf_info);
 
     elf_info->endian_is_big = ehdr.e_ident[EI_DATA] == 2;
+    memory_set_endian(m, elf_info->endian_is_big);
 
     if (ehdr.e_type != ET_EXEC)
         return 4;

@@ -49,18 +49,16 @@ step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
     if (dec.is_load) {
         if (verbose)
             printf("\t\t\t\t\t\t[0x%llx]\n", res.result);
-        res.result = isa->inst_loadalign(dec, res.result, load64(state->mem, res.result &~ 7));
+        res.result = isa->inst_loadalign(dec, res.result,
+                                         load(state->mem, res.result, dec.access_size));
     }
 
     if (dec.is_store) {
-        uint64_t oldvalue = load64(state->mem, res.result &~ 7);
-        uint64_t newvalue = oldvalue & ~res.storemask | res.storev & res.storemask;
-
         if (verbose)
-            printf("\t\t\t\t\t\t[0x%llx] = 0x%llx & 0x%llx\n",
-                   res.result, res.storev, res.storemask);
+            printf("\t\t\t\t\t\t[0x%llx]%c = 0x%llx\n",
+                   res.result, "xBHxWxxxQ"[dec.access_size], res.storev);
 
-        store64(state->mem, res.result &~ 7, newvalue);
+        store(state->mem, res.result, res.storev, dec.access_size);
     }
 
     if (dec.is_branch & res.result)

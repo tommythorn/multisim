@@ -40,11 +40,13 @@ typedef struct isa_decoded_st {
     bool        b_is_imm;
     uint64_t    imm;
     bool        is_load, is_store, is_branch;
+    int         access_size;
 } isa_decoded_t;
 
 typedef struct isa_result_st {
     uint64_t    result;
-    uint64_t    storev, storemask, pc;
+    uint64_t    storev;
+    uint64_t    pc;
     bool        fatal_error;
 } isa_result_t;
 

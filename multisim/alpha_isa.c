@@ -153,12 +153,14 @@ decode(uint64_t inst_addr, uint32_t inst)
     dec.b_is_imm     = false;
     dec.imm          = i.iop_imm.lit;
     dec.is_load      = false;
-    dec.is_store      = false;
-    dec.is_branch      = false;
+    dec.is_store     = false;
+    dec.is_branch    = false;
+    dec.access_size  = 1;
 
     switch (i.iop.opcode) {
     case OP_LDQ:
     case OP_LDQ_U:
+        dec.access_size  = 8;
     case OP_LDBU:
         dec.is_load      = i.iop.ra != 31;
     case OP_LDAH:
@@ -167,9 +169,10 @@ decode(uint64_t inst_addr, uint32_t inst)
         dec.dest_reg     = i.iop.ra;
         break;
 
-    case OP_STB:
     case OP_STL:
-        dec.is_store = true;
+        dec.access_size  = 4;
+    case OP_STB:
+        dec.is_store     = true;
         dec.source_reg_a = i.iop.rb;
         dec.source_reg_b = i.iop.ra;
         break;
@@ -185,7 +188,7 @@ decode(uint64_t inst_addr, uint32_t inst)
 
     case OP_BEQ:
     case OP_BNE:
-        dec.is_branch = true;
+        dec.is_branch    = true;
         dec.source_reg_a = i.iop.ra;
         break;
     }
@@ -202,7 +205,7 @@ inst_loadalign(isa_decoded_t dec, uint64_t address, uint64_t result)
     inst_t i = { .raw = dec.inst };
 
     switch (i.iop.opcode) {
-    case OP_LDBU: return (uint8_t) (result >> 8 * (address & 7));
+    case OP_LDBU: return (uint8_t) result;
     default: return result;
     }
 }
@@ -229,24 +232,10 @@ inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b)
         return res;
 
     case OP_STB:
-        res.storev = (uint8_t)op_b * 0x0101010101010101ULL;
-        res.storemask = 0xFFULL << 8 * (ea & 7);
+    case OP_STL:
+        res.storev = op_b;
         res.result = ea;
         return res;
-
-    case OP_STL: {
-        if (ea & 4) {
-            res.storev = op_b << 32;
-            res.storemask = 0xFFFFFFFF00000000ULL;
-        }
-        else {
-            res.storev = op_b;
-            res.storemask = 0xFFFFFFFFULL;
-        }
-
-        res.result = ea;
-        return res;
-    }
 
     case OP_INTL_:
         switch (i.iop.func) {
