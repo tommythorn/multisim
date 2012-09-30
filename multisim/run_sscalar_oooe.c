@@ -107,7 +107,7 @@ step_sscalar_oooe(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
         rs->pr_a = map[rs->dec.source_reg_a];
         rs->pr_b = map[rs->dec.source_reg_b];
 
-        if (rs->dec.dest_reg != NO_REG) {
+        if (rs->dec.dest_reg != ISA_NO_REG) {
             free_reg(map[rs->dec.dest_reg]); // XXX this is too soon!
             rs->pr_wb = map[rs->dec.dest_reg] = alloc_reg();
         }
@@ -176,7 +176,7 @@ step_sscalar_oooe(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
         printf("\t");
         isa->disass(rs->dec.inst_addr, rs->dec.inst);
 
-        isa_result_t res = isa->inst_exec(rs->dec, op_a, op_b);
+        isa_result_t res = isa->inst_exec(rs->dec, op_a, op_b, 0);
 
         if (res.fatal_error)
             return true;
@@ -219,7 +219,7 @@ step_sscalar_oooe(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
 
         rs->wbv = res.result;
 
-        if (wbr != NO_REG) {
+        if (wbr != ISA_NO_REG) {
             printf("\t\t\t\t\t\tr%d/R%d <- 0x%08llx\n",
                    rs->dec.dest_reg, pwbr, res.result);
             prf[pwbr] = res.result;
@@ -236,7 +236,7 @@ step_sscalar_oooe(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
         /* Co-simulate */
         assert(rs->dec.inst_addr == costate->pc);
         step_simple(isa, costate, false);
-        if (rs->dec.dest_reg != NO_REG &&
+        if (rs->dec.dest_reg != ISA_NO_REG &&
             rs->wbv != costate->r[rs->dec.dest_reg]) {
             printf("%08llx got r%d <- %016llx, expected r%d <- %016llx\n",
                    rs->dec.inst_addr,

@@ -149,6 +149,8 @@ decode(uint64_t inst_addr, uint32_t inst)
     dec.dest_reg     = i.ri.op < 32 ? i.ri.rX : i.rr.rX;
     dec.source_reg_a = i.ri.op < 32 ? i.ri.rY : i.rr.rY; // NB: same field
     dec.source_reg_b = i.ri.op < 32 ? 0       : i.rr.rZ;
+    dec.dest_msr     = ISA_NO_REG;
+    dec.source_msr_a = ISA_NO_REG;
     dec.class        = isa_inst_class_alu;
 
     switch (i.ri.op) {
@@ -160,7 +162,7 @@ decode(uint64_t inst_addr, uint32_t inst)
         dec.jumpbranch_target= inst_addr + i.i.imm26 * 4;
         dec.source_reg_a     = 0;
         dec.source_reg_b     = 0;
-        dec.dest_reg         = NO_REG;
+        dec.dest_reg         = ISA_NO_REG;
         break;
 
     case CALLI:
@@ -181,7 +183,7 @@ decode(uint64_t inst_addr, uint32_t inst)
 
     case B:
         dec.class            = isa_inst_class_compjump;
-        dec.dest_reg         = NO_REG;
+        dec.dest_reg         = ISA_NO_REG;
         assert(dec.source_reg_b == 0);
         break;
 
@@ -196,27 +198,27 @@ decode(uint64_t inst_addr, uint32_t inst)
         dec.class            = isa_inst_class_branch;
         dec.jumpbranch_target= inst_addr + i.ri.imm16 * 4;
         dec.source_reg_b     = i.ri.rX;
-        dec.dest_reg         = NO_REG;
+        dec.dest_reg         = ISA_NO_REG;
         break;
 
     case SB:
         dec.class            = isa_inst_class_store;
         dec.loadstore_size   = 1;
         dec.source_reg_b     = i.ri.rX;
-        dec.dest_reg         = NO_REG;
+        dec.dest_reg         = ISA_NO_REG;
         break;
 
     case SH:
         dec.class            = isa_inst_class_store;
         dec.loadstore_size   = 2;
         dec.source_reg_b     = i.ri.rX;
-        dec.dest_reg         = NO_REG;
+        dec.dest_reg         = ISA_NO_REG;
         break;
     case SW:
         dec.class            = isa_inst_class_store;
         dec.loadstore_size   = 4;
         dec.source_reg_b     = i.ri.rX;
-        dec.dest_reg         = NO_REG;
+        dec.dest_reg         = ISA_NO_REG;
         break;
 
     case LB:
@@ -241,12 +243,14 @@ decode(uint64_t inst_addr, uint32_t inst)
         dec.loadstore_size  = 4;
         break;
 
-    case WCSR: // XXX deal with msrs
-        dec.dest_reg         = NO_REG;
+    case WCSR:
+        dec.dest_msr        = i.ri.rY;
+        dec.dest_reg        = ISA_NO_REG;
         break;
 
-    case RCSR: // XXX deal with msrs
-        dec.source_reg_a     = 0;
+    case RCSR:
+        dec.source_msr_a    = i.ri.rY;
+        dec.source_reg_a    = 0;
         break;
 
     default:
@@ -257,7 +261,7 @@ decode(uint64_t inst_addr, uint32_t inst)
 }
 
 static isa_result_t
-inst_exec(isa_decoded_t dec, uint64_t op_Y, uint64_t op_ZX)
+inst_exec(isa_decoded_t dec, uint64_t op_Y, uint64_t op_ZX, uint64_t msr_a)
 {
     isa_result_t res     = { 0 };
     lm32_instruction_t i = { .raw = dec.inst };
@@ -293,8 +297,8 @@ inst_exec(isa_decoded_t dec, uint64_t op_Y, uint64_t op_ZX)
     case SRI:     case SR:      res.result = sy >> (uz_imm & 31); break;
     case SLI:     case SL:      res.result = sy << (uz_imm & 31); break;
 
-    case RCSR:                  assert(0); // XXX TODO
-    case WCSR:                  break; //assert(0); // XXX TODO
+    case RCSR:                  res.result = msr_a; break;
+    case WCSR:                  res.msr_result = uy; break; // XXX mask of the valid bits
     case RES1:                  assert(0);
     case RES2:                  assert(0);
     case SCALL:                 assert(0); // XXX TODO
@@ -337,6 +341,7 @@ setup(cpu_state_t *state, elf_info_t *info)
 }
 
 const isa_t lm32_isa = {
+    .zero_reg = 0,
     .setup = setup,
     .decode = decode,
     .inst_exec = inst_exec,

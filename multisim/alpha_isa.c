@@ -149,9 +149,11 @@ decode(uint64_t inst_addr, uint32_t inst)
     inst_t i = { .raw = inst };
     isa_decoded_t dec = { .inst_addr = inst_addr, .inst = inst };
 
-    dec.dest_reg     = NO_REG;
+    dec.dest_reg     = ISA_NO_REG;
     dec.source_reg_a = 31;
     dec.source_reg_b = 31;
+    dec.dest_msr     = ISA_NO_REG;
+    dec.source_msr_a = ISA_NO_REG;
     dec.class        = isa_inst_class_alu;
 
     switch (i.iop.opcode) {
@@ -203,13 +205,13 @@ decode(uint64_t inst_addr, uint32_t inst)
     }
 
     if (dec.dest_reg == 31)
-        dec.dest_reg = NO_REG;
+        dec.dest_reg = ISA_NO_REG;
 
     return dec;
 }
 
 static isa_result_t
-inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b)
+inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b, uint64_t msr_a)
 {
     inst_t i = { .raw = dec.inst };
     uint64_t imm = i.iop_imm.lit;
@@ -298,6 +300,7 @@ setup(cpu_state_t *state, elf_info_t *info)
 }
 
 const isa_t alpha_isa = {
+    .zero_reg = 31,
     .setup = setup,
     .decode = decode,
     .inst_exec = inst_exec,

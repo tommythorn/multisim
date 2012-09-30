@@ -27,25 +27,23 @@
 #include <stdbool.h>
 #include <assert.h>
 #include "memory.h"
-
-/* "no register" - a generalization of MIPS's r0 and Alpha's r31. */
-#define NO_REG 32
+#include "isa.h"
 
 /* All the architectual state */
-typedef struct cpu_state_st {
+struct cpu_state_st {
     memory_t       *mem;
 
     uint64_t        pc;
 
     /* CPU Registers */
-    uint64_t        r[NO_REG + 1];
+    uint64_t        r[ISA_REGISTERS];
 
     /* All other resources should be cover here */
-    uint64_t        msr[64];
+    uint64_t        msr[ISA_MSRS];
 
     /* Statistics */
     uint64_t        n_issue;
-} cpu_state_t;
+};
 
 #define fatal(msg...) ({printf(msg); exit(1);})
 #define warn(msg...)  printf(msg)

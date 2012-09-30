@@ -38,9 +38,18 @@ step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
         isa->disass(pc, inst);
 
     isa_decoded_t dec = isa->decode(pc, inst);
+
+    assert(dec.source_reg_a < ISA_NO_REG);
+    assert(dec.source_reg_b < ISA_NO_REG);
+    assert(dec.dest_reg     < ISA_REGISTERS);
+    assert(dec.dest_msr     < ISA_MSRS);
+    assert(dec.source_msr_a < ISA_MSRS);
+
     uint64_t op_a     = state->r[dec.source_reg_a];
     uint64_t op_b     = state->r[dec.source_reg_b];
-    isa_result_t res  = isa->inst_exec(dec, op_a, op_b);
+    uint64_t msr_a    = dec.source_msr_a != ISA_NO_REG
+        ? state->r[dec.source_msr_a] : 0;
+    isa_result_t res  = isa->inst_exec(dec, op_a, op_b, msr_a);
 
     if (res.fatal_error)
         return true;
@@ -79,7 +88,7 @@ step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
         break;
     }
 
-    if (dec.dest_reg != NO_REG) {
+    if (dec.dest_reg != ISA_NO_REG) {
         if (verbose)
             printf("\t\t\t\t\t\tr%d <- 0x%08llx\n", dec.dest_reg, res.result);
         state->r[dec.dest_reg] = res.result;

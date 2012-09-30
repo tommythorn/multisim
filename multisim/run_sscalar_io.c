@@ -47,7 +47,7 @@ unsigned issue_number;
 
 // XXX probably all state should be in "state" but I'm prototyping here...
 reservation_station_t reservation_stations[WINDOW_SIZE];
-bool scoreboard[NO_REG + 1];
+bool scoreboard[ISA_REGISTERS];
 
 bool
 step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
@@ -100,7 +100,7 @@ step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate
 
         state->pc += 4;
 
-        if (dec.dest_reg != NO_REG)
+        if (dec.dest_reg != ISA_NO_REG)
             scoreboard[dec.dest_reg] = false;
 
         ++state->n_issue;
@@ -124,7 +124,7 @@ step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate
 
         isa->disass(rs->dec.inst_addr, rs->dec.inst);
 
-        isa_result_t res = isa->inst_exec(rs->dec, rs->op_a, rs->op_b);
+        isa_result_t res = isa->inst_exec(rs->dec, rs->op_a, rs->op_b, 0);
 
         if (res.fatal_error)
             return true;
@@ -159,7 +159,7 @@ step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate
             break;
         }
 
-        if (rs->dec.dest_reg != NO_REG) {
+        if (rs->dec.dest_reg != ISA_NO_REG) {
             printf("\t\t\t\t\t\tr%d <- 0x%08llx\n", rs->dec.dest_reg, res.result);
             r[rs->dec.dest_reg] = res.result;
             scoreboard[rs->dec.dest_reg] = true;

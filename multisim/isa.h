@@ -34,6 +34,31 @@
 #include "loadelf.h"
 
 /*
+ * The major objective of multisim is to fully expose the data flow in
+ * the ISA, thus all* architectural CPU state outside the PC is
+ * assumed to be held in registers, general purpose registers and
+ * machine registers for everything else (we may expand this to
+ * include more register classes as needed).
+ *
+ * When dest_reg is ISA_NO_REG then the result should be ignored.
+ * Source registers must never be ISA_NO_REG.
+ *
+ * Similar for machine registers, but here sources should be marked
+ * NO_REG when not used.
+ *
+ * (By making NO_REG an index within the range of REGISTERS, we can
+ * safely use it to an index and can avoid checking for it in many
+ * places).
+ */
+
+#define ISA_REGISTERS 33
+#define ISA_MSRS      ISA_REGISTERS
+#define ISA_NO_REG    (ISA_REGISTERS-1)
+
+typedef uint8_t isa_reg_t;
+typedef uint8_t isa_msr_t;
+
+/*
  * Instructions are classified into alu, load, store, jump, branch,
  * and computed jump.
  *
@@ -63,11 +88,16 @@ typedef enum isa_inst_class_e {
  * loads: 1, signed byte loads: -1, signed half word: -2, unsigned
  * 64-bit: -8, etc. Store work similarly, except negative values are
  * not meaningful and are thus not allowed.
+ *
+ * Machine Specific Registers are modeled as just another register
+ * file, though it's expected that implementations will simply
+ * serialize on such instructions.
  */
 typedef struct isa_decoded_st {
     uint64_t            inst_addr;
     uint32_t            inst;
-    int                 dest_reg, source_reg_a, source_reg_b;
+    isa_reg_t           dest_reg, source_reg_a, source_reg_b;
+    isa_msr_t           dest_msr, source_msr_a;
     isa_inst_class_t    class;
     union {
         int                 loadstore_size;
@@ -93,18 +123,29 @@ typedef struct isa_result_st {
         bool        branch_taken;
     };
 
+    uint64_t    msr_result;
+
     /*
      * Stop simulation on fatal errors.
      */
     bool        fatal_error;
 } isa_result_t;
 
+typedef struct cpu_state_st cpu_state_t;
+
 typedef struct isa_st {
+    /*
+     * Many RISC architectures have a special register which reads as
+     * zero and ignores all writes.  If the ISA doesn't have such, use
+     * ISA_NO_REG.
+     */
+    const isa_reg_t zero_reg;
     void (*setup)(cpu_state_t *, elf_info_t *);
 
     isa_decoded_t (*decode)(uint64_t inst_addr, uint32_t inst);
 
-    isa_result_t (*inst_exec)(isa_decoded_t dec, uint64_t op_a, uint64_t op_b);
+    isa_result_t (*inst_exec)(isa_decoded_t dec, uint64_t op_a, uint64_t op_b,
+                              uint64_t msr_a);
 
     void (*disass)(uint64_t inst_addr, uint32_t inst);
 } isa_t;
