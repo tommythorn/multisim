@@ -20,7 +20,7 @@ WARN=-Wall -Werror -Wno-logical-op-parentheses -Wno-bitwise-op-parentheses
 CFLAGS=-g $(WARN) -MD -O0 -g -I/opt/local/include
 LDFLAGS=-g
 FLAGS=
-OBJS=main.o \
+OBJS=main.o isa.o \
 	run_simple.o run_sscalar_io.o run_sscalar_oooe.o \
 	memory.o loadelf.o alpha_isa.o lm32_isa.o
 

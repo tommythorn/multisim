@@ -31,12 +31,9 @@
 bool
 step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
 {
+    uint64_t loadaddress = 0;
     uint64_t pc       = state->pc;
     uint32_t inst     = load32(state->mem, pc);
-
-    if (verbose)
-        isa->disass(pc, inst);
-
     isa_decoded_t dec = isa->decode(pc, inst);
 
     assert(dec.source_reg_a < ISA_NO_REG);
@@ -56,17 +53,12 @@ step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
 
     switch (dec.class) {
     case isa_inst_class_load:
-        if (verbose)
-            printf("\t\t\t\t\t\t[0x%llx]\n", res.result);
+        loadaddress = res.result;
         res.result = load(state->mem, res.result, dec.loadstore_size);
         state->pc += 4;
         break;
 
     case isa_inst_class_store:
-        if (verbose)
-            printf("\t\t\t\t\t\t[0x%llx](%d) = 0x%llx\n",
-                   res.result, dec.loadstore_size, res.store_value);
-
         store(state->mem, res.result, res.store_value, dec.loadstore_size);
         state->pc += 4;
         break;
@@ -88,11 +80,11 @@ step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
         break;
     }
 
-    if (dec.dest_reg != ISA_NO_REG) {
-        if (verbose)
-            printf("\t\t\t\t\t\tr%d <- 0x%08llx\n", dec.dest_reg, res.result);
+    if (dec.dest_reg != ISA_NO_REG)
         state->r[dec.dest_reg] = res.result;
-    }
+
+    if (verbose)
+        isa_disass(isa, dec, res, loadaddress);
 
     return false;
 }

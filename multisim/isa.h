@@ -30,7 +30,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <sys/types.h>
-#include "sim.h"
 #include "loadelf.h"
 
 /*
@@ -147,21 +146,12 @@ typedef struct isa_st {
     isa_result_t (*inst_exec)(isa_decoded_t dec, uint64_t op_a, uint64_t op_b,
                               uint64_t msr_a);
 
-    void (*disass)(uint64_t inst_addr, uint32_t inst);
+    void (*disass_inst)(uint64_t pc, uint32_t inst, char *buf, size_t buf_size);
 } isa_t;
 
-extern const isa_t alpha_isa;
-extern const isa_t lm32_isa;
+const isa_t *get_isa(uint16_t machine);
 
-static inline const isa_t *
-get_isa(uint16_t machine)
-{
-    if (machine == EM_ALPHA)
-        return &alpha_isa;
-    if (machine == EM_LM32)
-        return &lm32_isa;
-    return NULL;
-}
+void isa_disass(const isa_t *, isa_decoded_t, isa_result_t, uint64_t loadaddress);
 
 #endif
 

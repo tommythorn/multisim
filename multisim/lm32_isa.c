@@ -44,7 +44,7 @@ is_imm16_signed(lm32_opcode_t op)
 }
 
 static void
-disass(uint64_t addr, uint32_t inst)
+disass_inst(uint64_t addr, uint32_t inst, char *buf, size_t buf_size)
 {
     lm32_instruction_t i = {.raw = inst };
     char op_buf[16], s[30];
@@ -128,7 +128,14 @@ disass(uint64_t addr, uint32_t inst)
         snprintf(s, sizeof s, "%-7s" "c%d=r%d", op_buf, i.rr.rY, i.rr.rZ);
         break;
 
-    case B: case CALL:
+    case B:
+        if (i.ri.rY == 29) {
+            snprintf(s, sizeof s, "ret");
+            break;
+        }
+        /* Fall through */
+
+    case CALL:
         snprintf(s, sizeof s, "%-7s" "r%d", op_buf, i.ri.rY);
         break;
 
@@ -137,7 +144,7 @@ disass(uint64_t addr, uint32_t inst)
         break;
     }
 
-    printf("%08llx %08x %s\n", addr, inst, s);
+    strncpy(buf, s, buf_size);
 }
 
 static isa_decoded_t
@@ -345,7 +352,7 @@ const isa_t lm32_isa = {
     .setup = setup,
     .decode = decode,
     .inst_exec = inst_exec,
-    .disass = disass,
+    .disass_inst = disass_inst,
 };
 
 // Local Variables:

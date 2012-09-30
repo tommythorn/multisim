@@ -120,10 +120,8 @@ step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate
      */
 
     while (fetch_number % WINDOW_SIZE != issue_number % WINDOW_SIZE) {
+        uint64_t loadaddress = 0;
         reservation_station_t *rs = reservation_stations + issue_number++ % WINDOW_SIZE;
-
-        isa->disass(rs->dec.inst_addr, rs->dec.inst);
-
         isa_result_t res = isa->inst_exec(rs->dec, rs->op_a, rs->op_b, 0);
 
         if (res.fatal_error)
@@ -134,14 +132,11 @@ step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate
             break;
 
         case isa_inst_class_load:
-            printf("\t\t\t\t\t\t[0x%llx]\n", res.result);
+            loadaddress = res.result;
             res.result = load(state->mem, res.result, rs->dec.loadstore_size);
             break;
 
         case isa_inst_class_store:
-            printf("\t\t\t\t\t\t[0x%llx](%d) = 0x%llx\n",
-                   res.result, rs->dec.loadstore_size, res.store_value);
-
             store(state->mem, res.result, res.store_value, rs->dec.loadstore_size);
             break;
 
@@ -160,10 +155,11 @@ step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate
         }
 
         if (rs->dec.dest_reg != ISA_NO_REG) {
-            printf("\t\t\t\t\t\tr%d <- 0x%08llx\n", rs->dec.dest_reg, res.result);
             r[rs->dec.dest_reg] = res.result;
             scoreboard[rs->dec.dest_reg] = true;
         }
+
+        isa_disass(isa, rs->dec, res, loadaddress);
 
         /* Co-simulate */
         assert(rs->dec.inst_addr == costate->pc);
@@ -178,7 +174,7 @@ void run_sscalar_io(int num_images, char *images[])
 {
     cpu_state_t *state = state_create();
     cpu_state_t *costate = state_create();
-    const isa_t *isa = &alpha_isa;
+    const isa_t *isa;
     elf_info_t info;
 
     memset(scoreboard, 1, sizeof scoreboard);
@@ -188,6 +184,9 @@ void run_sscalar_io(int num_images, char *images[])
         fatal("error: loading %s failed", images[r]);
     loadelfs(costate->mem, num_images, images, &info);
 
+    isa = get_isa(info.machine);
+    if (!isa)
+        fatal("error: unsupported architecture");
     isa->setup(state, &info);
     isa->setup(costate, &info);
 
