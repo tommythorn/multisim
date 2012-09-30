@@ -43,12 +43,6 @@ is_imm16_signed(lm32_opcode_t op)
     }
 }
 
-static bool
-is_imm16_shifted(lm32_opcode_t op)
-{
-    return op == ANDHI || op == ORHI;
-}
-
 static void
 disass(uint64_t addr, uint32_t inst)
 {
@@ -155,102 +149,96 @@ decode(uint64_t inst_addr, uint32_t inst)
     dec.dest_reg     = i.ri.op < 32 ? i.ri.rX : i.rr.rX;
     dec.source_reg_a = i.ri.op < 32 ? i.ri.rY : i.rr.rY; // NB: same field
     dec.source_reg_b = i.ri.op < 32 ? 0       : i.rr.rZ;
-    dec.is_load      = false;
-    dec.is_store     = false;
-    dec.is_branch    = false;
-    dec.imm =
-        is_imm16_signed(i.ri.op) ? i.ri.imm16 :
-        is_imm16_shifted(i.ri.op) ? i.ri.imm16 << 16 :
-        (uint16_t) i.ri.imm16;
+    dec.class        = isa_inst_class_alu;
 
     switch (i.ri.op) {
     case RES1: case RES2:
         assert(0);
 
     case BI:
-        dec.is_branch        = true;
-        dec.is_unconditional = true;
+        dec.class            = isa_inst_class_jump;
+        dec.jumpbranch_target= inst_addr + i.i.imm26 * 4;
         dec.source_reg_a     = 0;
         dec.source_reg_b     = 0;
         dec.dest_reg         = NO_REG;
         break;
 
     case CALLI:
-        dec.is_branch        = true;
-        dec.is_unconditional = true;
+        dec.class            = isa_inst_class_jump;
+        dec.jumpbranch_target= inst_addr + i.i.imm26 * 4;
         dec.source_reg_a     = 0;
         dec.source_reg_b     = 0;
         dec.dest_reg         = RA;
         break;
 
     case SCALL:
-        dec.is_branch        = true;
-        dec.is_unconditional = true;
+        dec.class            = isa_inst_class_jump;
+        dec.jumpbranch_target= -1; // XXX
         dec.source_reg_a     = 0;
         dec.source_reg_b     = 0;
         dec.dest_reg         = EA;
         break;
 
     case B:
-        dec.is_branch        = true;
-        dec.is_unconditional = true;
+        dec.class            = isa_inst_class_compjump;
         dec.dest_reg         = NO_REG;
         assert(dec.source_reg_b == 0);
         break;
 
     case CALL:
-        // XXX Lame that it's hardcoded
-        dec.is_branch        = true;
-        dec.is_unconditional = true;
+        /* Odd that RA is hardcoded */
+        dec.class            = isa_inst_class_compjump;
         dec.dest_reg         = RA;
         assert(dec.source_reg_b == 0);
         break;
 
     case BE: case BG: case BGE: case BGEU: case BGU: case BNE:
-        dec.is_branch        = true;
-        dec.is_unconditional = false;
+        dec.class            = isa_inst_class_branch;
+        dec.jumpbranch_target= inst_addr + i.ri.imm16 * 4;
         dec.source_reg_b     = i.ri.rX;
         dec.dest_reg         = NO_REG;
         break;
 
     case SB:
-        dec.is_store         = true;
+        dec.class            = isa_inst_class_store;
+        dec.loadstore_size   = 1;
         dec.source_reg_b     = i.ri.rX;
         dec.dest_reg         = NO_REG;
-        dec.mem_access_size  = 1;
         break;
+
     case SH:
-        dec.is_store         = true;
+        dec.class            = isa_inst_class_store;
+        dec.loadstore_size   = 2;
         dec.source_reg_b     = i.ri.rX;
         dec.dest_reg         = NO_REG;
-        dec.mem_access_size  = 2;
         break;
     case SW:
-        dec.is_store         = true;
+        dec.class            = isa_inst_class_store;
+        dec.loadstore_size   = 4;
         dec.source_reg_b     = i.ri.rX;
         dec.dest_reg         = NO_REG;
-        dec.mem_access_size  = 4;
         break;
 
     case LB:
-        dec.is_load          = true;
-        dec.mem_access_size  = -1;
+        dec.class           = isa_inst_class_load;
+        dec.loadstore_size  = -1;
         break;
+
     case LH:
-        dec.is_load          = true;
-        dec.mem_access_size  = -2;
+        dec.class           = isa_inst_class_load;
+        dec.loadstore_size  = -2;
         break;
     case LBU:
-        dec.is_load          = true;
-        dec.mem_access_size  = 1;
+        dec.class           = isa_inst_class_load;
+        dec.loadstore_size  = 1;
         break;
     case LHU:
-        dec.is_load          = true;
-        dec.mem_access_size  = 2;
+        dec.class           = isa_inst_class_load;
+        dec.loadstore_size  = 2;
         break;
     case LW:
-        dec.is_load          = true;
-        dec.mem_access_size  = 4;
+        dec.class           = isa_inst_class_load;
+        dec.loadstore_size  = 4;
         break;
 
     case WCSR: // XXX deal with msrs
@@ -281,8 +269,7 @@ inst_exec(isa_decoded_t dec, uint64_t op_Y, uint64_t op_ZX)
     int32_t       szx    = (int32_t)op_ZX;
     int32_t       sz_imm = op < 32 ? i.ri.imm16 : (int32_t)op_ZX;
 
-    res.fatal_error = false;
-    res.branch_target = dec.inst_addr + i.ri.imm16 * 4;
+    res.fatal_error      = false;
 
     switch (op) {
     case ADDI:    case ADD:     res.result = uy + uz_imm; break;
@@ -296,7 +283,7 @@ inst_exec(isa_decoded_t dec, uint64_t op_Y, uint64_t op_ZX)
 
     case ANDHI:                 assert((uz_imm & 0xFFFF) == 0); // XXX just a check
     case ANDI:    case AND:     res.result = uy & uz_imm; break;
-    case ORHI:                  res.result = uy | (i.ri.imm16 << 16); break; // XXX
+    case ORHI:                  res.result = uy | (i.ri.imm16 << 16); break;
     case ORI:     case OR:      res.result = uy | uz_imm; break;
     case XORI:    case XOR:     res.result = uy ^ uz_imm; break;
     case NORI:    case NOR:     res.result = ~(uy | uz_imm); break;
@@ -315,10 +302,8 @@ inst_exec(isa_decoded_t dec, uint64_t op_Y, uint64_t op_ZX)
     case SEXTB:                 res.result = (int8_t) sy; break;
     case SEXTH:                 res.result = (int16_t) sy; break;
 
-    case CALL: case B:          res.branch_target = uy;
-                                res.result = dec.inst_addr + 4; break;
-    case CALLI: case BI:        res.branch_target = dec.inst_addr + i.i.imm26 * 4;
-                                res.result = dec.inst_addr + 4; break;
+    case CALL: case B:          res.result = dec.inst_addr + 4; break;
+    case CALLI: case BI:        res.result = dec.inst_addr + 4; break;
 
     case BE:                    res.branch_taken = szx == sy; break;
     case BNE:                   res.branch_taken = uzx != uy; break;

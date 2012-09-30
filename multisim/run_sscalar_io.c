@@ -67,10 +67,15 @@ step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate
 
         isa_decoded_t dec = isa->decode(state->pc, i);
 
-        n_load += dec.is_load;
-        n_store += dec.is_store;
+        n_load += dec.class == isa_inst_class_load;
+        n_store += dec.class == isa_inst_class_store;
 
-        /* do not */
+        /*
+         * Only fetch instructions that can safely be reordered.  It's
+         * safe to reorder arbitrary (non-IO) loads in the absence of
+         * stores, but two stores can't be reordered (without knowning
+         * if they can alias).
+         */
         if (1 < n_store || 0 < n_store && 0 < n_load) {
             printf("Notice: bailing issue before we got %d loads and %d stores simultaneously\n",
                    n_load, n_store);
@@ -100,7 +105,10 @@ step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate
 
         ++state->n_issue;
 
-        if (rs->dec.is_branch) // XXX continue fetching across unconditional branches
+        if (rs->dec.class == isa_inst_class_jump ||
+            rs->dec.class == isa_inst_class_branch ||
+            rs->dec.class == isa_inst_class_compjump)
+            // XXX continue fetching across unconditional branches
             break;
     }
 
@@ -121,20 +129,35 @@ step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate
         if (res.fatal_error)
             return true;
 
-        if (rs->dec.is_load) {
+        switch (rs->dec.class) {
+        case isa_inst_class_alu:
+            break;
+
+        case isa_inst_class_load:
             printf("\t\t\t\t\t\t[0x%llx]\n", res.result);
-            res.result = load(state->mem, res.result, rs->dec.mem_access_size);
-        }
+            res.result = load(state->mem, res.result, rs->dec.loadstore_size);
+            break;
 
-        if (rs->dec.is_store) {
+        case isa_inst_class_store:
             printf("\t\t\t\t\t\t[0x%llx](%d) = 0x%llx\n",
-                   res.result, rs->dec.mem_access_size, res.store_value);
+                   res.result, rs->dec.loadstore_size, res.store_value);
 
-            store(state->mem, res.result, res.store_value, rs->dec.mem_access_size);
+            store(state->mem, res.result, res.store_value, rs->dec.loadstore_size);
+            break;
+
+        case isa_inst_class_branch:
+            if (res.branch_taken)
+                state->pc = rs->dec.jumpbranch_target;
+            break;
+
+        case isa_inst_class_jump:
+            state->pc = rs->dec.jumpbranch_target;
+            break;
+
+        case isa_inst_class_compjump:
+            state->pc = rs->op_a;
+            break;
         }
-
-        if (rs->dec.is_branch & (rs->dec.is_unconditional | res.branch_taken))
-            state->pc = res.branch_target;
 
         if (rs->dec.dest_reg != NO_REG) {
             printf("\t\t\t\t\t\tr%d <- 0x%08llx\n", rs->dec.dest_reg, res.result);

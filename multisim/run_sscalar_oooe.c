@@ -117,7 +117,9 @@ step_sscalar_oooe(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
 
         ++fetch_number;
 
-        if (rs->dec.is_branch) { // XXX continue on unconditional branches
+        if (rs->dec.class == isa_inst_class_jump ||
+            rs->dec.class == isa_inst_class_branch ||
+            rs->dec.class == isa_inst_class_compjump) { // XXX continue on unconditional branches
             if (DEBUG_SB)
                 printf("stop fetching past %08llx\n", state->pc);
 
@@ -179,21 +181,37 @@ step_sscalar_oooe(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
         if (res.fatal_error)
             return true;
 
-        if (rs->dec.is_load) {
+        switch (rs->dec.class) {
+        case isa_inst_class_alu:
+            break;
+
+        case isa_inst_class_load:
             printf("\t\t\t\t\t\t[0x%llx]\n", res.result);
-            res.result = load(state->mem, res.result, rs->dec.mem_access_size);
-        }
+            res.result = load(state->mem, res.result, rs->dec.loadstore_size);
+            break;
 
-        if (rs->dec.is_store) {
+        case isa_inst_class_store:
             printf("\t\t\t\t\t\t[0x%llx](%d) = 0x%llx\n",
-                   res.result, rs->dec.mem_access_size, res.store_value);
+                   res.result, rs->dec.loadstore_size, res.store_value);
 
-            store(state->mem, res.result, res.store_value, rs->dec.mem_access_size);
+            store(state->mem, res.result, res.store_value, rs->dec.loadstore_size);
+            break;
+
+        case isa_inst_class_jump:
+            state->pc = rs->dec.jumpbranch_target;
+            break;
+
+        case isa_inst_class_branch:
+            if (res.branch_taken)
+                state->pc = rs->dec.jumpbranch_target;
+            break;
+
+        case isa_inst_class_compjump:
+            state->pc = rs->op_a;
+            break;
         }
 
-        if (rs->dec.is_branch) { // XXX unconditional ...
-            if ((rs->dec.is_unconditional | res.branch_taken))
-                state->pc = res.branch_target;
+        if (isa_inst_class_jump <= rs->dec.class) {
             if (DEBUG_SB)
                 printf("resume fetching from %08llx\n", state->pc);
             stop_fetching = false;

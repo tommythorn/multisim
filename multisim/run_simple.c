@@ -45,24 +45,39 @@ step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
     if (res.fatal_error)
         return true;
 
-    if (dec.is_load) {
+    switch (dec.class) {
+    case isa_inst_class_load:
         if (verbose)
             printf("\t\t\t\t\t\t[0x%llx]\n", res.result);
-        res.result = load(state->mem, res.result, dec.mem_access_size);
-    }
+        res.result = load(state->mem, res.result, dec.loadstore_size);
+        state->pc += 4;
+        break;
 
-    if (dec.is_store) {
+    case isa_inst_class_store:
         if (verbose)
             printf("\t\t\t\t\t\t[0x%llx](%d) = 0x%llx\n",
-                   res.result, dec.mem_access_size, res.store_value);
+                   res.result, dec.loadstore_size, res.store_value);
 
-        store(state->mem, res.result, res.store_value, dec.mem_access_size);
-    }
-
-    if (dec.is_branch & (dec.is_unconditional | res.branch_taken))
-        state->pc = res.branch_target;
-    else
+        store(state->mem, res.result, res.store_value, dec.loadstore_size);
         state->pc += 4;
+        break;
+
+    case isa_inst_class_branch:
+        state->pc = res.branch_taken ? dec.jumpbranch_target : state->pc + 4;
+        break;
+
+    case isa_inst_class_jump:
+        state->pc = dec.jumpbranch_target;
+        break;
+
+    case isa_inst_class_compjump:
+        state->pc = op_a;
+        break;
+
+    default:
+        state->pc += 4;
+        break;
+    }
 
     if (dec.dest_reg != NO_REG) {
         if (verbose)

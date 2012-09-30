@@ -152,28 +152,36 @@ decode(uint64_t inst_addr, uint32_t inst)
     dec.dest_reg     = NO_REG;
     dec.source_reg_a = 31;
     dec.source_reg_b = 31;
-    dec.imm          = i.iop_imm.lit;
-    dec.is_load      = false;
-    dec.is_store     = false;
-    dec.is_branch    = false;
-    dec.mem_access_size = 1;
+    dec.class        = isa_inst_class_alu;
 
     switch (i.iop.opcode) {
     case OP_LDQ:
     case OP_LDQ_U:
-        dec.mem_access_size = 8;
-    case OP_LDBU:
-        dec.is_load      = i.iop.ra != 31;
+        if (i.iop.ra != 31)
+            dec.class = isa_inst_class_load;
+        dec.loadstore_size = 8;
+        dec.source_reg_a = i.iop.rb;
+        dec.dest_reg     = i.iop.ra;
+        break;
+
     case OP_LDAH:
     case OP_LDA:
         dec.source_reg_a = i.iop.rb;
         dec.dest_reg     = i.iop.ra;
         break;
 
+    case OP_LDBU:
+        if (i.iop.ra != 31)
+            dec.class = isa_inst_class_load;
+        dec.loadstore_size = 1;
+        dec.source_reg_a = i.iop.rb;
+        dec.dest_reg     = i.iop.ra;
+        break;
+
     case OP_STL:
-        dec.mem_access_size = 4;
     case OP_STB:
-        dec.is_store     = true;
+        dec.class          = isa_inst_class_store;
+        dec.loadstore_size = i.iop.opcode == OP_STL ? 4 : 1;
         dec.source_reg_a = i.iop.rb;
         dec.source_reg_b = i.iop.ra;
         break;
@@ -188,8 +196,8 @@ decode(uint64_t inst_addr, uint32_t inst)
 
     case OP_BEQ:
     case OP_BNE:
-        dec.is_branch    = true;
-        dec.is_unconditional = false;
+        dec.class = isa_inst_class_branch;
+        dec.jumpbranch_target = inst_addr + (i.br.disp + 1) * 4;
         dec.source_reg_a = i.iop.ra;
         break;
     }
@@ -204,8 +212,9 @@ static isa_result_t
 inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b)
 {
     inst_t i = { .raw = dec.inst };
+    uint64_t imm = i.iop_imm.lit;
     uint64_t ea = op_a + i.mem.disp;
-    uint64_t op_b_imm = i.iop.isimm ? dec.imm : op_b;
+    uint64_t op_b_imm = i.iop.isimm ? imm : op_b;
     isa_result_t res = { 0 };
     res.fatal_error = false;
 
@@ -264,12 +273,10 @@ inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b)
 
     case OP_BEQ:
         res.branch_taken = op_a == 0;
-        res.branch_target = dec.inst_addr + (i.br.disp + 1) * 4;
         return res;
 
     case OP_BNE:
         res.branch_taken = op_a != 0;
-        res.branch_target = dec.inst_addr + (i.br.disp + 1) * 4;
         return res;
 
     default:

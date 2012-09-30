@@ -21,7 +21,7 @@
 /*
  * Copyright (C) 2012 Tommy Thorn
  *
- * generic Instruction Set Architecture
+ * Generic Instruction Set Architecture
  */
 
 #ifndef _ISA_H
@@ -33,57 +33,65 @@
 #include "sim.h"
 #include "loadelf.h"
 
+/*
+ * Instructions are classified into alu, load, store, jump, branch,
+ * and computed jump.
+ *
+ * The distinction between the latter three is from the point
+ * of view of the instruction fetch:
+ *
+ * - for jumps, fetching can proceed uninterrupted at targetpc,
+ *
+ * - for branches, fetching can speculatively proceed at targetpc
+ *   based on branch prediction, and
+ *
+ * - for computed jumps, actual target is register source_reg_a.
+ */
+typedef enum isa_inst_class_e {
+    isa_inst_class_alu,
+    isa_inst_class_load,
+    isa_inst_class_store,
+    isa_inst_class_jump,
+    isa_inst_class_branch,
+    isa_inst_class_compjump,
+} isa_inst_class_t;
+
+/*
+ * Decode enough of the instruction to guide the dynamic scheduling.
+ *
+ * Loads encode the access size and signed as follows: unsigned byte
+ * loads: 1, signed byte loads: -1, signed half word: -2, unsigned
+ * 64-bit: -8, etc. Store work similarly, except negative values are
+ * not meaningful and are thus not allowed.
+ */
 typedef struct isa_decoded_st {
-    uint64_t    inst_addr;
-    uint32_t    inst;
-    int         dest_reg, source_reg_a, source_reg_b;
-    uint64_t    imm; // XXX nuke from decoded
-
-    /*
-     * Call, returns, jumps, branches, computed jumps, conditional
-     * branches, etc.  All control transfers are considered
-     * "branches".  Those that are unconditional further sets
-     * is_unconditional.
-     *
-     * XXX switch to inst_class: ALU, LOAD, STORE, (conditional)
-     * BRANCH, (unconditional) JUMP.
-     */
-    bool        is_branch;
-    bool        is_unconditional;
-
-    /*
-     * loads encode the access size and signed as follows: unsigned
-     * byte loads: 1, signed byte loads: -1, signed half word: -2,
-     * unsigned 64-bit: -8, etc. Store work similarly, except negative
-     * values are not meaningful and are thus not allowed.
-     */
-    bool        is_load, is_store;;
-    int         mem_access_size;
+    uint64_t            inst_addr;
+    uint32_t            inst;
+    int                 dest_reg, source_reg_a, source_reg_b;
+    isa_inst_class_t    class;
+    union {
+        int                 loadstore_size;
+        uint64_t            jumpbranch_target;
+        int                 compjump_reg;
+    };
 } isa_decoded_t;
 
 typedef struct isa_result_st {
     /*
-     * ALU results etc. The write-back value. Includes fx. the return
-     * address for a call instruction.
+     * Results, AKA the write-back value, from ALU instructions,
+     * etc.  Includes fx. the return address for a call instruction.
      */
     uint64_t    result;
 
-    /*
-     * Loads and stores are handled outside the execution stage, but
-     * result holds the memory address.  In the case of stores we need
-     * an extra value which is communited with store_value.
-     */
-    uint64_t    store_value;
-
-    /*
-     * Control transfers (calls, returns, jumps, branches, computed
-     * jumps, conditional branches, etc) needs to communicate the
-     * target address.  Conditional branches (and only those) further
-     * communicates if the branch was taken (if not, the target
-     * address should be ignored).
-     */
-    bool        branch_taken;
-    uint64_t    branch_target;
+    union {
+        /*
+         * Loads and stores are handled outside the execution stage, but
+         * result holds the memory address.  In the case of stores we need
+         * an extra value which is communited with store_value.
+         */
+        uint64_t    store_value;
+        bool        branch_taken;
+    };
 
     /*
      * Stop simulation on fatal errors.

@@ -1,7 +1,3 @@
-General:
-  - drop imm from isa_decode_t
-  - classify instructions into alu, jump, branch, load, and store.
-
 oooe:
   - be careful about load/store reordering
 
