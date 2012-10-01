@@ -221,6 +221,7 @@ decode(uint64_t inst_addr, uint32_t inst)
         dec.source_reg_b     = i.ri.rX;
         dec.dest_reg         = ISA_NO_REG;
         break;
+
     case SW:
         dec.class            = isa_inst_class_store;
         dec.loadstore_size   = 4;
@@ -283,10 +284,10 @@ inst_exec(isa_decoded_t dec, uint64_t op_Y, uint64_t op_ZX, uint64_t msr_a)
     res.fatal_error      = false;
 
     switch (op) {
-    case ADDI:    case ADD:     res.result = uy + uz_imm; break;
-    case SUB:                   res.result = uy - uzx; break;
+    case ADDI:    case ADD:     res.result = sy + sz_imm; break;
+    case SUB:                   res.result = sy - szx; break;
 
-    case MULI:    case MUL:     res.result = uy * uz_imm; break;
+    case MULI:    case MUL:     res.result = sy * sz_imm; break;
     case DIV:                   res.result = sy / szx; break; // undocumented!
     case MOD:                   res.result = sy % szx; break; // undocumented!
     case DIVU:                  res.result = uy / uzx; break;
@@ -300,12 +301,12 @@ inst_exec(isa_decoded_t dec, uint64_t op_Y, uint64_t op_ZX, uint64_t msr_a)
     case NORI:    case NOR:     res.result = ~(uy | uz_imm); break;
     case XNORI:   case XNOR:    res.result = ~uy ^ uz_imm; break;
 
-    case SRUI:    case SRU:     res.result = uy >> (uz_imm & 31); break;
-    case SRI:     case SR:      res.result = sy >> (uz_imm & 31); break;
-    case SLI:     case SL:      res.result = sy << (uz_imm & 31); break;
+    case SRUI:    case SRU:     res.result = uy >> (sz_imm & 31); break;
+    case SRI:     case SR:      res.result = sy >> (sz_imm & 31); break;
+    case SLI:     case SL:      res.result = sy << (sz_imm & 31); break;
 
     case RCSR:                  res.result = msr_a; break;
-    case WCSR:                  res.msr_result = uy; break; // XXX mask of the valid bits
+    case WCSR:                  res.msr_result = sz_imm; break; // XXX mask of the valid bits
     case RES1:                  assert(0);
     case RES2:                  assert(0);
     case SCALL:                 assert(0); // XXX TODO
@@ -316,15 +317,15 @@ inst_exec(isa_decoded_t dec, uint64_t op_Y, uint64_t op_ZX, uint64_t msr_a)
     case CALL: case B:          res.result = dec.inst_addr + 4; break;
     case CALLI: case BI:        res.result = dec.inst_addr + 4; break;
 
-    case BE:                    res.branch_taken = szx == sy; break;
-    case BNE:                   res.branch_taken = uzx != uy; break;
-    case BG:                    res.branch_taken = szx >  sy; break;
-    case BGE:                   res.branch_taken = szx >= sy; break;
-    case BGU:                   res.branch_taken = uzx >  uy; break;
-    case BGEU:                  res.branch_taken = uzx >= uy; break;
+    case BE:                    res.branch_taken = sy == szx; break;
+    case BNE:                   res.branch_taken = sy != szx; break;
+    case BG:                    res.branch_taken = sy >  szx; break;
+    case BGE:                   res.branch_taken = sy >= szx; break;
+    case BGU:                   res.branch_taken = uy >  uzx; break;
+    case BGEU:                  res.branch_taken = uy >= uzx; break;
 
     case CMPEI:   case CMPE:    res.result = sy == sz_imm; break;
-    case CMPNEI:  case CMPNE:   res.result = uy != uz_imm; break;
+    case CMPNEI:  case CMPNE:   res.result = sy != sz_imm; break;
     case CMPGI:   case CMPG:    res.result = sy >  sz_imm; break;
     case CMPGEI:  case CMPGE:   res.result = sy >= sz_imm; break;
     case CMPGUI:  case CMPGU:   res.result = uy >  uz_imm; break;
@@ -333,10 +334,11 @@ inst_exec(isa_decoded_t dec, uint64_t op_Y, uint64_t op_ZX, uint64_t msr_a)
     case LB: case LBU:
     case LH: case LHU: case LW: res.result = uy + i.ri.imm16; break;
 
-    case SB: case SH: case SW:  res.result = uy + i.ri.imm16; break;
+    case SB: case SH: case SW:  res.result = uy + i.ri.imm16;
                                 res.store_value = uzx; break;
     }
 
+    res.result = (uint32_t) res.result;
     return res;
 }
 
@@ -345,6 +347,14 @@ setup(cpu_state_t *state, elf_info_t *info)
 {
     state->pc = info->program_entry;
     memory_ensure_mapped_range(state->mem, 0x200103f0, 1024*1024);
+
+    /* This is mostly copied from lm32_sys.js */
+    memory_ensure_mapped_range(state->mem, 0x08000000, 64*1024*1024);
+
+    state->r[1] = 0x0bffe000;// HWSETUP_BASE
+    state->r[2] = 0x0bfff000;// CMDLINE_BASE
+    state->r[3] = 0x08400000;// INITRD_BASE
+    state->r[4] = 0x08600000;// INITRD_BASE + initrd_size
 }
 
 const isa_t lm32_isa = {

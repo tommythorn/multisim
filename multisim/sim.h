@@ -98,6 +98,11 @@ static inline uint64_t
 load(memory_t *m, uint64_t address, int mem_access_size)
 {
     void *p = memory_physical(m, (uint32_t)address, mem_access_size);
+
+    if (!p) {
+        fprintf(stderr, "SEGFAULT, load from unmapped memory %08llx\n", address);
+    }
+
     switch (mem_access_size) {
     case -1: return *(int8_t *)p;
     case  1: return *(uint8_t *)p;
@@ -117,6 +122,11 @@ static inline void
 store(memory_t *m, uint64_t address, uint64_t value, int mem_access_size)
 {
     void *p = memory_physical(m, (uint32_t)address, mem_access_size);
+
+    if (!p) {
+        fprintf(stderr, "SEGFAULT, store to unmapped memory %08llx\n", address);
+    }
+
     switch (mem_access_size) {
     case 1: *(uint8_t *)p = value; return;
     case 2: *(uint16_t *)p = memory_endian_fix16(m, value); return;
