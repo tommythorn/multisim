@@ -30,8 +30,12 @@
 #include "loadelf.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <fcntl.h>
 #include <assert.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <ctype.h>
 
 static const bool enable_verb_prog_sec = false;
 static const bool enable_verb_elf = false;
@@ -116,9 +120,59 @@ int loadelf(memory_t *m, char *name, elf_info_t *elf_info)
     return 4;
 }
 
+static int
+loadbin(memory_t *m, uint64_t loadaddress, const char name[], elf_info_t *last_info)
+{
+    int fd = open(name, O_RDONLY);
+
+    if (fd < 0) {
+        perror(name);
+        return 1;
+    }
+
+    struct stat stat_buf;
+
+    int r = fstat(fd, &stat_buf);
+    if (r) {
+        perror(name);
+        return 1;
+    }
+
+    memory_ensure_mapped_range(m, (uint32_t)loadaddress, stat_buf.st_size);
+
+    if (read(fd, memory_physical(m, (uint32_t)loadaddress, stat_buf.st_size), stat_buf.st_size) !=
+        stat_buf.st_size) {
+        perror(name);
+        return 1;
+    }
+
+    // XXX hack
+    last_info->machine = EM_LM32;
+    last_info->endian_is_big = true;
+    last_info->program_entry = 0x08000000;
+    memory_set_endian(m, last_info->endian_is_big);
+
+    return 0;
+}
+
 int loadelfs(memory_t *m, int n, char *name[], elf_info_t *last_info)
 {
     int i;
+
+    if (n % 2 == 0 && n > 1 && isdigit(name[0][0])) {
+        /* Assume binary files, preceeded by loading address */
+        for (i = 0; i < n; i += 2) {
+            char *end;
+            uint64_t loadaddress = strtol(name[i], &end, 16);
+            if (*end != '\0')
+                return 0;
+            if (loadbin(m, loadaddress, name[i+1], last_info))
+                return 0;
+        }
+
+        return n;
+    }
+
     for (i = 0; i < n; ++i) {
         int r = loadelf(m, name[i], last_info);
         if (r)
