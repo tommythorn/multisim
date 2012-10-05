@@ -268,6 +268,157 @@ decode(uint64_t inst_addr, uint32_t inst)
     return dec;
 }
 
+/* executed every cycle */
+static void
+tick(cpu_state_t *state)
+{
+    // Update cycle counter
+    ++state->msr[CSR_CC];
+}
+
+static void
+update_irq(cpu_state_t *state)
+{
+    /* magic */
+}
+
+
+/* Handle the write-back of MSRs (CSR in LM32 parlance). Deals with
+ * side effects, if any. */
+static void
+write_msr(cpu_state_t *state, lm32_csr_t csr, uint32_t value)
+{
+    switch (csr) {
+/*
+ * Copyright (c) 2011, 2012 Reginaldo Silva (reginaldo@ubercomp.com)
+ * Created: 10/09/11 17:21
+ */
+    // these cannot be written to:
+    case CSR_CC:
+    case CSR_CFG:
+        assert(0); // This should have been caught and dealt with during decode
+        //console.log("Cannot write to csr number " + csr);
+        break;
+
+    case CSR_IP:
+        state->msr[CSR_IP] &= ~value;
+        update_irq(state);
+        break;
+
+    case CSR_IM:
+        state->msr[CSR_IM] = value;
+        update_irq(state);
+        break;
+
+    case CSR_ICC:
+    case CSR_DCC:
+        break; // i just fake icc
+
+    //case CSR_DC:
+
+    default:
+        assert(0); // XXX lots of stuff left unimplemented
+
+    //case CSR_JTX:
+        //console.log("Writing CSR_JTX at PC: 0x" + (cs.pc).toString(16));
+    //case CSR_JRX:
+        //console.log("Writing CSR_JRX at PC: 0x" + (cs.pc).toString(16));
+
+    case CSR_DEBA:
+    case CSR_EBA:
+    case CSR_BP0:
+    case CSR_BP1:
+    case CSR_BP2:
+    case CSR_BP3:
+    case CSR_WP0:
+    case CSR_WP1:
+    case CSR_WP2:
+    case CSR_WP3:
+    case CSR_IE:
+        state->msr[csr] = value;
+        break;
+    }
+}
+
+static uint32_t
+rcsr(lm32_csr_t csr, uint32_t csr_value)
+{
+/*
+ * Copyright (c) 2011, 2012 Reginaldo Silva (reginaldo@ubercomp.com)
+ * Created: 10/09/11 17:21
+ */
+    switch (csr) {
+    // These cannot be read from:
+    case CSR_ICC:
+    case CSR_DCC:
+    case CSR_BP0:
+    case CSR_BP1:
+    case CSR_BP2:
+    case CSR_BP3:
+    case CSR_WP0:
+    case CSR_WP1:
+    case CSR_WP2:
+    case CSR_WP3:
+    default:
+        // XXX Illegal instruction?
+        //console.log("Invalid read on csr 0x" + csr.toString(16));
+        return 0;
+
+    case CSR_DC:
+    case CSR_IE:
+    case CSR_IM:
+    case CSR_IP:
+    case CSR_CC:
+    case CSR_CFG:
+    case CSR_EBA:
+    case CSR_DEBA:
+    case CSR_JTX:
+    case CSR_JRX:
+        return csr_value;
+    }
+}
+
+/* Write CSR mostly takes care of stipping illegal bits.  The actual
+ * side-effect happens in write_msr().  The reason for this split is
+ * to separate data-flow from the side-effect, which becomes necessary
+ * for super-scalar and out-of-order execution.
+ */
+static uint32_t
+wcsr(lm32_csr_t csr, uint32_t value)
+{
+/*
+ * Copyright (c) 2011, 2012 Reginaldo Silva (reginaldo@ubercomp.com)
+ * Created: 10/09/11 17:21
+ */
+    switch (csr) {
+    // these cannot be written to:
+    case CSR_CC:
+    case CSR_CFG:
+        assert(0); // This should have been caught and dealt with during decode
+        //console.log("Cannot write to csr number " + csr);
+        break;
+
+    case CSR_EBA:
+    case CSR_DEBA:
+        return value & 0xffffff00;
+
+    case CSR_IE:
+    case CSR_IM:
+    case CSR_BP0:
+    case CSR_BP1:
+    case CSR_BP2:
+    case CSR_BP3:
+    case CSR_WP0:
+    case CSR_WP1:
+    case CSR_WP2:
+    case CSR_WP3:
+        return value;
+
+    default:
+        assert(0);
+    }
+}
+
 static isa_result_t
 inst_exec(isa_decoded_t dec, uint64_t op_Y, uint64_t op_ZX, uint64_t msr_a)
 {
@@ -305,8 +456,8 @@ inst_exec(isa_decoded_t dec, uint64_t op_Y, uint64_t op_ZX, uint64_t msr_a)
     case SRI:     case SR:      res.result = sy >> (sz_imm & 31); break;
     case SLI:     case SL:      res.result = sy << (sz_imm & 31); break;
 
-    case RCSR:                  res.result = msr_a; break;
-    case WCSR:                  res.msr_result = sz_imm; break; // XXX mask of the valid bits
+    case RCSR:                  res.result = rcsr(dec.source_msr_a, msr_a); break;
+    case WCSR:                  res.msr_result = wcsr(dec.dest_msr, sz_imm); break;
     case RES1:                  assert(0);
     case RES2:                  assert(0);
     case SCALL:                 assert(0); // XXX TODO
@@ -355,6 +506,10 @@ setup(cpu_state_t *state, elf_info_t *info)
     state->r[2] = 0x0bfff000;// CMDLINE_BASE
     state->r[3] = 0x08400000;// INITRD_BASE
     state->r[4] = 0x08600000;// INITRD_BASE + initrd_size
+
+    state->msr[CSR_CFG]  = 0x0d120037;
+    state->msr[CSR_EBA]  = 0x08000000; // Exception Based Address == RAM_BASE
+    state->msr[CSR_DEBA] = 0x08000000; // Exception Based Address == RAM_BASE
 }
 
 const isa_t lm32_isa = {
@@ -363,6 +518,8 @@ const isa_t lm32_isa = {
     .decode = decode,
     .inst_exec = inst_exec,
     .disass_inst = disass_inst,
+    .tick = tick,
+    .write_msr = write_msr,
 };
 
 // Local Variables:

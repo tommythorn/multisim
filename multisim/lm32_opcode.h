@@ -89,6 +89,34 @@ typedef enum lm32_reg_e {
     R16, R17, R18, R19, R20, R21, R22, R23, R24, R25, GP, FP, SP, RA, EA,
 } lm32_reg_t;
 
+/*
+ * Copyright (c) 2011, 2012 Reginaldo Silva (reginaldo@ubercomp.com)
+ * Created: 10/09/11 17:21
+ */
+typedef enum lm32_csr_e {
+    // control and status register indices:
+    CSR_IE   = 0x0,  // interrupt enable
+    CSR_IM   = 0x1,  // interrupt mask
+    CSR_IP   = 0x2,  // interrupt pending
+    CSR_ICC  = 0x3,  // instruction cache control
+    CSR_DCC  = 0x4,  // data_cache_control
+    CSR_CC   = 0x5,  // cycle counter
+    CSR_CFG  = 0x6,  // configuration
+    CSR_EBA  = 0x7,  // exception base address
+    CSR_DC   = 0x8,  // debug control
+    CSR_DEBA = 0x9,  // debug exception base address
+    CSR_JTX  = 0xe,  // jtag uart transmit
+    CSR_JRX  = 0xf,  // jtag uart receive
+    CSR_BP0  = 0x10, // breakpoint address 0
+    CSR_BP1  = 0x11, // breakpoint address 1
+    CSR_BP2  = 0x12, // breakpoint address 2
+    CSR_BP3  = 0x13, // breakpoint address 3
+    CSR_WP0  = 0x18, // wacthpoint address 0
+    CSR_WP1  = 0x19, // watchpoint address 1
+    CSR_WP2  = 0x1a, // watchpoint address 2
+    CSR_WP3  = 0x1b, // watchpoint address 3
+} lm32_csr_t;
+
 typedef union lm32_instruction_u {
     struct {
         int             imm16  : 16;

@@ -295,12 +295,20 @@ setup(cpu_state_t *state, elf_info_t *info)
     memory_ensure_mapped_range(state->mem, 0x200103f0, 1024*1024);
 }
 
+/* executed every cycle */
+static void
+tick(cpu_state_t *state)
+{
+}
+
 const isa_t alpha_isa = {
     .zero_reg = 31,
     .setup = setup,
     .decode = decode,
     .inst_exec = inst_exec,
     .disass_inst = disass_inst,
+    .tick = tick,
+    .write_msr = 0, // XXX My alpha has no MSRs yet
 };
 
 // Local Variables:

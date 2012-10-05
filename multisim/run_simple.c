@@ -83,6 +83,11 @@ step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
     if (dec.dest_reg != ISA_NO_REG)
         state->r[dec.dest_reg] = res.result;
 
+    if (dec.dest_msr != ISA_NO_REG)
+        isa->write_msr(state, dec.dest_msr, res.msr_result);
+
+    isa->tick(state);
+
     if (verbose)
         isa_disass(isa, dec, res, loadaddress);
 

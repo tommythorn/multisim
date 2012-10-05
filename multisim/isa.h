@@ -148,6 +148,8 @@ typedef struct isa_st {
                               uint64_t msr_a);
 
     void (*disass_inst)(uint64_t pc, uint32_t inst, char *buf, size_t buf_size);
+    void (*tick)(cpu_state_t *state);
+    void (*write_msr)(cpu_state_t *state, unsigned csr, uint32_t value);
 } isa_t;
 
 const isa_t *get_isa(uint16_t machine);
