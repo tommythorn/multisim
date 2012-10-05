@@ -26,18 +26,18 @@ isa_disass(const isa_t *isa, isa_decoded_t dec, isa_result_t res, uint64_t loada
 {
     char dis_buf[99];
 
-    printf("%08llx ", dec.inst_addr);
+    printf("%08"PRIx64" ", dec.inst_addr);
 
     isa->disass_inst(dec.inst_addr, dec.inst, dis_buf, sizeof dis_buf);
 
     switch (dec.class) {
     case isa_inst_class_load:
-        printf("%-32s r%d <- 0x%08llx [0x%08llx]\n",
+        printf("%-32s r%d <- 0x%08"PRIx64" [0x%08"PRIx64"]\n",
                dis_buf, dec.dest_reg, res.result, loadaddress);
         break;
 
     case isa_inst_class_store:
-        printf("%-32s [0x%08llx] <- 0x%08llx\n", dis_buf, res.result, res.store_value);
+        printf("%-32s [0x%08"PRIx64"] <- 0x%08"PRIx64"\n", dis_buf, res.result, res.store_value);
         break;
 
     default:
@@ -47,10 +47,10 @@ isa_disass(const isa_t *isa, isa_decoded_t dec, isa_result_t res, uint64_t loada
             printf("%s", dis_buf);
 
         if (dec.dest_reg != ISA_NO_REG)
-            printf(" r%d <- 0x%08llx", dec.dest_reg, res.result);
+            printf(" r%d <- 0x%08"PRIx64"", dec.dest_reg, res.result);
 
         if (dec.dest_msr != ISA_NO_REG)
-            printf(" MSR%d <- 0x%08llx", dec.dest_msr, res.msr_result);
+            printf(" MSR%d <- 0x%08"PRIx64"", dec.dest_msr, res.msr_result);
 
         printf("\n");
     }

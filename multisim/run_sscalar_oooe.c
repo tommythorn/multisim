@@ -121,7 +121,7 @@ step_sscalar_oooe(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
             rs->dec.class == isa_inst_class_branch ||
             rs->dec.class == isa_inst_class_compjump) { // XXX continue on unconditional branches
             if (DEBUG_SB)
-                printf("stop fetching past %08llx\n", state->pc);
+                printf("stop fetching past %08"PRIx64"\n", state->pc);
 
             stop_fetching = true;
         }
@@ -152,14 +152,14 @@ step_sscalar_oooe(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
 
         if (!scoreboard[rs->pr_a]) {
             if (DEBUG_SB)
-                printf("... skipping %08llx because op a (R%d) isn't ready\n",
+                printf("... skipping %08"PRIx64" because op a (R%d) isn't ready\n",
                        rs->dec.inst_addr, rs->pr_a);
             continue;
         }
 
         if (!scoreboard[rs->pr_b]) {
             if (DEBUG_SB)
-                printf("... skipping %08llx because op b (R%d) isn't ready\n",
+                printf("... skipping %08"PRIx64" because op b (R%d) isn't ready\n",
                        rs->dec.inst_addr, rs->pr_b);
             continue;
         }
@@ -208,7 +208,7 @@ step_sscalar_oooe(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
 
         if (isa_inst_class_jump <= rs->dec.class) {
             if (DEBUG_SB)
-                printf("resume fetching from %08llx\n", state->pc);
+                printf("resume fetching from %08"PRIx64"\n", state->pc);
             stop_fetching = false;
         }
 
@@ -234,7 +234,7 @@ step_sscalar_oooe(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
         step_simple(isa, costate, false);
         if (rs->dec.dest_reg != ISA_NO_REG &&
             rs->wbv != costate->r[rs->dec.dest_reg]) {
-            printf("%08llx got r%d <- %016llx, expected r%d <- %016llx\n",
+            printf("%08"PRIx64" got r%d <- %016"PRIx64", expected r%d <- %016"PRIx64"\n",
                    rs->dec.inst_addr,
                    rs->dec.dest_reg, rs->wbv,
                    rs->dec.dest_reg, costate->r[rs->dec.dest_reg]);

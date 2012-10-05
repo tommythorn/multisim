@@ -21,6 +21,7 @@
 #include "memory.h"
 #include <assert.h>
 #include <stdlib.h>
+#include <arpa/inet.h>
 
 /*
   The simulation space address to physical address translation is a

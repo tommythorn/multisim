@@ -100,7 +100,7 @@ load(memory_t *m, uint64_t address, int mem_access_size)
     void *p = memory_physical(m, (uint32_t)address, mem_access_size);
 
     if (!p) {
-        fprintf(stderr, "SEGFAULT, load from unmapped memory %08llx\n", address);
+        fprintf(stderr, "SEGFAULT, load from unmapped memory %08"PRIx64"\n", address);
     }
 
     switch (mem_access_size) {
@@ -124,7 +124,7 @@ store(memory_t *m, uint64_t address, uint64_t value, int mem_access_size)
     void *p = memory_physical(m, (uint32_t)address, mem_access_size);
 
     if (!p) {
-        fprintf(stderr, "SEGFAULT, store to unmapped memory %08llx\n", address);
+        fprintf(stderr, "SEGFAULT, store to unmapped memory %08"PRIx64"\n", address);
     }
 
     switch (mem_access_size) {

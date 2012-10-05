@@ -35,10 +35,10 @@ static void
 brfmt(char *buf, size_t n, uint64_t pc, char *inst_string, inst_t i)
 {
     if (i.mem.ra == 31)
-        snprintf(buf, n, "%-11s0x%016llx", inst_string,
+        snprintf(buf, n, "%-11s0x%016"PRIx64"", inst_string,
                 pc + 4 + i.br.disp * 4);
     else
-        snprintf(buf, n, "%-11s0x%016llx,r%d", inst_string,
+        snprintf(buf, n, "%-11s0x%016"PRIx64",r%d", inst_string,
                 pc + 4 + i.br.disp * 4, i.mem.ra);
 }
 #endif
@@ -46,7 +46,7 @@ brfmt(char *buf, size_t n, uint64_t pc, char *inst_string, inst_t i)
 static void
 cbrfmt(char *buf, size_t n, uint64_t pc, char *inst_string, inst_t i)
 {
-    snprintf(buf, n, "%-11sr%d,0x%016llx", inst_string, i.mem.ra, pc + 4 + i.br.disp * 4);
+    snprintf(buf, n, "%-11sr%d,0x%016"PRIx64"", inst_string, i.mem.ra, pc + 4 + i.br.disp * 4);
 }
 
 static void
@@ -88,11 +88,10 @@ static void
 disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
 {
     inst_t i = {.raw = inst };
-    unsigned wbr;
     char *inst_string;
     void (*fmt)(char *, size_t, uint64_t, char *, inst_t) = 0;
 
-#define DIS(name, format, rd) inst_string = #name; fmt = format; wbr = rd; break
+#define DIS(name, format, rd) inst_string = #name; fmt = format; break
 
     switch (i.iop.opcode) {
     default:

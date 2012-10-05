@@ -57,7 +57,7 @@ int SZ(loadelf,)(memory_t *m, char *name, FILE *f, elf_info_t *elf_info)
     if (enable_verb_prog_sec) {
         printf("%s:\n", name);
         printf("%sendian\n", elf_info->endian_is_big ? "big" : "little");
-        printf("Entry:             %016llx\n",
+        printf("Entry:             %016"PRIx64"\n",
                (uint64_t) NATIVE(ehdr.e_entry)); /* Entry point virtual address */
         printf("Proc Flags:        %08x\n",
                NATIVE(ehdr.e_flags)); /* Processor-specific flags */
@@ -94,19 +94,19 @@ int SZ(loadelf,)(memory_t *m, char *name, FILE *f, elf_info_t *elf_info)
         if (enable_verb_prog_sec) {
             printf("\nProgram header #%d (%lx)\n", i, ftell(f));
             printf(" type             %08x\n",   NATIVE(ph[i].p_type));
-            printf(" filesz           %016llx\n", (uint64_t)NATIVE(ph[i].p_filesz));
-            printf(" offset           %016llx\n", (uint64_t)NATIVE(ph[i].p_offset));
-            printf(" vaddr            %016llx\n", (uint64_t)NATIVE(ph[i].p_vaddr));
-            printf(" paddr            %016llx\n", (uint64_t)NATIVE(ph[i].p_paddr));
-            printf(" memsz            %016llx\n", (uint64_t)NATIVE(ph[i].p_memsz));
+            printf(" filesz           %016"PRIx64"\n", (uint64_t)NATIVE(ph[i].p_filesz));
+            printf(" offset           %016"PRIx64"\n", (uint64_t)NATIVE(ph[i].p_offset));
+            printf(" vaddr            %016"PRIx64"\n", (uint64_t)NATIVE(ph[i].p_vaddr));
+            printf(" paddr            %016"PRIx64"\n", (uint64_t)NATIVE(ph[i].p_paddr));
+            printf(" memsz            %016"PRIx64"\n", (uint64_t)NATIVE(ph[i].p_memsz));
             printf(" flags            %08x\n",    NATIVE(ph[i].p_flags));
-            printf(" align            %016llx\n", (uint64_t)NATIVE(ph[i].p_align));
+            printf(" align            %016"PRIx64"\n", (uint64_t)NATIVE(ph[i].p_align));
         }
 
         if (NATIVE(ph[i].p_type) == PT_LOAD && NATIVE(ph[i].p_filesz)) {
 
             if (enable_verb_prog_sec)
-                fprintf(stderr, "Loading section [%016llx; %016llx]\n",
+                fprintf(stderr, "Loading section [%016"PRIx64"; %016"PRIx64"]\n",
                         (uint64_t)NATIVE(ph[i].p_vaddr),
                         (uint64_t)NATIVE(ph[i].p_vaddr) + NATIVE(ph[i].p_memsz) - 1);
 
@@ -143,14 +143,14 @@ int SZ(loadelf,)(memory_t *m, char *name, FILE *f, elf_info_t *elf_info)
             printf("\nSection header #%d (%lx)\n", i, ftell(f));
             printf(" name            %08x\n", NATIVE(sh.sh_name));
             printf(" type            %08x\n", NATIVE(sh.sh_type));
-            printf(" flags           %016llx\n", (uint64_t)NATIVE(sh.sh_flags));
-            printf(" addr            %016llx\n", (uint64_t)NATIVE(sh.sh_addr));
-            printf(" offset          %016llx\n", (uint64_t)NATIVE(sh.sh_offset));
-            printf(" size            %016llx\n", (uint64_t)NATIVE(sh.sh_size));
+            printf(" flags           %016"PRIx64"\n", (uint64_t)NATIVE(sh.sh_flags));
+            printf(" addr            %016"PRIx64"\n", (uint64_t)NATIVE(sh.sh_addr));
+            printf(" offset          %016"PRIx64"\n", (uint64_t)NATIVE(sh.sh_offset));
+            printf(" size            %016"PRIx64"\n", (uint64_t)NATIVE(sh.sh_size));
             printf(" link            %08x\n", NATIVE(sh.sh_link));
             printf(" info            %08x\n", NATIVE(sh.sh_info));
-            printf(" addralign       %016llx\n", (uint64_t)NATIVE(sh.sh_addralign));
-            printf(" entsize         %016llx\n", (uint64_t)NATIVE(sh.sh_entsize));
+            printf(" addralign       %016"PRIx64"\n", (uint64_t)NATIVE(sh.sh_addralign));
+            printf(" entsize         %016"PRIx64"\n", (uint64_t)NATIVE(sh.sh_entsize));
         }
 
         printf(" (now at %lx)\n", ftell(f));

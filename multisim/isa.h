@@ -28,6 +28,7 @@
 #define _ISA_H 1
 
 #include <stdint.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <sys/types.h>
 #include "loadelf.h"
