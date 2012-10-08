@@ -28,13 +28,20 @@
 #include "run_simple.h"
 #include "loadelf.h"
 
+#define TRACING 1
+
 bool
 step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
 {
+    static int cycle = 0;
+    uint64_t orig_r[32];
     uint64_t loadaddress = 0;
     uint64_t pc       = state->pc;
     uint32_t inst     = load32(state->mem, pc);
     isa_decoded_t dec = isa->decode(pc, inst);
+
+    if (TRACING)
+        memcpy(orig_r, state->r, sizeof orig_r);
 
     assert(dec.source_reg_a < ISA_NO_REG);
     assert(dec.source_reg_b < ISA_NO_REG);
@@ -88,7 +95,13 @@ step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
 
     isa->tick(state);
 
-    if (verbose)
+    if (TRACING) {
+        printf("%d:0x%08"PRIx64"\n", cycle, dec.inst_addr);
+        if (dec.dest_reg != ISA_NO_REG && orig_r[dec.dest_reg] != res.result)
+            printf("%d:r%d=0x%08"PRIx64"\n", cycle, dec.dest_reg,
+                   res.result);
+        ++cycle;
+    } else if (verbose)
         isa_disass(isa, dec, res, loadaddress);
 
     return false;
@@ -111,7 +124,7 @@ void run_simple(int num_images, char *images[])
 
     int cycle;
     for (cycle = 0;; ++cycle) {
-        printf("%5d ", cycle);
+        //printf("%5d ", cycle);
         if (step_simple(isa, state, true))
             break;
     }

@@ -496,20 +496,50 @@ inst_exec(isa_decoded_t dec, uint64_t op_Y, uint64_t op_ZX, uint64_t msr_a)
 static void
 setup(cpu_state_t *state, elf_info_t *info)
 {
+    static uint8_t hwsetup_data[] = {
+        0, 0, 0, 44, 0, 0, 0, 1, 76, 77, 51, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 61, 9, 0, 0,
+        0, 0, 48, 0, 0, 0, 6, 100, 100, 114, 95, 115, 100, 114, 97, 109, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 0,
+        0, 0, 4, 0, 0, 0, 0, 0, 0, 56, 0, 0, 0, 8, 116, 105, 109, 101, 114,
+        48, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 128, 0, 32, 0, 1, 1, 1, 32, 0, 0, 0, 20, 1, 0, 0, 0, 0, 0,
+        0, 56, 0, 0, 0, 9, 117, 97, 114, 116, 48, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0,
+        1, 194, 0, 8, 1, 1, 1, 1, 4, 4, 0, 0, 0, 0, 56, 0, 0, 0, 9, 117, 97,
+        114, 116, 49, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 129, 0, 0, 0, 0, 1, 194, 0, 8, 1, 1, 1, 1, 4,
+        4, 2, 0, 0, 0, 8, 0, 0, 0, 0,
+    };
+
+    const uint32_t ram_base     = 0x08000000;
+    const uint32_t initrd_base  = 0x08400000;
+    const uint32_t initrd_size  = 0x00200000; // 2 MiB
+    const uint32_t hwsetup_base = 0x0bffe000;
+    const uint32_t cmdline_base = 0x0bfff000;
+
     state->pc = info->program_entry;
     memory_ensure_mapped_range(state->mem, 0x200103f0, 1024*1024);
 
     /* This is mostly copied from lm32_sys.js */
     memory_ensure_mapped_range(state->mem, 0x08000000, 64*1024*1024);
 
-    state->r[1] = 0x0bffe000;// HWSETUP_BASE
-    state->r[2] = 0x0bfff000;// CMDLINE_BASE
-    state->r[3] = 0x08400000;// INITRD_BASE
-    state->r[4] = 0x08600000;// INITRD_BASE + initrd_size
+    state->r[1] = hwsetup_base;
+    state->r[2] = cmdline_base;
+    state->r[3] = initrd_base;
+    state->r[4] = initrd_base + initrd_size;
+
+    memory_ensure_mapped_range(state->mem, hwsetup_base, 8192);
+    strcpy(memory_physical(state->mem, cmdline_base, 64),
+           "root=/dev/ram0 console=ttyS0,115200 ramdisk_size=16384");
+
+    memcpy(memory_physical(state->mem, hwsetup_base, sizeof hwsetup_data),
+           hwsetup_data,
+           sizeof hwsetup_data);
 
     state->msr[CSR_CFG]  = 0x0d120037;
-    state->msr[CSR_EBA]  = 0x08000000; // Exception Based Address == RAM_BASE
-    state->msr[CSR_DEBA] = 0x08000000; // Exception Based Address == RAM_BASE
+    state->msr[CSR_EBA]  = ram_base; // Exception Based Address
+    state->msr[CSR_DEBA] = ram_base; // Exception Based Address
 }
 
 const isa_t lm32_isa = {
