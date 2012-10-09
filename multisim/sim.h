@@ -27,7 +27,7 @@
 #include <stdbool.h>
 #include <assert.h>
 #include "memory.h"
-#include "isa.h"
+#include "arch.h"
 
 /* All the architectual state */
 struct cpu_state_st {

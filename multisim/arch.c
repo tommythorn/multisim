@@ -19,16 +19,16 @@
  */
 
 #include <stdio.h>
-#include "isa.h"
+#include "arch.h"
 
 void
-isa_disass(const isa_t *isa, isa_decoded_t dec, isa_result_t res, uint64_t loadaddress)
+isa_disass(const arch_t *arch, isa_decoded_t dec, isa_result_t res, uint64_t loadaddress)
 {
     char dis_buf[99];
 
     printf("%08"PRIx64" ", dec.inst_addr);
 
-    isa->disass_inst(dec.inst_addr, dec.inst, dis_buf, sizeof dis_buf);
+    arch->disass_inst(dec.inst_addr, dec.inst, dis_buf, sizeof dis_buf);
 
     switch (dec.class) {
     case isa_inst_class_load:
@@ -56,16 +56,15 @@ isa_disass(const isa_t *isa, isa_decoded_t dec, isa_result_t res, uint64_t loada
     }
 }
 
-extern const isa_t alpha_isa;
-extern const isa_t lm32_isa;
+extern const arch_t arch_alpha, arch_lm32;
 
-const isa_t *
-get_isa(uint16_t machine)
+const arch_t *
+get_arch(uint16_t machine)
 {
     if (machine == EM_ALPHA)
-        return &alpha_isa;
+        return &arch_alpha;
     if (machine == EM_LM32)
-        return &lm32_isa;
+        return &arch_lm32;
     return NULL;
 }
 

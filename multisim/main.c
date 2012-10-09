@@ -32,7 +32,7 @@
 #include <signal.h>
 #include <getopt.h>
 #include <ctype.h>
-#include "alpha_opcode.h"
+#include "alpha.h"
 #include "sim.h"
 
 static int run = '1';

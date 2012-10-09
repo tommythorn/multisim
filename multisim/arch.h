@@ -168,11 +168,11 @@ typedef struct isa_st {
      */
     uint64_t (*load)(cpu_state_t *, uint64_t address, int mem_access_size);
     void (*store)(cpu_state_t *, uint64_t address, uint64_t value, int mem_access_size);
-} isa_t;
+} arch_t;
 
-const isa_t *get_isa(uint16_t machine);
+const arch_t *get_arch(uint16_t machine);
 
-void isa_disass(const isa_t *, isa_decoded_t, isa_result_t, uint64_t loadaddress);
+void isa_disass(const arch_t *, isa_decoded_t, isa_result_t, uint64_t loadaddress);
 
 #endif
 

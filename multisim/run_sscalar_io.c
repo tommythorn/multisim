@@ -50,7 +50,7 @@ reservation_station_t reservation_stations[WINDOW_SIZE];
 bool scoreboard[ISA_REGISTERS];
 
 bool
-step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
+step_sscalar_in_order(const arch_t *arch, cpu_state_t *state, cpu_state_t *costate)
 {
     uint64_t *r = state->r;
     int n_load = 0;
@@ -63,9 +63,9 @@ step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate
      */
 
     while ((fetch_number + 1) % WINDOW_SIZE != issue_number % WINDOW_SIZE) {
-        uint32_t i = isa->load(state, state->pc, 4);
+        uint32_t i = arch->load(state, state->pc, 4);
 
-        isa_decoded_t dec = isa->decode(state->pc, i);
+        isa_decoded_t dec = arch->decode(state->pc, i);
 
         n_load += dec.class == isa_inst_class_load;
         n_store += dec.class == isa_inst_class_store;
@@ -122,7 +122,7 @@ step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate
     while (fetch_number % WINDOW_SIZE != issue_number % WINDOW_SIZE) {
         uint64_t loadaddress = 0;
         reservation_station_t *rs = reservation_stations + issue_number++ % WINDOW_SIZE;
-        isa_result_t res = isa->inst_exec(rs->dec, rs->op_a, rs->op_b, 0);
+        isa_result_t res = arch->inst_exec(rs->dec, rs->op_a, rs->op_b, 0);
 
         if (res.fatal_error)
             return true;
@@ -133,11 +133,11 @@ step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate
 
         case isa_inst_class_load:
             loadaddress = res.result;
-            res.result = isa->load(state, res.result, rs->dec.loadstore_size);
+            res.result = arch->load(state, res.result, rs->dec.loadstore_size);
             break;
 
         case isa_inst_class_store:
-            isa->store(state, res.result, res.store_value, rs->dec.loadstore_size);
+            arch->store(state, res.result, res.store_value, rs->dec.loadstore_size);
             break;
 
         case isa_inst_class_branch:
@@ -159,11 +159,11 @@ step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate
             scoreboard[rs->dec.dest_reg] = true;
         }
 
-        isa_disass(isa, rs->dec, res, loadaddress);
+        isa_disass(arch, rs->dec, res, loadaddress);
 
         /* Co-simulate */
         assert(rs->dec.inst_addr == costate->pc);
-        step_simple(isa, costate, false);
+        step_simple(arch, costate, false);
         assert(state->r[rs->dec.dest_reg] == costate->r[rs->dec.dest_reg]);
     }
 
@@ -174,7 +174,7 @@ void run_sscalar_io(int num_images, char *images[])
 {
     cpu_state_t *state = state_create();
     cpu_state_t *costate = state_create();
-    const isa_t *isa;
+    const arch_t *arch;
     elf_info_t info;
 
     memset(scoreboard, 1, sizeof scoreboard);
@@ -184,16 +184,16 @@ void run_sscalar_io(int num_images, char *images[])
         fatal("error: loading %s failed", images[r]);
     loadelfs(costate->mem, num_images, images, &info);
 
-    isa = get_isa(info.machine);
-    if (!isa)
+    arch = get_arch(info.machine);
+    if (!arch)
         fatal("error: unsupported architecture");
-    isa->setup(state, &info);
-    isa->setup(costate, &info);
+    arch->setup(state, &info);
+    arch->setup(costate, &info);
 
     int cycle;
     for (cycle = 0;; ++cycle) {
         printf("Cycle #%d:\n", cycle);
-        if (step_sscalar_in_order(isa, state, costate))
+        if (step_sscalar_in_order(arch, state, costate))
             break;
     }
 

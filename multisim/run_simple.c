@@ -31,14 +31,14 @@
 #define TRACING 1
 
 bool
-step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
+step_simple(const arch_t *arch, cpu_state_t *state, bool verbose)
 {
     static int cycle = 0;
     uint64_t orig_r[32];
     uint64_t loadaddress = 0;
     uint64_t pc       = state->pc;
-    uint32_t inst     = isa->load(state, pc, 4);
-    isa_decoded_t dec = isa->decode(pc, inst);
+    uint32_t inst     = arch->load(state, pc, 4);
+    isa_decoded_t dec = arch->decode(pc, inst);
 
     if (TRACING)
         memcpy(orig_r, state->r, sizeof orig_r);
@@ -53,7 +53,7 @@ step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
     uint64_t op_b     = state->r[dec.source_reg_b];
     uint64_t msr_a    = dec.source_msr_a != ISA_NO_REG
         ? state->r[dec.source_msr_a] : 0;
-    isa_result_t res  = isa->inst_exec(dec, op_a, op_b, msr_a);
+    isa_result_t res  = arch->inst_exec(dec, op_a, op_b, msr_a);
 
     if (res.fatal_error)
         return true;
@@ -61,12 +61,12 @@ step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
     switch (dec.class) {
     case isa_inst_class_load:
         loadaddress = res.result;
-        res.result = isa->load(state, res.result, dec.loadstore_size);
+        res.result = arch->load(state, res.result, dec.loadstore_size);
         state->pc += 4;
         break;
 
     case isa_inst_class_store:
-        isa->store(state, res.result, res.store_value, dec.loadstore_size);
+        arch->store(state, res.result, res.store_value, dec.loadstore_size);
         state->pc += 4;
         break;
 
@@ -91,9 +91,9 @@ step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
         state->r[dec.dest_reg] = res.result;
 
     if (dec.dest_msr != ISA_NO_REG)
-        isa->write_msr(state, dec.dest_msr, res.msr_result);
+        arch->write_msr(state, dec.dest_msr, res.msr_result);
 
-    isa->tick(state);
+    arch->tick(state);
 
     if (TRACING) {
         fprintf(stderr,"%d:0x%08"PRIx64"\n", cycle, dec.inst_addr);
@@ -103,7 +103,7 @@ step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
         fflush(stderr);
         ++cycle;
     } else if (verbose)
-        isa_disass(isa, dec, res, loadaddress);
+        isa_disass(arch, dec, res, loadaddress);
 
     return false;
 }
@@ -111,22 +111,22 @@ step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
 void run_simple(int num_images, char *images[])
 {
     cpu_state_t *state = state_create();
-    const isa_t *isa;
+    const arch_t *arch;
     elf_info_t info;
 
     int r = loadelfs(state->mem, num_images, images, &info);
     if (r != num_images)
         fatal("error: loading %s failed", images[r]);
 
-    isa = get_isa(info.machine);
-    if (!isa)
+    arch = get_arch(info.machine);
+    if (!arch)
         fatal("error: unsupported architecture");
-    isa->setup(state, &info);
+    arch->setup(state, &info);
 
     int cycle;
     for (cycle = 0;; ++cycle) {
         //printf("%5d ", cycle);
-        if (step_simple(isa, state, true))
+        if (step_simple(arch, state, true))
             break;
     }
 

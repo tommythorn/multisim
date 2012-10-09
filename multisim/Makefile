@@ -21,9 +21,9 @@ WARN=-Wall -Werror -Wno-logical-op-parentheses -Wno-bitwise-op-parentheses \
 CFLAGS=-g -std=c99 $(WARN) -MD -O0 -g -I/opt/local/include
 LDFLAGS=-g
 FLAGS=
-OBJS=main.o isa.o \
+OBJS=main.o arch.o \
 	run_simple.o run_sscalar_io.o run_sscalar_oooe.o \
-	memory.o loadelf.o alpha_isa.o lm32_isa.o
+	memory.o loadelf.o alpha.o lm32.o
 
 test_lm32: multisim
 	./multisim ../workloads/vmlinux.lm32

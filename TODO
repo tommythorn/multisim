@@ -1,5 +1,3 @@
-isa -> arch or sys and change XXX_opcode.h/XXX_isa.h -> XXX_arch.{h,c}
-
 oooe:
   - be careful about load/store reordering
 

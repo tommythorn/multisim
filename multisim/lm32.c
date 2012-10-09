@@ -22,8 +22,8 @@
 #include <string.h>
 #include <ctype.h>
 #include "sim.h"
-#include "isa.h"
-#include "lm32_opcode.h"
+#include "arch.h"
+#include "lm32.h"
 
 #define _LM32_MK_NAME(O) #O,
 
@@ -584,7 +584,7 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size)
     }
 }
 
-const isa_t lm32_isa = {
+const arch_t arch_lm32 = {
     .zero_reg = 0,
     .setup = setup,
     .decode = decode,

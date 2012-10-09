@@ -21,8 +21,8 @@
 #include <stdio.h>
 #include <string.h>
 #include "sim.h"
-#include "isa.h"
-#include "alpha_opcode.h"
+#include "arch.h"
+#include "alpha.h"
 
 static void
 mfmt(char *buf, size_t n, uint64_t pc, char *inst_string, inst_t i)
@@ -347,7 +347,7 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size)
     }
 }
 
-const isa_t alpha_isa = {
+const arch_t arch_alpha = {
     .zero_reg = 31,
     .setup = setup,
     .decode = decode,

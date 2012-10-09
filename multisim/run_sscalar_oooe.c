@@ -89,7 +89,7 @@ static unsigned alloc_reg(void)
 }
 
 static bool
-step_sscalar_oooe(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
+step_sscalar_oooe(const arch_t *arch, cpu_state_t *state, cpu_state_t *costate)
 {
     /*
      * Fetch instructions, but at most one control flow
@@ -97,10 +97,10 @@ step_sscalar_oooe(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
      */
 
     while (!stop_fetching && rs_size < WINDOW_SIZE) {
-        uint32_t i = isa->load(state, state->pc, 4);
+        uint32_t i = arch->load(state, state->pc, 4);
         reservation_station_t *rs =
             reservation_stations + (rs_size++ + rs_start) % WINDOW_SIZE;
-        rs->dec = isa->decode(state->pc, i);
+        rs->dec = arch->decode(state->pc, i);
         rs->valid = true;
         rs->issued = false;
         rs->number = fetch_number;
@@ -174,7 +174,7 @@ step_sscalar_oooe(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
 
         rs->issued  = true;
 
-        isa_result_t res = isa->inst_exec(rs->dec, op_a, op_b, 0);
+        isa_result_t res = arch->inst_exec(rs->dec, op_a, op_b, 0);
 
         if (res.fatal_error)
             return true;
@@ -185,11 +185,11 @@ step_sscalar_oooe(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
 
         case isa_inst_class_load:
             loadaddress = res.result;
-            res.result = isa->load(state, res.result, rs->dec.loadstore_size);
+            res.result = arch->load(state, res.result, rs->dec.loadstore_size);
             break;
 
         case isa_inst_class_store:
-            isa->store(state, res.result, res.store_value, rs->dec.loadstore_size);
+            arch->store(state, res.result, res.store_value, rs->dec.loadstore_size);
             break;
 
         case isa_inst_class_jump:
@@ -220,7 +220,7 @@ step_sscalar_oooe(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
         }
 
         printf("\t");
-        isa_disass(isa, rs->dec, res, loadaddress);
+        isa_disass(arch, rs->dec, res, loadaddress);
 
         ++issued;
         ++n_issue;
@@ -231,7 +231,7 @@ step_sscalar_oooe(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate)
         reservation_station_t *rs = &reservation_stations[rs_start];
         /* Co-simulate */
         assert(rs->dec.inst_addr == costate->pc);
-        step_simple(isa, costate, false);
+        step_simple(arch, costate, false);
         if (rs->dec.dest_reg != ISA_NO_REG &&
             rs->wbv != costate->r[rs->dec.dest_reg]) {
             printf("%08"PRIx64" got r%d <- %016"PRIx64", expected r%d <- %016"PRIx64"\n",
@@ -262,7 +262,7 @@ run_sscalar_oooe(int num_images, char *images[])
 {
     cpu_state_t *state = state_create();
     cpu_state_t *costate = state_create();
-    const isa_t *isa;
+    const arch_t *arch;
     elf_info_t info;
 
     int cycle;
@@ -272,11 +272,11 @@ run_sscalar_oooe(int num_images, char *images[])
         fatal("error: loading %s failed", images[r]);
     loadelfs(costate->mem, num_images, images, &info);
 
-    isa = get_isa(info.machine);
-    if (!isa)
+    arch = get_arch(info.machine);
+    if (!arch)
         fatal("error: unsupported architecture");
-    isa->setup(state, &info);
-    isa->setup(costate, &info);
+    arch->setup(state, &info);
+    arch->setup(costate, &info);
 
 
     /* Scoreboard and reservation station initialization */
@@ -297,7 +297,7 @@ run_sscalar_oooe(int num_images, char *images[])
 
     for (cycle = 0;; ++cycle) {
         printf("Cycle #%d (%d):\n", cycle, rs_size);
-        if (step_sscalar_oooe(isa, state, costate))
+        if (step_sscalar_oooe(arch, state, costate))
             break;
     }
 
