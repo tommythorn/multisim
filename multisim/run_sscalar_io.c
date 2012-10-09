@@ -63,7 +63,7 @@ step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate
      */
 
     while ((fetch_number + 1) % WINDOW_SIZE != issue_number % WINDOW_SIZE) {
-        uint32_t i = load32(state->mem, state->pc);
+        uint32_t i = isa->load(state, state->pc, 4);
 
         isa_decoded_t dec = isa->decode(state->pc, i);
 
@@ -133,11 +133,11 @@ step_sscalar_in_order(const isa_t *isa, cpu_state_t *state, cpu_state_t *costate
 
         case isa_inst_class_load:
             loadaddress = res.result;
-            res.result = load(state->mem, res.result, rs->dec.loadstore_size);
+            res.result = isa->load(state, res.result, rs->dec.loadstore_size);
             break;
 
         case isa_inst_class_store:
-            store(state->mem, res.result, res.store_value, rs->dec.loadstore_size);
+            isa->store(state, res.result, res.store_value, rs->dec.loadstore_size);
             break;
 
         case isa_inst_class_branch:

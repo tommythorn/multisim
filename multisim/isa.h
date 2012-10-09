@@ -148,8 +148,26 @@ typedef struct isa_st {
                               uint64_t msr_a);
 
     void (*disass_inst)(uint64_t pc, uint32_t inst, char *buf, size_t buf_size);
+
+    /*
+     * tick() advances the state of any devices that run
+     * asynchronously with the CPU.
+     */
     void (*tick)(cpu_state_t *state);
+
+    /*
+     * write_msr() is the MSR equivalent of the register
+     * writeback. However MSR writes (and reads?) can have side
+     * effects, thus the ISA function.
+     */
     void (*write_msr)(cpu_state_t *state, unsigned csr, uint32_t value);
+
+    /*
+     * Memory access - is responsible for dealing with any MMU, IO,
+     * etc mapping and semantic.
+     */
+    uint64_t (*load)(cpu_state_t *, uint64_t address, int mem_access_size);
+    void (*store)(cpu_state_t *, uint64_t address, uint64_t value, int mem_access_size);
 } isa_t;
 
 const isa_t *get_isa(uint16_t machine);

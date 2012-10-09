@@ -301,6 +301,52 @@ tick(cpu_state_t *state)
 {
 }
 
+static uint64_t
+load(cpu_state_t *s, uint64_t address, int mem_access_size)
+{
+    memory_t *m = s->mem;
+    void *p = memory_physical(m, (uint32_t)address, mem_access_size);
+
+    if (!p) {
+        fprintf(stderr, "SEGFAULT, load from unmapped memory %08"PRIx64"\n", address);
+    }
+
+    switch (mem_access_size) {
+    case -1: return *(int8_t *)p;
+    case  1: return *(uint8_t *)p;
+    case -2: return (int16_t)memory_endian_fix16(m, *(uint16_t *)p);
+    case  2: return memory_endian_fix16(m, *(uint16_t *)p);
+    case -4: return (int32_t)memory_endian_fix32(m, *(uint32_t *)p);
+    case  4: return memory_endian_fix32(m, *(uint32_t *)p);
+    case -8:
+    case  8: return memory_endian_fix64(m, *(uint64_t *)p);
+    default: assert(mem_access_size == mem_access_size + 1);
+    }
+
+    return 0;
+}
+
+static void
+store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size)
+{
+    memory_t *m = s->mem;
+    void *p = memory_physical(m, (uint32_t)address, mem_access_size);
+
+    if (!p) {
+        fprintf(stderr, "SEGFAULT, store to unmapped memory %08"PRIx64"\n", address);
+    }
+
+    switch (mem_access_size) {
+    case 1: *(uint8_t *)p = value; return;
+    case 2: *(uint16_t *)p = memory_endian_fix16(m, value); return;
+    case 4: *(uint32_t *)p = memory_endian_fix32(m, (uint32_t)value); return;
+    case 8: *(uint64_t *)p = memory_endian_fix64(m, (uint64_t)value); return;
+    default:
+        assert(mem_access_size > 0);
+        assert(mem_access_size == mem_access_size + 1);
+    }
+}
+
 const isa_t alpha_isa = {
     .zero_reg = 31,
     .setup = setup,
@@ -309,6 +355,8 @@ const isa_t alpha_isa = {
     .disass_inst = disass_inst,
     .tick = tick,
     .write_msr = 0, // XXX My alpha has no MSRs yet
+    .load = load,
+    .store = store,
 };
 
 // Local Variables:

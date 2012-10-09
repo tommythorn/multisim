@@ -37,7 +37,7 @@ step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
     uint64_t orig_r[32];
     uint64_t loadaddress = 0;
     uint64_t pc       = state->pc;
-    uint32_t inst     = load32(state->mem, pc);
+    uint32_t inst     = isa->load(state, pc, 4);
     isa_decoded_t dec = isa->decode(pc, inst);
 
     if (TRACING)
@@ -61,12 +61,12 @@ step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
     switch (dec.class) {
     case isa_inst_class_load:
         loadaddress = res.result;
-        res.result = load(state->mem, res.result, dec.loadstore_size);
+        res.result = isa->load(state, res.result, dec.loadstore_size);
         state->pc += 4;
         break;
 
     case isa_inst_class_store:
-        store(state->mem, res.result, res.store_value, dec.loadstore_size);
+        isa->store(state, res.result, res.store_value, dec.loadstore_size);
         state->pc += 4;
         break;
 
@@ -96,10 +96,11 @@ step_simple(const isa_t *isa, cpu_state_t *state, bool verbose)
     isa->tick(state);
 
     if (TRACING) {
-        printf("%d:0x%08"PRIx64"\n", cycle, dec.inst_addr);
+        fprintf(stderr,"%d:0x%08"PRIx64"\n", cycle, dec.inst_addr);
         if (dec.dest_reg != ISA_NO_REG && orig_r[dec.dest_reg] != res.result)
-            printf("%d:r%d=0x%08"PRIx64"\n", cycle, dec.dest_reg,
-                   res.result);
+            fprintf(stderr,"%d:r%d=0x%08"PRIx64"\n", cycle, dec.dest_reg,
+                    res.result);
+        fflush(stderr);
         ++cycle;
     } else if (verbose)
         isa_disass(isa, dec, res, loadaddress);

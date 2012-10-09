@@ -542,6 +542,48 @@ setup(cpu_state_t *state, elf_info_t *info)
     state->msr[CSR_DEBA] = ram_base; // Exception Based Address
 }
 
+static uint64_t
+load(cpu_state_t *s, uint64_t address, int mem_access_size)
+{
+    memory_t *m = s->mem;
+    void *p = memory_physical(m, (uint32_t)address, mem_access_size);
+
+    if (!p) {
+        fprintf(stderr, "SEGFAULT, load from unmapped memory %08"PRIx64"\n", address);
+    }
+
+    switch (mem_access_size) {
+    case -1: return (uint32_t) *(int8_t *)p;
+    case  1: return (uint32_t) *(uint8_t *)p;
+    case -2: return (uint32_t) (int16_t)memory_endian_fix16(m, *(uint16_t *)p);
+    case  2: return (uint32_t) memory_endian_fix16(m, *(uint16_t *)p);
+    case -4: return (uint32_t) (int32_t)memory_endian_fix32(m, *(uint32_t *)p);
+    case  4: return (uint32_t) memory_endian_fix32(m, *(uint32_t *)p);
+    default: assert(0);
+    }
+
+    return 0;
+}
+
+static void
+store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size)
+{
+    memory_t *m = s->mem;
+    void *p = memory_physical(m, (uint32_t)address, mem_access_size);
+
+    if (!p) {
+        fprintf(stderr, "SEGFAULT, store to unmapped memory %08"PRIx64"\n", address);
+    }
+
+    switch (mem_access_size) {
+    case 1: *(uint8_t *)p = value; return;
+    case 2: *(uint16_t *)p = memory_endian_fix16(m, value); return;
+    case 4: *(uint32_t *)p = memory_endian_fix32(m, (uint32_t)value); return;
+    default:
+        assert(0);
+    }
+}
+
 const isa_t lm32_isa = {
     .zero_reg = 0,
     .setup = setup,
@@ -550,6 +592,8 @@ const isa_t lm32_isa = {
     .disass_inst = disass_inst,
     .tick = tick,
     .write_msr = write_msr,
+    .load = load,
+    .store = store,
 };
 
 // Local Variables:
