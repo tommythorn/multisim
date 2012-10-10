@@ -28,10 +28,8 @@
 #include "run_simple.h"
 #include "loadelf.h"
 
-#define TRACING 1
-
 bool
-step_simple(const arch_t *arch, cpu_state_t *state, bool verbose)
+step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
 {
     static int cycle = 0;
     uint64_t orig_r[32];
@@ -40,7 +38,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, bool verbose)
     uint32_t inst     = arch->load(state, pc, 4);
     isa_decoded_t dec = arch->decode(pc, inst);
 
-    if (TRACING)
+    if (verbosity & VERBOSE_TRACE)
         memcpy(orig_r, state->r, sizeof orig_r);
 
     assert(dec.source_reg_a < ISA_NO_REG);
@@ -95,42 +93,39 @@ step_simple(const arch_t *arch, cpu_state_t *state, bool verbose)
 
     arch->tick(state);
 
-    if (TRACING) {
+    if (verbosity & VERBOSE_TRACE) {
         fprintf(stderr,"%d:0x%08"PRIx64"\n", cycle, dec.inst_addr);
         if (dec.dest_reg != ISA_NO_REG && orig_r[dec.dest_reg] != res.result)
             fprintf(stderr,"%d:r%d=0x%08"PRIx64"\n", cycle, dec.dest_reg,
                     res.result);
         fflush(stderr);
         ++cycle;
-    } else if (verbose)
+    }
+
+    if (verbosity & VERBOSE_DISASS)
         isa_disass(arch, dec, res, loadaddress);
 
     return false;
 }
 
-void run_simple(int num_images, char *images[])
+void run_simple(int num_images, char *images[], verbosity_t verbosity)
 {
     cpu_state_t *state = state_create();
     const arch_t *arch;
     elf_info_t info;
+    int cycle;
 
-    int r = loadelfs(state->mem, num_images, images, &info);
-    if (r != num_images)
-        fatal("error: loading %s failed", images[r]);
-
+    loadelfs(state->mem, num_images, images, &info);
     arch = get_arch(info.machine);
-    if (!arch)
-        fatal("error: unsupported architecture");
     arch->setup(state, &info);
 
-    int cycle;
     for (cycle = 0;; ++cycle) {
-        //printf("%5d ", cycle);
-        if (step_simple(arch, state, true))
+        if (step_simple(arch, state, verbosity))
             break;
     }
 
-    printf("IPC = %.2f\n", (double) state->n_issue / cycle);
+    if (verbosity && (verbosity & VERBOSE_DISASS) == 0)
+        printf("IPC = %.2f\n", (double) state->n_issue / cycle);
 
     state_destroy(state);
 }

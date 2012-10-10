@@ -79,18 +79,27 @@ int main(int argc, char **argv)
 {
     char **images;
     int num_images;
+    verbosity_t verbosity = 0;
 
     for (;;) {
         int c;
         int option_index = 0;
 
-        c = getopt_long(argc, argv, "tf:i:o:123",
+        c = getopt_long(argc, argv, "tdf:i:o:123",
                         long_options, &option_index);
         if (c == -1)
             break;
 
         switch (c) {
         case 0:
+            break;
+
+        case 'd':
+            verbosity |= VERBOSE_DISASS;
+            break;
+
+        case 't':
+            verbosity |= VERBOSE_TRACE;
             break;
 
         case '?':
@@ -116,15 +125,15 @@ int main(int argc, char **argv)
 
     switch (run) {
     case '1':
-        run_simple(num_images, images);
+        run_simple(num_images, images, verbosity);
         break;
 
     case '2':
-        run_sscalar_io(num_images, images);
+        run_sscalar_io(num_images, images, verbosity);
         break;
 
     case '3':
-        run_sscalar_oooe(num_images, images);
+        run_sscalar_oooe(num_images, images, verbosity);
         break;
 
     default:

@@ -19,6 +19,7 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include "arch.h"
 
 void
@@ -63,9 +64,12 @@ get_arch(uint16_t machine)
 {
     if (machine == EM_ALPHA)
         return &arch_alpha;
-    if (machine == EM_LM32)
+    if (machine == EM_LM32 || machine == EM_LM32_ALT)
         return &arch_lm32;
-    return NULL;
+
+    fprintf(stderr, "error: unsupported architecture %d", machine);
+
+    exit(1);
 }
 
 // Local Variables:

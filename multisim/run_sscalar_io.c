@@ -50,7 +50,9 @@ reservation_station_t reservation_stations[WINDOW_SIZE];
 bool scoreboard[ISA_REGISTERS];
 
 bool
-step_sscalar_in_order(const arch_t *arch, cpu_state_t *state, cpu_state_t *costate)
+step_sscalar_in_order(
+    const arch_t *arch, cpu_state_t *state, cpu_state_t *costate,
+    verbosity_t verbosity)
 {
     uint64_t *r = state->r;
     int n_load = 0;
@@ -77,8 +79,11 @@ step_sscalar_in_order(const arch_t *arch, cpu_state_t *state, cpu_state_t *costa
          * if they can alias).
          */
         if (1 < n_store || 0 < n_store && 0 < n_load) {
-            printf("Notice: bailing issue before we got %d loads and %d stores simultaneously\n",
-                   n_load, n_store);
+            if (verbosity)
+                printf(
+                    "Notice: bailing issue before we got "
+                    "%d loads and %d stores simultaneously\n",
+                    n_load, n_store);
             break;
         }
 
@@ -163,14 +168,14 @@ step_sscalar_in_order(const arch_t *arch, cpu_state_t *state, cpu_state_t *costa
 
         /* Co-simulate */
         assert(rs->dec.inst_addr == costate->pc);
-        step_simple(arch, costate, false);
+        step_simple(arch, costate, 0);
         assert(state->r[rs->dec.dest_reg] == costate->r[rs->dec.dest_reg]);
     }
 
     return false;
 }
 
-void run_sscalar_io(int num_images, char *images[])
+void run_sscalar_io(int num_images, char *images[], verbosity_t verbosity)
 {
     cpu_state_t *state = state_create();
     cpu_state_t *costate = state_create();
@@ -179,25 +184,23 @@ void run_sscalar_io(int num_images, char *images[])
 
     memset(scoreboard, 1, sizeof scoreboard);
 
-    int r = loadelfs(state->mem, num_images, images, &info);
-    if (r != num_images)
-        fatal("error: loading %s failed", images[r]);
+    loadelfs(state->mem, num_images, images, &info);
     loadelfs(costate->mem, num_images, images, &info);
 
     arch = get_arch(info.machine);
-    if (!arch)
-        fatal("error: unsupported architecture");
     arch->setup(state, &info);
     arch->setup(costate, &info);
 
     int cycle;
     for (cycle = 0;; ++cycle) {
-        printf("Cycle #%d:\n", cycle);
-        if (step_sscalar_in_order(arch, state, costate))
+        if (verbosity && (verbosity & VERBOSE_TRACE) == 0)
+            printf("Cycle #%d:\n", cycle);
+        if (step_sscalar_in_order(arch, state, costate, verbosity))
             break;
     }
 
-    printf("IPC = %.2f\n", (double) state->n_issue / cycle);
+    if (verbosity)
+        printf("IPC = %.2f\n", (double) state->n_issue / cycle);
 
     state_destroy(state);
     state_destroy(costate);

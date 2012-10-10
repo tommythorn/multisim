@@ -23,8 +23,8 @@
 
 #include "arch.h"
 
-bool step_simple(const arch_t *arch, cpu_state_t *state, bool verbose);
-void run_simple(int, char **);
+bool step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity);
+void run_simple(int, char **, verbosity_t);
 
 #endif
 

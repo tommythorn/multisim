@@ -34,6 +34,7 @@
 #endif
 /* Nobody have this */
 #define EM_LM32         0x0666 /* Lattice Mico32 */
+#define EM_LM32_ALT        138 /* Lattice Mico32 */
 
 #define MAX_ELF_SECTIONS 32
 
@@ -53,7 +54,7 @@ typedef struct elf_info_st {
 int loadelf(memory_t *m, char *name, elf_info_t *program_entry);
 
 /* loadelfs returns how many successfully loaded */
-int loadelfs(memory_t *m, int n, char *name[], elf_info_t *last_info);
+void loadelfs(memory_t *m, int n, char *name[], elf_info_t *last_info);
 #endif
 
 // Local Variables:

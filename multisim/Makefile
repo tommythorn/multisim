@@ -24,13 +24,18 @@ FLAGS=
 OBJS=main.o arch.o \
 	run_simple.o run_sscalar_io.o run_sscalar_oooe.o \
 	memory.o loadelf.o alpha.o lm32.o
+#VERB=-t
+VERB=-d
 
-test_lm32: multisim
-	./multisim ../workloads/vmlinux.lm32
+boot_linux: multisim
+	./multisim $(VERB) ../workloads/vmlinux.lm32
 
 
-test_sieve: multisim
-	./multisim ../workloads/sieve.alpha
+sieve_lm32: multisim
+	./multisim $(VERB) ../workloads/sieve.lm32
+
+sieve_alpha: multisim
+	./multisim $(VERB) ../workloads/sieve.alpha
 
 install: multisim
 	cp multisim $(PREFIX)/bin

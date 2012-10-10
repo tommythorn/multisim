@@ -45,13 +45,18 @@ struct cpu_state_st {
     uint64_t        n_issue;
 };
 
-#define fatal(msg...) ({printf(msg); exit(1);})
-#define warn(msg...)  printf(msg)
+typedef enum verbosity_e {
+    VERBOSE_DISASS = 1 << 0,
+    VERBOSE_TRACE  = 1 << 1,
+} verbosity_t;
+
+#define fatal(msg...) ({fprintf(stderr, msg); exit(1);})
+#define warn(msg...)  fprintf(stderr, msg)
 
 void exception(char *kind);
-void run_simple(int, char **);
-void run_sscalar_io(int, char **);
-void run_sscalar_oooe(int, char **);
+void run_simple(int, char **, verbosity_t);
+void run_sscalar_io(int, char **, verbosity_t);
+void run_sscalar_oooe(int, char **, verbosity_t);
 
 static inline cpu_state_t *
 state_create(void)

@@ -48,7 +48,8 @@ int SZ(loadelf,)(memory_t *m, char *name, FILE *f, elf_info_t *elf_info)
     elf_info->machine = NATIVE(ehdr.e_machine);
 
     if (elf_info->machine != EM_ALPHA &&
-        elf_info->machine != EM_LM32) {
+        elf_info->machine != EM_LM32 &&
+        elf_info->machine != EM_LM32_ALT) {
         fprintf(stderr, "%s: Unsupported machine architecture %d\n",
                 name, NATIVE(ehdr.e_machine));
         return 13;

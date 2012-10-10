@@ -116,19 +116,17 @@ int loadelf(memory_t *m, char *name, elf_info_t *elf_info)
 
     fprintf(stderr, "%s: Not an ELF file? (EI_CLASS = %d)\n", name,
             ehdr.e_ident[EI_CLASS]);
+
     return 4;
 }
 
-int loadelfs(memory_t *m, int n, char *name[], elf_info_t *last_info)
+void loadelfs(memory_t *m, int n, char *name[], elf_info_t *last_info)
 {
-    int i;
-    for (i = 0; i < n; ++i) {
-        int r = loadelf(m, name[i], last_info);
-        if (r)
-            break;
-    }
-
-    return i;
+    for (int i = 0; i < n; ++i)
+        if (loadelf(m, name[i], last_info)) {
+            fprintf(stderr, "error: loading %s failed", name[i]);
+            exit(1);
+        }
 }
 
 // Local Variables:

@@ -258,7 +258,7 @@ step_sscalar_oooe(const arch_t *arch, cpu_state_t *state, cpu_state_t *costate)
 }
 
 void
-run_sscalar_oooe(int num_images, char *images[])
+run_sscalar_oooe(int num_images, char *images[], verbosity_t verbosity)
 {
     cpu_state_t *state = state_create();
     cpu_state_t *costate = state_create();
@@ -267,14 +267,10 @@ run_sscalar_oooe(int num_images, char *images[])
 
     int cycle;
 
-    int r = loadelfs(state->mem, num_images, images, &info);
-    if (r != num_images)
-        fatal("error: loading %s failed", images[r]);
+    loadelfs(state->mem, num_images, images, &info);
     loadelfs(costate->mem, num_images, images, &info);
 
     arch = get_arch(info.machine);
-    if (!arch)
-        fatal("error: unsupported architecture");
     arch->setup(state, &info);
     arch->setup(costate, &info);
 
@@ -296,7 +292,8 @@ run_sscalar_oooe(int num_images, char *images[])
 
 
     for (cycle = 0;; ++cycle) {
-        printf("Cycle #%d (%d):\n", cycle, rs_size);
+        if (verbosity && (verbosity & VERBOSE_TRACE) == 0)
+            printf("Cycle #%d (%d):\n", cycle, rs_size);
         if (step_sscalar_oooe(arch, state, costate))
             break;
     }
