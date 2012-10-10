@@ -43,9 +43,6 @@ typedef struct {
     unsigned pr_b;
     unsigned pr_wb;
 
-    uint64_t op_a;
-    uint64_t op_b;
-
     uint64_t wbv;
 } reservation_station_t;
 
@@ -84,13 +81,19 @@ static unsigned alloc_reg(void)
 
     unsigned pr = prf_free[prf_free_rp];
     prf_free_rp = (prf_free_rp + 1) % PHYSICAL_REGS;
+    scoreboard[pr] = false;
 
     return pr;
 }
 
 static bool
-step_sscalar_oooe(const arch_t *arch, cpu_state_t *state, cpu_state_t *costate)
+step_sscalar_oooe(
+    const arch_t *arch, cpu_state_t *state, cpu_state_t *costate,
+    verbosity_t verbosity)
 {
+    int n_load = 0;
+    int n_store = 0;
+
     /*
      * Fetch instructions, but at most one control flow
      * instruction.
@@ -100,7 +103,30 @@ step_sscalar_oooe(const arch_t *arch, cpu_state_t *state, cpu_state_t *costate)
         uint32_t i = arch->load(state, state->pc, 4);
         reservation_station_t *rs =
             reservation_stations + (rs_size++ + rs_start) % WINDOW_SIZE;
-        rs->dec = arch->decode(state->pc, i);
+        isa_decoded_t dec = arch->decode(state->pc, i);
+
+        n_load += dec.class == isa_inst_class_load;
+        n_store += dec.class == isa_inst_class_store;
+
+        /*
+         * Only fetch instructions that can safely be reordered.  It's
+         * safe to reorder arbitrary (non-IO) loads in the absence of
+         * stores, but two stores can't be reordered (without knowning
+         * if they can alias).
+         */
+
+        // XXX debug out why this break cosimulation
+        if (0)
+        if (1 < n_store || 0 < n_store && 0 < n_load) {
+            if (verbosity)
+                printf(
+                    "Notice: bailing issue before we got "
+                    "%d loads and %d stores simultaneously\n",
+                    n_load, n_store);
+            break;
+        }
+
+        rs->dec = dec;
         rs->valid = true;
         rs->issued = false;
         rs->number = fetch_number;
@@ -124,6 +150,7 @@ step_sscalar_oooe(const arch_t *arch, cpu_state_t *state, cpu_state_t *costate)
                 printf("stop fetching past %08"PRIx64"\n", state->pc);
 
             stop_fetching = true;
+            break;
         }
 
         state->pc += 4;
@@ -202,7 +229,7 @@ step_sscalar_oooe(const arch_t *arch, cpu_state_t *state, cpu_state_t *costate)
             break;
 
         case isa_inst_class_compjump:
-            state->pc = rs->op_a;
+            state->pc = op_a;
             break;
         }
 
@@ -294,7 +321,7 @@ run_sscalar_oooe(int num_images, char *images[], verbosity_t verbosity)
     for (cycle = 0;; ++cycle) {
         if (verbosity && (verbosity & VERBOSE_TRACE) == 0)
             printf("Cycle #%d (%d):\n", cycle, rs_size);
-        if (step_sscalar_oooe(arch, state, costate))
+        if (step_sscalar_oooe(arch, state, costate, verbosity))
             break;
     }
 
