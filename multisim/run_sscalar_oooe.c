@@ -30,7 +30,7 @@
 
 #define DEBUG_SB 0
 
-/* Reservation station - a window over instructions are in program order
+/* Reservation station - a window over instructions in program order
  * Life of an entry: invalid -> valid & not issued -> valid & issued -> invalid
  */
 typedef struct {
@@ -100,7 +100,7 @@ step_sscalar_oooe(
      */
 
     while (!stop_fetching && rs_size < WINDOW_SIZE) {
-        uint32_t i = arch->load(state, state->pc, 4);
+        uint32_t i = (uint32_t)arch->load(state, state->pc, 4);
         reservation_station_t *rs =
             reservation_stations + (rs_size++ + rs_start) % WINDOW_SIZE;
         isa_decoded_t dec = arch->decode(state->pc, i);

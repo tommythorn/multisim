@@ -35,7 +35,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     uint64_t orig_r[32];
     uint64_t loadaddress = 0;
     uint64_t pc       = state->pc;
-    uint32_t inst     = arch->load(state, pc, 4);
+    uint32_t inst     = (uint32_t)arch->load(state, pc, 4);
     isa_decoded_t dec = arch->decode(pc, inst);
 
     if (verbosity & VERBOSE_TRACE)

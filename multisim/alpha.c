@@ -309,6 +309,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size)
 
     if (!p) {
         fprintf(stderr, "SEGFAULT, load from unmapped memory %08"PRIx64"\n", address);
+        return 0;
     }
 
     switch (mem_access_size) {

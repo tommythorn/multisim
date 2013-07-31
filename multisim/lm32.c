@@ -456,7 +456,7 @@ inst_exec(isa_decoded_t dec, uint64_t op_Y, uint64_t op_ZX, uint64_t msr_a)
     case SRI:     case SR:      res.result = sy >> (sz_imm & 31); break;
     case SLI:     case SL:      res.result = sy << (sz_imm & 31); break;
 
-    case RCSR:                  res.result = rcsr(dec.source_msr_a, msr_a); break;
+    case RCSR:                  res.result = rcsr(dec.source_msr_a, (uint32_t)msr_a); break;
     case WCSR:                  res.msr_result = wcsr(dec.dest_msr, sz_imm); break;
     case RES1:                  assert(0);
     case RES2:                  assert(0);
@@ -550,6 +550,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size)
 
     if (!p) {
         fprintf(stderr, "SEGFAULT, load from unmapped memory %08"PRIx64"\n", address);
+        return 0;
     }
 
     switch (mem_access_size) {
@@ -573,6 +574,7 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size)
 
     if (!p) {
         fprintf(stderr, "SEGFAULT, store to unmapped memory %08"PRIx64"\n", address);
+        return;
     }
 
     switch (mem_access_size) {
