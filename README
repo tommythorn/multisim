@@ -1,6 +1,6 @@
 -*- text -*-
 
-Copyright (c) 2012 Tommy Thorn
+Copyright (c) 2013 Tommy Thorn
 
 
 MultiSim
@@ -33,6 +33,8 @@ everything is 64-bit everywhere, except simulated memory which only
 allow a 32-bit address space.  The latter limitation may be fixed
 eventually.
 
+
+Needs libelf to compile
 
 MultiSim is actually not intended for public consumption, but is
 distributed under the GPL v2.
