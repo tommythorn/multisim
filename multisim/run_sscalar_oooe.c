@@ -226,6 +226,8 @@ step_sscalar_oooe(
         case isa_inst_class_branch:
             if (res.branch_taken)
                 state->pc = rs->dec.jumpbranch_target;
+            else
+                state->pc += 4;
             break;
 
         case isa_inst_class_compjump:
