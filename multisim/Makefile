@@ -1,5 +1,5 @@
 # Multisim: a microprocessor architecture exploration framework
-# Copyright (C) 2012 Tommy Thorn
+# Copyright (C) 2014 Tommy Thorn
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -23,9 +23,11 @@ LDFLAGS=-g
 FLAGS=
 OBJS=main.o arch.o \
 	run_simple.o run_sscalar_io.o run_sscalar_oooe.o \
-	memory.o loadelf.o alpha.o lm32.o
+	memory.o loadelf.o alpha.o lm32.o riscv.o
 #VERB=-t
 VERB=-d
+
+all: multisim
 
 boot_linux: multisim
 	./multisim $(VERB) ../workloads/vmlinux.lm32
@@ -36,6 +38,9 @@ sieve_lm32: multisim
 
 sieve_alpha: multisim
 	./multisim $(VERB) ../workloads/sieve.alpha
+
+sieve_riscv: multisim
+	./multisim $(VERB) ../workloads/sieve.riscv
 
 install: multisim
 	cp multisim $(PREFIX)/bin

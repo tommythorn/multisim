@@ -1,6 +1,6 @@
 /*
  * Multisim: a microprocessor architecture exploration framework
- * Copyright (C) 2012 Tommy Thorn
+ * Copyright (C) 2014 Tommy Thorn
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -48,6 +48,7 @@ int SZ(loadelf,)(memory_t *m, char *name, FILE *f, elf_info_t *elf_info)
     elf_info->machine = NATIVE(ehdr.e_machine);
 
     if (elf_info->machine != EM_ALPHA &&
+        elf_info->machine != EM_RISCV &&
         elf_info->machine != EM_LM32 &&
         elf_info->machine != EM_LM32_ALT) {
         fprintf(stderr, "%s: Unsupported machine architecture %d\n",

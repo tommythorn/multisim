@@ -1,6 +1,6 @@
 /*
  * Multisim: a microprocessor architecture exploration framework
- * Copyright (C) 2012 Tommy Thorn
+ * Copyright (C) 2014 Tommy Thorn
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -32,7 +32,6 @@
 #include <signal.h>
 #include <getopt.h>
 #include <ctype.h>
-#include "alpha.h"
 #include "sim.h"
 
 static int run = '1';

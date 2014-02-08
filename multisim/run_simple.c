@@ -36,6 +36,10 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     uint64_t loadaddress = 0;
     uint64_t pc       = state->pc;
     uint32_t inst     = (uint32_t)arch->load(state, pc, 4);
+
+    if (state->fatal_error)
+        return true;
+
     isa_decoded_t dec = arch->decode(pc, inst);
 
     if (verbosity & VERBOSE_TRACE)
@@ -60,11 +64,21 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     case isa_inst_class_load:
         loadaddress = res.result;
         res.result = arch->load(state, res.result, dec.loadstore_size);
+        if (!arch->is_64bit)
+            res.result = (int32_t) res.result;
+
+        if (state->fatal_error)
+            return true;
+
         state->pc += 4;
         break;
 
     case isa_inst_class_store:
         arch->store(state, res.result, res.store_value, dec.loadstore_size);
+
+        if (state->fatal_error)
+            return true;
+
         state->pc += 4;
         break;
 
@@ -77,11 +91,13 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
         break;
 
     case isa_inst_class_compjump:
-        state->pc = op_a;
+        state->pc = res.compjump_target;
         break;
 
     default:
         state->pc += 4;
+        if (!arch->is_64bit)
+            state->pc = (int32_t) state->pc;
         break;
     }
 

@@ -309,6 +309,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size)
 
     if (!p) {
         fprintf(stderr, "SEGFAULT, load from unmapped memory %08"PRIx64"\n", address);
+        s->fatal_error = true;
         return 0;
     }
 
@@ -335,6 +336,8 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size)
 
     if (!p) {
         fprintf(stderr, "SEGFAULT, store to unmapped memory %08"PRIx64"\n", address);
+        s->fatal_error = true;
+        return;
     }
 
     switch (mem_access_size) {
@@ -350,6 +353,7 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size)
 
 const arch_t arch_alpha = {
     .zero_reg = 31,
+    .is_64bit = true,
     .setup = setup,
     .decode = decode,
     .inst_exec = inst_exec,

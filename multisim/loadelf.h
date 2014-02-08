@@ -35,6 +35,7 @@
 /* Nobody have this */
 #define EM_LM32         0x0666 /* Lattice Mico32 */
 #define EM_LM32_ALT        138 /* Lattice Mico32 */
+#define EM_RISCV          0xF3 /* 32-bit little endian RISC-V */
 
 #define MAX_ELF_SECTIONS 32
 

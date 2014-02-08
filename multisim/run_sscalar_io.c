@@ -67,6 +67,10 @@ step_sscalar_in_order(
     while ((fetch_number + 1) % WINDOW_SIZE != issue_number % WINDOW_SIZE) {
         uint32_t i = arch->load(state, state->pc, 4);
 
+        if (state->fatal_error)
+            // XXX We should be able to poison the instruction instead
+            return true;
+
         isa_decoded_t dec = arch->decode(state->pc, i);
 
         n_load += dec.class == isa_inst_class_load;
@@ -139,10 +143,20 @@ step_sscalar_in_order(
         case isa_inst_class_load:
             loadaddress = res.result;
             res.result = arch->load(state, res.result, rs->dec.loadstore_size);
+
+            if (state->fatal_error)
+                // XXX We should be able to poison the instruction instead
+                return true;
+
             break;
 
         case isa_inst_class_store:
             arch->store(state, res.result, res.store_value, rs->dec.loadstore_size);
+
+            if (state->fatal_error)
+                // XXX We should be able to poison the instruction instead
+                return true;
+
             break;
 
         case isa_inst_class_branch:

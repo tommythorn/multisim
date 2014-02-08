@@ -102,7 +102,6 @@ typedef struct isa_decoded_st {
     union {
         int                 loadstore_size;
         uint64_t            jumpbranch_target;
-        int                 compjump_reg;
     };
 } isa_decoded_t;
 
@@ -121,6 +120,7 @@ typedef struct isa_result_st {
          */
         uint64_t    store_value;
         bool        branch_taken;
+        uint64_t    compjump_target;
     };
 
     uint64_t    msr_result;
@@ -140,6 +140,9 @@ typedef struct isa_st {
      * ISA_NO_REG.
      */
     const isa_reg_t zero_reg;
+
+    const bool is_64bit;
+
     void (*setup)(cpu_state_t *, elf_info_t *);
 
     isa_decoded_t (*decode)(uint64_t inst_addr, uint32_t inst);

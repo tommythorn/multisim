@@ -1,0 +1,3 @@
+riscv-gcc -std=c99 -m32 -O2 sieve.c -c -o sieve.riscv.o
+riscv-ld -melf32lriscv -Tdata=0x20000000 -o sieve.riscv sieve.riscv.o
+riscv-objdump -d sieve.riscv > sieve.riscv.dis

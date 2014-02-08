@@ -1,6 +1,6 @@
 /*
  * Multisim: a microprocessor architecture exploration framework
- * Copyright (C) 2012 Tommy Thorn
+ * Copyright (C) 2014 Tommy Thorn
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,15 +18,6 @@
  * Boston, MA 02111-1307, USA.
  */
 
-/*
- * loadelf.c - binary image loader. Assumes only memory.h
- *
- * Copyright (C) 2004-2012 Tommy Thorn - All Rights Reserved
- *
- * This is propri
-
- */
-
 #include "loadelf.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,7 +28,7 @@
 #include <alloca.h>
 
 static const bool enable_verb_prog_sec = false;
-static const bool enable_verb_elf = false;
+static const bool enable_verb_elf      = false;
 
 static void
 loadsection(FILE *f, unsigned f_offset, unsigned f_len,

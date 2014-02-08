@@ -465,7 +465,9 @@ inst_exec(isa_decoded_t dec, uint64_t op_Y, uint64_t op_ZX, uint64_t msr_a)
     case SEXTB:                 res.result = (int8_t) sy; break;
     case SEXTH:                 res.result = (int16_t) sy; break;
 
-    case CALL: case B:          res.result = dec.inst_addr + 4; break;
+    case CALL: case B:          res.result = dec.inst_addr + 4;
+                                res.compjump_target = sy;
+                                break;
     case CALLI: case BI:        res.result = dec.inst_addr + 4; break;
 
     case BE:                    res.branch_taken = sy == szx; break;
@@ -550,6 +552,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size)
 
     if (!p) {
         fprintf(stderr, "SEGFAULT, load from unmapped memory %08"PRIx64"\n", address);
+        s->fatal_error = true;
         return 0;
     }
 
@@ -574,6 +577,7 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size)
 
     if (!p) {
         fprintf(stderr, "SEGFAULT, store to unmapped memory %08"PRIx64"\n", address);
+        s->fatal_error = true;
         return;
     }
 
@@ -588,6 +592,7 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size)
 
 const arch_t arch_lm32 = {
     .zero_reg = 0,
+    .is_64bit = false,
     .setup = setup,
     .decode = decode,
     .inst_exec = inst_exec,

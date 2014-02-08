@@ -43,6 +43,8 @@ struct cpu_state_st {
 
     /* Statistics */
     uint64_t        n_issue;
+
+    bool            fatal_error;
 };
 
 typedef enum verbosity_e {

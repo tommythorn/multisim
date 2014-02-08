@@ -1,6 +1,6 @@
 /*
  * Multisim: a microprocessor architecture exploration framework
- * Copyright (C) 2012 Tommy Thorn
+ * Copyright (C) 2014 Tommy Thorn
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -26,6 +26,7 @@ void
 isa_disass(const arch_t *arch, isa_decoded_t dec, isa_result_t res, uint64_t loadaddress)
 {
     char dis_buf[99];
+    uint64_t mask = arch->is_64bit ? ~0ULL : ~0U;
 
     printf("%08"PRIx64" ", dec.inst_addr);
 
@@ -48,16 +49,16 @@ isa_disass(const arch_t *arch, isa_decoded_t dec, isa_result_t res, uint64_t loa
             printf("%s", dis_buf);
 
         if (dec.dest_reg != ISA_NO_REG)
-            printf(" r%d <- 0x%08"PRIx64"", dec.dest_reg, res.result);
+            printf(" r%d <- 0x%08"PRIx64"", dec.dest_reg, mask & res.result);
 
         if (dec.dest_msr != ISA_NO_REG)
-            printf(" MSR%d <- 0x%08"PRIx64"", dec.dest_msr, res.msr_result);
+            printf(" MSR%d <- 0x%08"PRIx64"", dec.dest_msr, mask & res.msr_result);
 
         printf("\n");
     }
 }
 
-extern const arch_t arch_alpha, arch_lm32;
+extern const arch_t arch_alpha, arch_lm32, arch_riscv;
 
 const arch_t *
 get_arch(uint16_t machine)
@@ -66,6 +67,8 @@ get_arch(uint16_t machine)
         return &arch_alpha;
     if (machine == EM_LM32 || machine == EM_LM32_ALT)
         return &arch_lm32;
+    if (machine == EM_RISCV)
+        return &arch_riscv;
 
     fprintf(stderr, "error: unsupported architecture %d", machine);
 

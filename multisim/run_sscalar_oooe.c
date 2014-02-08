@@ -101,6 +101,11 @@ step_sscalar_oooe(
 
     while (!stop_fetching && rs_size < WINDOW_SIZE) {
         uint32_t i = (uint32_t)arch->load(state, state->pc, 4);
+
+        if (state->fatal_error)
+            // XXX We should be able to poison the instruction instead
+            return true;
+
         reservation_station_t *rs =
             reservation_stations + (rs_size++ + rs_start) % WINDOW_SIZE;
         isa_decoded_t dec = arch->decode(state->pc, i);
@@ -213,10 +218,20 @@ step_sscalar_oooe(
         case isa_inst_class_load:
             loadaddress = res.result;
             res.result = arch->load(state, res.result, rs->dec.loadstore_size);
+
+            if (state->fatal_error)
+                // XXX We should be able to poison the instruction instead
+                return true;
+
             break;
 
         case isa_inst_class_store:
             arch->store(state, res.result, res.store_value, rs->dec.loadstore_size);
+
+            if (state->fatal_error)
+                // XXX We should be able to poison the instruction instead
+                return true;
+
             break;
 
         case isa_inst_class_jump:
@@ -260,7 +275,10 @@ step_sscalar_oooe(
         reservation_station_t *rs = &reservation_stations[rs_start];
         /* Co-simulate */
         assert(rs->dec.inst_addr == costate->pc);
-        step_simple(arch, costate, false);
+
+        if (step_simple(arch, costate, false))
+            break;
+
         if (rs->dec.dest_reg != ISA_NO_REG &&
             rs->wbv != costate->r[rs->dec.dest_reg]) {
             printf("%08"PRIx64" got r%d <- %016"PRIx64", expected r%d <- %016"PRIx64"\n",
