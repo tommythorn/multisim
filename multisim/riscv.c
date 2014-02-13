@@ -46,7 +46,7 @@ const char *opcode_name[32] = {
 };
 
 const char *opcode_imm_name[8] = {
-    "add", "sll", "slt", "sltu", "xori", "sr_i", "ori", "andi",
+    "addi", "slli", "slti", "sltiu", "xori", "sr_i", "ori", "andi",
 };
 
 const char *opcode_load_op_name[8] = {
@@ -361,7 +361,7 @@ inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b, uint64_t msr_a)
         return res;
 
     case AUIPC:
-        res.result = (dec.inst_addr + 4 + (i.u.imm31_12 << 12)) & ~0U << 12;
+        res.result = dec.inst_addr + (i.u.imm31_12 << 12);
         res.result = (int32_t) res.result;
         return res;
 
