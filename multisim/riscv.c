@@ -162,7 +162,7 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
     }
 
   case SYSTEM:
-      switch (i.s.imm11_5) {
+      switch (i.r.funct7) {
       case 0:
           switch (i.s.rs2) {
           case 0:
@@ -271,7 +271,7 @@ decode(uint64_t inst_addr, uint32_t inst)
     }
 
   case SYSTEM:
-      switch (i.s.imm11_5) {
+      switch (i.r.funct7) {
       case 0:
           switch (i.s.rs2) {
           case 0:
