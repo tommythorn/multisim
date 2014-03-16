@@ -357,12 +357,10 @@ inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b, uint64_t msr_a)
         default:
             assert(0);
         }
-        res.result = (int32_t) res.result;
         return res;
 
     case AUIPC:
         res.result = dec.inst_addr + (i.u.imm31_12 << 12);
-        res.result = (int32_t) res.result;
         return res;
 
     case STORE:

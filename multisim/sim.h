@@ -76,6 +76,10 @@ state_destroy(cpu_state_t *state)
     free(state);
 }
 
+/* Enforce that 32-bit architectures keep the register file in a
+   canonical form, that is int32_t sign extended to int64_t/uint64_t */
+#define CANONICALIZE(v) (arch->is_64bit ? (v) : (int32_t)  (v))
+
 #endif
 
 // Local Variables:

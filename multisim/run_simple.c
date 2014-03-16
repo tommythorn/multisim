@@ -56,6 +56,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     uint64_t msr_a    = dec.source_msr_a != ISA_NO_REG
         ? state->r[dec.source_msr_a] : 0;
     isa_result_t res  = arch->inst_exec(dec, op_a, op_b, msr_a);
+    res.result = CANONICALIZE(res.result);
 
     if (res.fatal_error)
         return true;
@@ -64,8 +65,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     case isa_inst_class_load:
         loadaddress = res.result;
         res.result = arch->load(state, res.result, dec.loadstore_size);
-        if (!arch->is_64bit)
-            res.result = (int32_t) res.result;
+        res.result = CANONICALIZE(res.result);
 
         if (state->fatal_error)
             return true;
@@ -96,8 +96,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
 
     default:
         state->pc += 4;
-        if (!arch->is_64bit)
-            state->pc = (int32_t) state->pc;
+        state->pc = CANONICALIZE(state->pc);
         break;
     }
 
