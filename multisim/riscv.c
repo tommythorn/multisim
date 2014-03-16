@@ -19,16 +19,21 @@
  */
 
 /*
- * TODO:
+ * Goal is RV32G (== RV32I2M2A2F2D2, but really RV32IMAFD)
+ * thought RV64G would get me closer to Linux
  *
- * Implement *ALL* of RV32I:
+ * Status:
+ *
+ * I - Implemented all,
  *   SYSTEM (SCALL, SBREAK, RDCYCLE, RDTIME, RDINSTRET)
- *   FENCE[.I],
+ *   (Well, the behaviour of SCALL and SBREAK aren't specificed).
  *
- * possibly RV32IM
+ * M - Fix the implementation of
  *   MUL, MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU
  *
- * eventually RV32G...
+ * A - Atomics, not sure how they would fit in the framework
+ *
+ * FD - Floating point, Just Do It!
  */
 
 #include <stdio.h>
@@ -39,6 +44,15 @@
 #include "sim.h"
 #include "arch.h"
 #include "riscv.h"
+
+const char *reg_name[32] = {
+    //  0     1     2     3     4     5     6     7     8     9    10    11
+    "zero", "ra", "s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9",
+    //12     13    14    15    16    17    18    19    20    21    22    23
+    "s10", "s11", "sp", "tp", "v0", "v1", "a0", "a1", "a2", "a3", "a4", "a5",
+    //24   25    26    27    28    29    30    31
+    "a6", "a7", "t0", "t1", "t2", "t3", "t4", "gp",
+};
 
 const char *opcode_name[32] = {
     "LOAD", "LOAD_FP", "CUSTOM0", "MISC_MEM", "OP_IMM", "AUIPC", "OP_IMM_32", "EXT0",
@@ -60,6 +74,10 @@ const char *opcode_op_op_name[16] = {
     "sub", "?",   "?",   "?",    "?",   "sra", "?", "?",
 };
 
+const char *opcode_op_div_name[8] = {
+    "mul", "mulh", "mulhsu", "mulhu", "div", "divu", "rem", "remu",
+};
+
 const char *opcode_op_branch_name[8] = {
     "beq", "bne", "?", "?", "blt", "bge", "bltu", "bgeu",
 };
@@ -75,6 +93,10 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
                  opcode_load_op_name[i.i.funct3], i.i.rd, i.i.imm11_0, i.i.rs1);
         break;
 
+
+    case MISC_MEM:
+        snprintf(buf, buf_size, "%-11s", i.r.funct3 ? "fence.i" : "fence");
+        break;
 
 //  case LOAD_FP:
 //  case CUSTOM0:
@@ -107,9 +129,14 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
 //  case CUSTOM1:
 //  case AMO:
     case OP:
-        snprintf(buf, buf_size, "%-11sr%d,r%d,r%d",
-                 opcode_op_op_name[i.r.funct3 + 8 * (i.i.imm11_0 >> 10 & 1)],
-                 i.r.rd, i.r.rs1, i.r.rs2);
+        if (i.r.funct7 == 1)
+            snprintf(buf, buf_size, "%-11sr%d,r%d,r%d",
+                     opcode_op_div_name[i.r.funct3],
+                     i.r.rd, i.r.rs1, i.r.rs2);
+        else
+            snprintf(buf, buf_size, "%-11sr%d,r%d,r%d",
+                     opcode_op_op_name[i.r.funct3 + 8 * (i.i.imm11_0 >> 10 & 1)],
+                     i.r.rd, i.r.rs1, i.r.rs2);
         break;
     case LUI:
         snprintf(buf, buf_size, "%-11sr%d,0x%x",
@@ -117,7 +144,6 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
         break;
 
 //  case OP_32:
-//  case EXT1:
 //  ..
     case BRANCH: {
         int imm =
@@ -146,6 +172,12 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
             i.uj.imm19_12 << 12 |
             i.uj.imm11    << 11 |
             i.uj.imm10_1  << 1;
+
+        // Sign-extend:
+        imm = (imm << 11) >> 11;
+
+        assert(-i.uj.imm20 == (imm < 0));
+
         uint32_t addr = pc + imm;
 
         if (i.uj.rd == 0)
@@ -163,29 +195,66 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
         break;
     }
 
+/*
+
+I'm not sure about the SYSTEM opcode layout, but it appears to be
+something like the following:
+
+funct7  rs2   rs1   fc3 rd opcode  R-type
+x       x     x     x   x  SYSTEM
+0000000 00000 00000 000 00000 1110011 SCALL
+0000000 00001 00000 000 00000 1110011 SBREAK
+
+ imm[11:0]     rs1  fc3  rd    opcode I-type
+
+csr#           rs1  001 00000 1110011 CSRRW
+110000000000  00000 010  rd   1110011 RDCYCLE rd    alias for csrr rd, 0xC00
+110000000001  00000 010  rd   1110011 RDTIME rd     alias for csrr rd, 0xC01
+110000000010  00000 010  rd   1110011 RDINSTRET rd  alias for csrr rd, 0xC02
+csr#          00000 010  rd   1110011 CSRR
+csr#           rs1  010 00000 1110011 CSRRS
+csr#           rs1  011 00000 1110011 CSRRC
+
+csr#          imm5  101 00000 1110011 CSRRWI
+csr#          imm5  110 00000 1110011 CSRRSI
+csr#          imm5  111 00000 1110011 CSRRCI
+
+*/
+
   case SYSTEM:
-      switch (i.r.funct7) {
-      case 0:
+      switch (i.r.funct3) {
+      case SCALLSBREAK:
+          assert(i.r.rs1 == 0 && i.r.funct7 == 0 && i.r.rd == 0);
+
           switch (i.s.rs2) {
-          case 0:
-              snprintf(buf, buf_size, "%-11s", "scall");
-              return;
-          case 1:
-              snprintf(buf, buf_size, "%-11s", "sbreak");
-              return;
+          case 0: snprintf(buf, buf_size, "%-11s", "scall"); return;
+          case 1: snprintf(buf, buf_size, "%-11s", "sbreak"); return;
+          default: assert(0);
           }
-      case 0x60:
-          switch (i.s.rs2) {
-          case 0:
-              snprintf(buf, buf_size, "%-11sr%d", "rdcycle", i.i.rs1);
-              return;
-          case 1:
-              snprintf(buf, buf_size, "%-11sr%d", "rdtime", i.i.rs1);
-              return;
-          case 2:
-              snprintf(buf, buf_size, "%-11sr%d", "rdinstret", i.i.rs1);
-              return;
+          break;
+
+      case CSRRS:
+          if (i.i.rs1 == 0) {
+              switch ((unsigned)i.i.imm11_0) {
+              case 0xC00: snprintf(buf, buf_size, "%-11sr%d", "rdcycle",   i.i.rd); return;
+              case 0xC01: snprintf(buf, buf_size, "%-11sr%d", "rdtime",    i.i.rd); return;
+              case 0xC02: snprintf(buf, buf_size, "%-11sr%d", "rdinstret", i.i.rd); return;
+              default:    snprintf(buf, buf_size, "%-11sr%d,$%d", "csrr",  i.i.rd, i.i.imm11_0); return;
+              }
+          } else {
+              assert(i.i.rd == 0);
+              snprintf(buf, buf_size, "%-11s$%d,%d",  "csrs", i.i.imm11_0, i.i.rs1); return;
           }
+          break;
+
+      case CSRRSI: snprintf(buf, buf_size, "%-11s$%d,%d",  "csrsi", i.i.imm11_0, i.i.rs1); return;
+      case CSRRC:  snprintf(buf, buf_size, "%-11s$%d,r%d", "csrc",  i.i.imm11_0, i.i.rs1); return;
+      case CSRRCI: snprintf(buf, buf_size, "%-11s$%d,%d",  "csrci", i.i.imm11_0, i.i.rs1); return;
+      case CSRRW:  snprintf(buf, buf_size, "%-11s$%d,r%d", "csrw",  i.i.imm11_0, i.i.rs1); return;
+      case CSRRWI: snprintf(buf, buf_size, "%-11s$%d,%d",  "csrwi", i.i.imm11_0, i.i.rs1); return;
+
+      default:
+          assert(0);
       }
       break;
 
@@ -215,8 +284,15 @@ decode(uint64_t inst_addr, uint32_t inst)
     case LOAD:
         dec.class        = isa_inst_class_load;
         dec.loadstore_size = 1 << (i.i.funct3 & 3);
+        if (i.i.funct3 <= 1)
+            // LB or LH needs sign-extension.
+            dec.loadstore_size = -dec.loadstore_size;
         dec.source_reg_a = i.i.rs1;
         dec.dest_reg     = i.i.rd;
+        break;
+
+    case MISC_MEM:
+        dec.class        = isa_inst_class_branch;
         break;
 
     case OP_IMM:
@@ -235,6 +311,10 @@ decode(uint64_t inst_addr, uint32_t inst)
         break;
 
     case OP:
+        /* RV32M */
+        if (i.r.funct7 != 1)
+            assert((i.r.funct3 == ADDSUB || i.r.funct3 == SR_) && i.r.funct7 == 0x20 ||
+                   i.r.funct7 == 0x00);
         dec.dest_reg     = i.r.rd;
         dec.source_reg_a = i.r.rs1;
         dec.source_reg_b = i.r.rs2;
@@ -272,33 +352,41 @@ decode(uint64_t inst_addr, uint32_t inst)
         break;
     }
 
+
   case SYSTEM:
-      switch (i.r.funct7) {
-      case 0:
+      switch (i.r.funct3) {
+      case SCALLSBREAK:
+          assert(i.r.rs1 == 0 && i.r.funct7 == 0 && i.r.rd == 0);
+          assert(0); // Not implemented yet
+
           switch (i.s.rs2) {
-          case 0:
-              // scall
-              assert(0); // Not handling system calls yet
-              break;
-          case 1:
-              // snprintf(buf, buf_size, "%-11s", "sbreak");
+          case 0: // SCALL
+              assert(0);
+          case 1: // SBREAK
+              assert(0);
+          default:
+              assert(0);
+          }
+
+      case CSRRS:
+          if (i.i.rs1 == 0) {
+              // CSRR
+              dec.source_msr_a = i.i.imm11_0;
+              dec.dest_reg     = i.i.rd;
               break;
           }
-      case 0x60:
-          switch (i.s.rs2) {
-          case 0:
-              assert(0);
-              // snprintf(buf, buf_size, "%-11sr%d", "rdcycle", i.i.rs1);
+          /* Fall-through */
+      case CSRRC:
+              dec.source_reg_a = i.i.rs1;
+      case CSRRSI:
+      case CSRRCI:
+              dec.source_msr_a = i.i.imm11_0;
+      case CSRRW:
+      case CSRRWI:
+              dec.dest_msr     = i.i.imm11_0;
               break;
-          case 1:
-              assert(0);
-              // snprintf(buf, buf_size, "%-11sr%d", "rdtime", i.i.rs1);
-              break;
-          case 2:
-              assert(0);
-              // snprintf(buf, buf_size, "%-11sr%d", "rdinstret", i.i.rs1);
-              break;
-          }
+      default:
+          assert(0);
       }
       break;
 
@@ -336,7 +424,7 @@ inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b, uint64_t msr_a)
             res.result = op_a << (i.i.imm11_0 & 31);
             break;
         case SLTI:
-            res.result = op_a < i.i.imm11_0;
+            res.result = (int32_t) op_a < i.i.imm11_0;
             break;
         case SLTIU:
             res.result = (uint32_t) op_a < (uint32_t) (int) i.i.imm11_0;
@@ -371,37 +459,81 @@ inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b, uint64_t msr_a)
         return res;
 
     case OP:
-        switch (i.r.funct3) {
-        case ADDSUB:
-            res.result = i.i.imm11_0 >> 10 & 1 ? op_a - op_b : op_a + op_b;
-            break;
-        case SLL:
-            res.result = op_a << (op_b & 31);
-            break;
-        case SLT:
-            res.result = op_a < op_b;
-            break;
-        case SLTU:
-            res.result = (uint32_t) op_a < (uint32_t) op_b;
-            break;
-        case XOR:
-            res.result = op_a ^ op_b;
-            break;
-        case SR_:
-            if (i.i.imm11_0 & 1 << 10)
-                res.result = op_a >> (op_b & 31);
-            else
-                res.result = (uint32_t) op_a >> (op_b & 31);
-            break;
-        case OR:
-            res.result = op_a | op_b;
-            break;
-        case AND:
-            res.result = op_a & op_b;
-            break;
-        default:
-            assert(0);
-        }
+        if (i.r.funct7 == 1)
+            switch (i.r.funct3) {
+            case MUL:
+                res.result = (int32_t) op_a * (int32_t) op_b;
+                return res;
+            case MULH:
+                res.result = ((int64_t) op_a * (int64_t) op_b) >> 32;
+                return res;
+            case MULHSU:
+                res.result = ((int64_t) op_a * (uint64_t) (uint32_t) op_b) >> 32;
+                return res;
+            case MULHU:
+                res.result = ((uint64_t) (uint32_t) op_a * (uint64_t) (uint32_t) op_b) >> 32;
+                return res;
+            case DIV:
+                if (op_b == 0)
+                    res.result = -1LL;
+                else if (op_b == -1 && (uint32_t)op_a == (1 << 31))
+                    res.result = -1 << 31;
+                else
+                    res.result = (int32_t) op_a / (int32_t) op_b;
+                return res;
+            case DIVU:
+                if (op_b == 0)
+                    res.result = -1LL;
+                else
+                    res.result = (uint32_t) op_a / (uint32_t) op_b;
+                return res;
+            case REM:
+                if (op_b == 0)
+                    res.result = op_a;
+                else if (op_b == -1 && (uint32_t) op_a == (1 << 31))
+                    res.result = -1 << 31;
+                else
+                    res.result = (int32_t) op_a % (int32_t) op_b;
+                return res;
+            case REMU:
+                if (op_b == 0)
+                    res.result = op_a;
+                else
+                    res.result = op_a % op_b;
+                return res;
+            }
+        else
+            switch (i.r.funct3) {
+            case ADDSUB:
+                res.result = i.i.imm11_0 >> 10 & 1 ? op_a - op_b : op_a + op_b;
+                break;
+            case SLL:
+                res.result = op_a << (op_b & 31);
+                break;
+            case SLT:
+                res.result = (int32_t) op_a < (int32_t) op_b;
+                break;
+            case SLTU:
+                res.result = (uint32_t) op_a < (uint32_t) op_b;
+                break;
+            case XOR:
+                res.result = op_a ^ op_b;
+                break;
+            case SR_:
+                if (i.i.imm11_0 & 1 << 10)
+                    res.result = op_a >> (op_b & 31);
+                else
+                    res.result = (uint32_t) op_a >> (op_b & 31);
+                break;
+            case OR:
+                res.result = op_a | op_b;
+                break;
+            case AND:
+                res.result = op_a & op_b;
+                break;
+            default:
+                assert(0);
+            }
         res.result = (int32_t) res.result;
         return res;
 
@@ -409,6 +541,9 @@ inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b, uint64_t msr_a)
         res.result = i.u.imm31_12 << 12;
         res.result = (int32_t) res.result;
         return res;
+
+    case MISC_MEM:
+        break;
 
     case BRANCH:
         switch (i.sb.funct3) {
@@ -418,11 +553,11 @@ inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b, uint64_t msr_a)
             break;
         case BLT:
         case BGE:
-            res.branch_taken = (i.sb.funct3 & 1) ^ (op_a < op_b);
+            res.branch_taken = (i.sb.funct3 & 1) ^ ((int32_t)op_a < (int32_t)op_b);
             break;
         case BLTU:
         case BGEU:
-            res.branch_taken = (i.sb.funct3 & 1) ^ ((uint32_t) op_a < (uint32_t) op_b);
+            res.branch_taken = (i.sb.funct3 & 1) ^ (op_a < op_b);
             break;
         default:
             assert(0);
@@ -440,8 +575,37 @@ inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b, uint64_t msr_a)
         res.result = (int32_t) res.result;
         return res;
 
+    case SYSTEM:
+        switch (i.r.funct3) {
+        case SCALLSBREAK:
+            assert(i.r.rs1 == 0 && i.r.funct7 == 0 && i.r.rd == 0);
+
+            switch (i.s.rs2) {
+            case 0: printf("SCALL"); break;
+            case 1: printf("SBREAK"); break;
+            }
+            assert(0);
+            return res;
+
+        case CSRRS:  res.msr_result = i.i.rs1 ? msr_a | op_a : msr_a ; return res;
+        case CSRRSI: res.msr_result = msr_a | i.i.rs1; return res;
+        case CSRRC:  res.msr_result = msr_a &~ op_a; return res;
+        case CSRRCI: res.msr_result = msr_a &~ i.i.rs1; return res;
+        case CSRRW:  res.msr_result = op_a; return res;
+        case CSRRWI: res.msr_result = i.i.rs1; return res;
+
+        default:
+            assert(0);
+        }
+        break;
+
     default:
-        warn("Opcode %s exec not implemented, inst 0x%08x\n", opcode_name[i.r.opcode], i.raw);
+        warn("Opcode %s exec not implemented, inst 0x%08x "
+             "i{%x,%s,%x,%s,%s,%x}\n",
+             opcode_name[i.r.opcode], i.raw,
+             i.i.imm11_0, reg_name[i.r.rs1], i.r.funct3,
+             reg_name[i.r.rd],
+             opcode_name[i.r.opcode], i.r.opext);
         res.fatal_error = true;
         res.result = 0;
         return res;
@@ -493,7 +657,29 @@ static uint64_t
 load(cpu_state_t *s, uint64_t address, int mem_access_size)
 {
     memory_t *m = s->mem;
-    void *p = memory_physical(m, (uint32_t)address, mem_access_size);
+    void *p;
+    uint32_t iodata;
+
+    if (address & 1 << 31) {
+        /* We follow Altera's JTAG UART interface:
+
+           The core has two registers, data (addr 0) and control (addr 1):
+
+           data    (R/W): RAVAIL:16 	   RVALID:1 RSERV:7	     DATA:8
+           control (R/W): WSPACE:16 	   RSERV:5 AC:1 WI:1 RI:1    RSERV:6 WE:1 RE:1
+        */
+        iodata = 0;
+        if ((address & 4) == 0) {
+            int ch = getchar();
+            iodata = (0 <= ch) * (1 << 16 | 1 << 15) + (uint8_t) ch;
+        }
+        else
+            iodata = 1 << 16;
+
+        p = (void *)&iodata + (address & 3);
+    }
+    else
+        p = memory_physical(m, (uint32_t)address, mem_access_size);
 
     if (!p) {
         fprintf(stderr, "SEGFAULT, load from unmapped memory %08"PRIx64"\n", address);
@@ -519,6 +705,14 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size)
 static void
 store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size)
 {
+    if (address & 1 << 31) {
+        if (address == (1U << 31))
+            putchar(value & 255);
+        else
+            fprintf(stderr, "IGNORED: store to unmapped IO memory %08"PRIx64"\n", address);
+        return;
+    }
+
     memory_t *m = s->mem;
     void *p = memory_physical(m, (uint32_t)address, mem_access_size);
 
@@ -540,21 +734,51 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size)
 }
 
 static void
+dump(cpu_state_t *s, const char *filename, unsigned width, unsigned shift)
+{
+    FILE *f = fopen(filename, "w");
+
+    uint32_t mask = (1ULL << width) - 1;
+
+    if (!f) {
+        perror(filename);
+        return;
+    }
+
+    memory_t *m = s->mem;
+    uint32_t base = 0x10000000;
+
+    for (int i = 0; i < 128 * 1024; i += 4) {
+        uint32_t *p = memory_physical(m, base + i, 4);
+        if (!p)
+            break;
+        fprintf(f, "%0*x\n", width / 4, (*p >> shift) & mask);
+    }
+
+    fclose(f);
+}
+
+static void
 setup(cpu_state_t *state, elf_info_t *info)
 {
     memset(state->r, 0, sizeof state->r);
     state->pc = info->program_entry;
 
     // <HACK>
-    memory_ensure_mapped_range(state->mem, 0x20000000, 1024*1024);
-    state->r[31] = 0x20010000;
+    const int memory_size       = 128 * 1024;
+    const uint32_t memory_start = 0x10000000;
+    memory_ensure_mapped_range(state->mem, memory_start, memory_size);
+    state->r[31] = memory_start + memory_size / 2; // GP
+    state->r[14] = memory_start + memory_size - 4; // SP
+    store(state, state->r[14], 0, 4);
     // </HACK>
 
-    uint32_t stack_size = 1*1024*1024;
-    uint32_t stack_start = 0x80000000;
-    memory_ensure_mapped_range(state->mem, stack_start, stack_size);
-    state->r[14] = stack_start + stack_size - 4;
-    store(state, state->r[14], 0, 4);
+    // <HACK> <HACK>
+    dump(state, "program.txt", 32, 0);
+    dump(state, "mem0.txt", 8,  0);
+    dump(state, "mem1.txt", 8,  8);
+    dump(state, "mem2.txt", 8, 16);
+    dump(state, "mem3.txt", 8, 24);
 }
 
 const arch_t arch_riscv = {
