@@ -40,21 +40,25 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     if (state->fatal_error)
         return true;
 
+    if (verbosity & VERBOSE_TRACE)
+        fprintf(stderr, "%5d:%08"PRIx64" %08x\n", cycle, pc, inst);
+
     isa_decoded_t dec = arch->decode(pc, inst);
 
     if (verbosity & VERBOSE_TRACE)
         memcpy(orig_r, state->r, sizeof orig_r);
 
-    assert(dec.source_reg_a < ISA_NO_REG);
-    assert(dec.source_reg_b < ISA_NO_REG);
-    assert(dec.dest_reg     < ISA_REGISTERS);
-    assert(dec.dest_msr     < ISA_MSRS);
-    assert(dec.source_msr_a < ISA_MSRS);
+    assert(dec.source_reg_a == ISA_NO_REG || dec.source_reg_a < ISA_REGISTERS);
+    assert(dec.source_reg_b == ISA_NO_REG || dec.source_reg_b < ISA_REGISTERS);
+    assert(dec.dest_reg     == ISA_NO_REG || dec.dest_reg     < ISA_REGISTERS);
+    assert(dec.dest_msr     == ISA_NO_REG || dec.dest_msr     < ISA_MSRS);
+    assert(dec.source_msr_a == ISA_NO_REG || dec.source_msr_a < ISA_MSRS);
 
     uint64_t op_a     = state->r[dec.source_reg_a];
     uint64_t op_b     = state->r[dec.source_reg_b];
-    uint64_t msr_a    = dec.source_msr_a != ISA_NO_REG
-        ? state->r[dec.source_msr_a] : 0;
+    uint64_t msr_a    = 0;
+    if (dec.source_msr_a != ISA_NO_REG)
+        msr_a = arch->read_msr(state, dec.source_msr_a);
     isa_result_t res  = arch->inst_exec(dec, op_a, op_b, msr_a);
     res.result = CANONICALIZE(res.result);
 
@@ -109,7 +113,6 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     arch->tick(state);
 
     if (verbosity & VERBOSE_TRACE) {
-        fprintf(stderr,"%d:0x%08"PRIx64"\n", cycle, dec.inst_addr);
         if (dec.dest_reg != ISA_NO_REG && orig_r[dec.dest_reg] != res.result)
             fprintf(stderr,"%d:r%d=0x%08"PRIx64"\n", cycle, dec.dest_reg,
                     res.result);

@@ -47,7 +47,8 @@ unsigned issue_number;
 
 // XXX probably all state should be in "state" but I'm prototyping here...
 reservation_station_t reservation_stations[WINDOW_SIZE];
-bool scoreboard[ISA_REGISTERS];
+// XXX hack to make -1 (ISA_NO_REG) a legal reference.
+bool scoreboard0[ISA_REGISTERS], *scoreboard = scoreboard0 + 1;
 
 bool
 step_sscalar_in_order(
@@ -102,8 +103,8 @@ step_sscalar_in_order(
         rs->issued = false;
         rs->number = fetch_number;
         rs->dec = dec;
-        rs->op_a = r[dec.source_reg_a];
-        rs->op_b = r[dec.source_reg_b];
+        rs->op_a = dec.source_reg_a == ISA_NO_REG ? 0 : r[dec.source_reg_a];
+        rs->op_b = dec.source_reg_b == ISA_NO_REG ? 0 : r[dec.source_reg_b];
 
         ++fetch_number;
 
@@ -186,7 +187,8 @@ step_sscalar_in_order(
         /* Co-simulate */
         assert(rs->dec.inst_addr == costate->pc);
         step_simple(arch, costate, 0);
-        assert(state->r[rs->dec.dest_reg] == costate->r[rs->dec.dest_reg]);
+        if (rs->dec.dest_reg != ISA_NO_REG)
+            assert(state->r[rs->dec.dest_reg] == costate->r[rs->dec.dest_reg]);
     }
 
     return false;
@@ -199,7 +201,7 @@ void run_sscalar_io(int num_images, char *images[], verbosity_t verbosity)
     const arch_t *arch;
     elf_info_t info;
 
-    memset(scoreboard, 1, sizeof scoreboard);
+    memset(scoreboard0, 1, sizeof scoreboard0);
 
     loadelfs(state->mem, num_images, images, &info);
     loadelfs(costate->mem, num_images, images, &info);

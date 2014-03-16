@@ -351,6 +351,15 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size)
     }
 }
 
+static uint64_t read_msr(cpu_state_t *state, unsigned msr)
+{
+    return 0;
+}
+
+static void write_msr(cpu_state_t *state, unsigned msr, uint64_t value)
+{
+}
+
 const arch_t arch_alpha = {
     .zero_reg = 31,
     .is_64bit = true,
@@ -359,7 +368,8 @@ const arch_t arch_alpha = {
     .inst_exec = inst_exec,
     .disass_inst = disass_inst,
     .tick = tick,
-    .write_msr = 0, // XXX My alpha has no MSRs yet
+    .read_msr = read_msr,
+    .write_msr = write_msr,
     .load = load,
     .store = store,
 };

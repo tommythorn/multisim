@@ -41,6 +41,9 @@ struct cpu_state_st {
     /* All other resources should be cover here */
     uint64_t        msr[ISA_MSRS];
 
+    /* Counter running at the CPU tick rate */
+    uint64_t        counter;
+
     /* Statistics */
     uint64_t        n_issue;
 

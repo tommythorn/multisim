@@ -33,7 +33,9 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 #include <assert.h>
+#include <sys/time.h>
 #include "sim.h"
 #include "arch.h"
 #include "riscv.h"
@@ -450,9 +452,41 @@ inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b, uint64_t msr_a)
 }
 
 /* executed every cycle */
-static void
-tick(cpu_state_t *state)
+static void tick(cpu_state_t *state)
 {
+    ++state->counter;
+}
+
+static uint64_t read_msr(cpu_state_t *state, unsigned csr)
+{
+    printf("Read CSR %x\n", csr);
+    switch (csr) {
+    case CSR_CYCLE:
+        printf("  RDCYCLE -> %ju\n", state->counter);
+        return state->counter;
+    case CSR_TIME: {
+     struct timeval tv;
+     gettimeofday(&tv, NULL);
+     uint64_t now = tv.tv_sec * 1000000LL + tv.tv_usec;
+     printf("  RDTIME -> %ju\n", now);
+     return now;
+    }
+    case CSR_INSTRET:
+        // XXX for now, an instruction per tick
+        printf("  RDCYCLE -> %ju\n", state->counter);
+        return state->counter;
+    default:
+        return 0;
+    }
+}
+
+static void write_msr(cpu_state_t *state, unsigned csr, uint64_t value)
+{
+    printf("Write CSR %x <- %ju\n", csr, value);
+    if (csr == 0x51e) {
+        printf("HOST RESULT %"PRId64"\n", value);
+        exit(0);
+    }
 }
 
 static uint64_t
@@ -531,7 +565,8 @@ const arch_t arch_riscv = {
     .inst_exec = inst_exec,
     .disass_inst = disass_inst,
     .tick = tick,
-    .write_msr = 0, // XXX My RISC-V has no CSRs yet
+    .read_msr = read_msr,
+    .write_msr = write_msr,
     .load = load,
     .store = store,
 };

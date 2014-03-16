@@ -115,6 +115,20 @@ enum riscv_opcode_op_branch_e {
     BEQ, BNE, UIMP_BR2, UIMP_BR3, BLT, BGE, BLTU, BGEU,
 };
 
+enum riscv_opcode_op_system_e {
+    SCALLSBREAK, CSRRW, CSRRS, CSRRC, TBD, CSRRWI, CSRRSI, CSRRCI,
+};
+
+enum riscv_opcode_op_div_e {
+    MUL, MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU,
+};
+
+/* CSRs */
+
+enum riscv_csr_e {
+    CSR_CYCLE = 0xC00, CSR_TIME, CSR_INSTRET,
+};
+
 #endif
 
 // Local Variables:

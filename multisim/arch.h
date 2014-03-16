@@ -51,12 +51,12 @@
  * places).
  */
 
-#define ISA_REGISTERS 33
-#define ISA_MSRS      ISA_REGISTERS
-#define ISA_NO_REG    (ISA_REGISTERS-1)
+#define ISA_REGISTERS 128
+#define ISA_MSRS      (1 << 12)
+#define ISA_NO_REG    (-1)
 
-typedef uint8_t isa_reg_t;
-typedef uint8_t isa_msr_t;
+typedef int8_t isa_reg_t;
+typedef int isa_msr_t;
 
 /*
  * Instructions are classified into alu, load, store, jump, branch,
@@ -159,11 +159,17 @@ typedef struct isa_st {
     void (*tick)(cpu_state_t *state);
 
     /*
-     * write_msr() is the MSR equivalent of the register
-     * writeback. However MSR writes (and reads?) can have side
-     * effects, thus the ISA function.
+     * read_msr() is the MSR equivalent of the register read.  However
+     * MSR reads can have side effects, thus the ISA function.
      */
-    void (*write_msr)(cpu_state_t *state, unsigned csr, uint32_t value);
+    uint64_t (*read_msr)(cpu_state_t *state, unsigned msr);
+
+    /*
+     * write_msr() is the MSR equivalent of the register writeback.
+     * However MSR writes can have side effects, thus the ISA
+     * function.
+     */
+    void (*write_msr)(cpu_state_t *state, unsigned msr, uint64_t value);
 
     /*
      * Memory access - is responsible for dealing with any MMU, IO,

@@ -286,7 +286,7 @@ update_irq(cpu_state_t *state)
 /* Handle the write-back of MSRs (CSR in LM32 parlance). Deals with
  * side effects, if any. */
 static void
-write_msr(cpu_state_t *state, lm32_csr_t csr, uint32_t value)
+write_msr(cpu_state_t *state, lm32_csr_t csr, uint64_t value)
 {
     switch (csr) {
 /*
