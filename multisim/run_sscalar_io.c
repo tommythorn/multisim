@@ -206,7 +206,7 @@ void run_sscalar_io(int num_images, char *images[], verbosity_t verbosity)
     loadelfs(state->mem, num_images, images, &info);
     loadelfs(costate->mem, num_images, images, &info);
 
-    arch = get_arch(info.machine);
+    arch = get_arch(info.machine, info.is_64bit);
     arch->setup(state, &info);
     arch->setup(costate, &info);
 

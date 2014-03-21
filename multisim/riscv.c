@@ -198,32 +198,6 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
         break;
     }
 
-/*
-
-I'm not sure about the SYSTEM opcode layout, but it appears to be
-something like the following:
-
-funct7  rs2   rs1   fc3 rd opcode  R-type
-x       x     x     x   x  SYSTEM
-0000000 00000 00000 000 00000 1110011 SCALL
-0000000 00001 00000 000 00000 1110011 SBREAK
-
- imm[11:0]     rs1  fc3  rd    opcode I-type
-
-csr#           rs1  001 00000 1110011 CSRRW
-110000000000  00000 010  rd   1110011 RDCYCLE rd    alias for csrr rd, 0xC00
-110000000001  00000 010  rd   1110011 RDTIME rd     alias for csrr rd, 0xC01
-110000000010  00000 010  rd   1110011 RDINSTRET rd  alias for csrr rd, 0xC02
-csr#          00000 010  rd   1110011 CSRR
-csr#           rs1  010 00000 1110011 CSRRS
-csr#           rs1  011 00000 1110011 CSRRC
-
-csr#          imm5  101 00000 1110011 CSRRWI
-csr#          imm5  110 00000 1110011 CSRRSI
-csr#          imm5  111 00000 1110011 CSRRCI
-
-*/
-
   case SYSTEM:
       switch (i.r.funct3) {
       case SCALLSBREAK:
@@ -236,6 +210,7 @@ csr#          imm5  111 00000 1110011 CSRRCI
           }
           break;
 
+      // XXX this is not right
       case CSRRS:
           if (i.i.rs1 == 0) {
               switch ((unsigned)i.i.imm11_0) {
@@ -765,6 +740,8 @@ setup(cpu_state_t *state, elf_info_t *info)
     memset(state->r, 0, sizeof state->r);
     state->pc = info->program_entry;
 
+
+
     // <HACK>
     memory_ensure_mapped_range(state->mem, memory_start, memory_size);
     state->r[31] = memory_start + memory_size / 2; // GP
@@ -780,7 +757,21 @@ setup(cpu_state_t *state, elf_info_t *info)
     dump(state, "mem3.txt", 8, 24);
 }
 
-const arch_t arch_riscv = {
+const arch_t arch_riscv32 = {
+    .zero_reg = 0,
+    .is_64bit = true,
+    .setup = setup,
+    .decode = decode,
+    .inst_exec = inst_exec,
+    .disass_inst = disass_inst,
+    .tick = tick,
+    .read_msr = read_msr,
+    .write_msr = write_msr,
+    .load = load,
+    .store = store,
+};
+
+const arch_t arch_riscv64 = {
     .zero_reg = 0,
     .is_64bit = true,
     .setup = setup,

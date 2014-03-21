@@ -99,11 +99,17 @@ int loadelf(memory_t *m, char *name, elf_info_t *elf_info)
 
     rewind(f);
 
-    if (ehdr.e_ident[EI_CLASS] == ELFCLASS32)
-        return loadelf32(m, name, f, elf_info);
+    if (ehdr.e_ident[EI_CLASS] == ELFCLASS32) {
+        int r = loadelf32(m, name, f, elf_info);
+        elf_info->is_64bit = false;
+        return r;
+    }
 
-    if (ehdr.e_ident[EI_CLASS] == ELFCLASS64)
-        return loadelf64(m, name, f, elf_info);
+    if (ehdr.e_ident[EI_CLASS] == ELFCLASS64) {
+        int r = loadelf64(m, name, f, elf_info);
+        elf_info->is_64bit = true;
+        return r;
+    }
 
     fprintf(stderr, "%s: Not an ELF file? (EI_CLASS = %d)\n", name,
             ehdr.e_ident[EI_CLASS]);

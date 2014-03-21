@@ -135,12 +135,12 @@ void run_simple(int num_images, char *images[], verbosity_t verbosity)
 
     loadelfs(state->mem, num_images, images, &info);
 
-    // hack to support vmlinux which expects to be recolated?
+    // hack to support vmlinux which expects to be relocated?
     if (info.text_segments >= 1 &&
         (int64_t) info.text_start < 0)
         info.program_entry += info.text_start;
 
-    arch = get_arch(info.machine);
+    arch = get_arch(info.machine, info.is_64bit);
     arch->setup(state, &info);
 
     for (cycle = 0;; ++cycle) {

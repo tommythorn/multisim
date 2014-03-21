@@ -32,16 +32,17 @@
 #else
 #include "elf.h"
 #endif
-/* Nobody have this */
+/* Nobody has this */
 #define EM_LM32         0x0666 /* Lattice Mico32 */
 #define EM_LM32_ALT        138 /* Lattice Mico32 */
-#define EM_RISCV          0xF3 /* 32-bit little endian RISC-V */
+#define EM_RISCV          0xF3 /* Little endian RISC-V, 32- and 64-bit */
 
 #define MAX_ELF_SECTIONS 32
 
 typedef struct elf_info_st {
     uint32_t machine;
     bool     endian_is_big;
+    bool     is_64bit;
     uint64_t program_entry;
     unsigned nsections;
     uint64_t section_start[MAX_ELF_SECTIONS];

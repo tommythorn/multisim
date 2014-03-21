@@ -58,17 +58,17 @@ isa_disass(const arch_t *arch, isa_decoded_t dec, isa_result_t res, uint64_t loa
     }
 }
 
-extern const arch_t arch_alpha, arch_lm32, arch_riscv;
+extern const arch_t arch_alpha, arch_lm32, arch_riscv32, arch_riscv64;
 
 const arch_t *
-get_arch(uint16_t machine)
+get_arch(uint16_t machine, bool is_64bit)
 {
     if (machine == EM_ALPHA)
         return &arch_alpha;
     if (machine == EM_LM32 || machine == EM_LM32_ALT)
         return &arch_lm32;
     if (machine == EM_RISCV)
-        return &arch_riscv;
+        return is_64bit ? &arch_riscv64 : &arch_riscv32;
 
     fprintf(stderr, "error: unsupported architecture %d", machine);
 
