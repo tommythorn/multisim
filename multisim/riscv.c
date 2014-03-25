@@ -480,13 +480,13 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
                 res.result = op_a * op_b;
                 return res;
             case MULH:
-                res.result = (op_a * op_b) >> 32;
+                res.result = ((__int128) op_a * op_b) >> 64;
                 return res;
             case MULHSU:
-                res.result = (op_a * op_b_u) >> 32;
+                res.result = ((__int128) op_a * op_b_u) >> 64;
                 return res;
             case MULHU:
-                res.result = (op_a_u * op_b_u) >> 32;
+                res.result = ((unsigned __int128) op_a_u * op_b_u) >> 64;
                 return res;
             case DIV:
                 if (op_b == 0)
@@ -506,7 +506,7 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
                 if (op_b == 0)
                     res.result = op_a;
                 else if (op_b == -1 && op_a == (1LL << (xlen - 1)))
-                    res.result = -1LL << (xlen - 1);
+                    res.result = 0;
                 else
                     res.result = op_a % op_b;
                 return res;
@@ -575,7 +575,7 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
                 if (op_b_32 == 0)
                     res.result = op_a_32;
                 else if (op_b_32 == -1 && op_a_32 == (1 << 31))
-                    res.result = -1LL << 31;
+                    res.result = 0;
                 else
                     res.result = (int32_t) (op_a_32 % op_b_32);
                 return res;
