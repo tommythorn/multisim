@@ -109,8 +109,8 @@ int SZ(loadelf,)(memory_t *m, char *name, FILE *f, elf_info_t *elf_info)
 
             if (enable_verb_prog_sec)
                 fprintf(stderr, "Loading section [%016"PRIx64"; %016"PRIx64"]\n",
-                        (uint64_t)NATIVE(ph[i].p_vaddr),
-                        (uint64_t)NATIVE(ph[i].p_vaddr) + NATIVE(ph[i].p_memsz) - 1);
+                        (uint64_t)NATIVE(ph[i].p_paddr),
+                        (uint64_t)NATIVE(ph[i].p_paddr) + NATIVE(ph[i].p_memsz) - 1);
 
             loadsection(f,
                         (unsigned)NATIVE(ph[i].p_offset),
@@ -123,7 +123,7 @@ int SZ(loadelf,)(memory_t *m, char *name, FILE *f, elf_info_t *elf_info)
 
         if (ph[i].p_flags & 1) {
             elf_info->text_segments++;
-            elf_info->text_start = NATIVE(ph[i].p_vaddr);
+            elf_info->text_start = NATIVE(ph[i].p_paddr);
             elf_info->text_size  = NATIVE(ph[i].p_memsz);
         }
     }

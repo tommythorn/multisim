@@ -100,7 +100,8 @@ typedef enum riscv_opcode_e {
 } riscv_opcode_t;
 
 enum riscv_opcode_load_e {
-    LB, LH, LW, UIMP_LOAD3, LBU, LHU, UIMP_LOAD6, UIMP_LOAD7,
+    LB,  LH,  LW,  LD,
+    LBU, LHU, LWU, UIMP_LOAD7,
 };
 
 enum riscv_opcode_op_imm_e {

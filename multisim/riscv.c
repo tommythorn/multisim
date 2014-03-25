@@ -25,11 +25,10 @@
  * Status:
  *
  * I - Implemented all,
- *   SYSTEM (SCALL, SBREAK, RDCYCLE, RDTIME, RDINSTRET)
- *   (Well, the behaviour of SCALL and SBREAK aren't specificed).
+ *   SYSTEM (SCALL, SBREAK) and all the CSRs
  *
  * M - Fix the implementation of
- *   MUL, MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU
+ *   MULH, MULHSU, MULHU, REM, REMW
  *
  * A - Atomics, not sure how they would fit in the framework
  *
@@ -69,7 +68,7 @@ const char *opcode_imm_name[8] = {
 };
 
 const char *opcode_load_op_name[8] = {
-    "lb", "lh", "lw", "?", "lbu", "lhu", "?", "?",
+    "lb", "lh", "lw", "ld", "lbu", "lhu", "lwu", "?",
 };
 
 const char *opcode_op_op_name[16] = {
@@ -119,7 +118,14 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
                  "auipc", i.u.rd, i.u.imm31_12);
         break;
 
-//  case OP_IMM_32
+    case OP_IMM_32: {
+        char op[16];
+        snprintf(op, sizeof op, "%sw",opcode_imm_name[i.r.funct3]);
+
+        snprintf(buf, buf_size, "%-11sr%d,r%d,%d", op, i.r.rd, i.r.rs1, i.i.imm11_0);
+        break;
+    }
+
 //  case EXT0:
     case STORE: {
         int imm = i.s.imm4_0 | i.s.imm11_5 << 5;
@@ -146,16 +152,26 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
                  "lui", i.u.rd, i.u.imm31_12);
         break;
 
-//  case OP_32:
+  case OP_32: {
+        char op[16];
+        snprintf(op, sizeof op, "%sw",
+                 i.r.funct7 == 1
+                 ? opcode_op_div_name[i.r.funct3]
+                 : opcode_op_op_name[i.r.funct3 + 8 * (i.i.imm11_0 >> 10 & 1)]);
+
+        snprintf(buf, buf_size, "%-11sr%d,r%d,r%d", op, i.r.rd, i.r.rs1, i.r.rs2);
+        break;
+    }
+
 //  ..
     case BRANCH: {
         int imm =
             i.sb.imm12 << 12 | i.sb.imm11 << 11 |
             i.sb.imm10_5 << 5 | i.sb.imm4_1 << 1;
 
-        snprintf(buf, buf_size, "%-11sr%d,r%d,0x%08x",
+        snprintf(buf, buf_size, "%-11sr%d,r%d,0x%08"PRIx64,
                  opcode_op_branch_name[i.r.funct3],
-                 i.r.rs1, i.r.rs2, (uint32_t) pc + imm);
+                 i.r.rs1, i.r.rs2, pc + imm);
         break;
     }
 
@@ -181,18 +197,18 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
 
         assert(-i.uj.imm20 == (imm < 0));
 
-        uint32_t addr = pc + imm;
+        uint64_t addr = pc + imm;
 
         if (i.uj.rd == 0)
             // Pseudo "j" instruction
-            snprintf(buf, buf_size, "%-11s0x%08x",
+            snprintf(buf, buf_size, "%-11s0x%08"PRIx64,
                      "j", addr);
         else if (i.uj.rd == 1)
             // Pseudo "jal" instruction (without destination)
-            snprintf(buf, buf_size, "%-11s0x%08x",
+            snprintf(buf, buf_size, "%-11s0x%08"PRIx64,
                      "jal", addr);
         else
-            snprintf(buf, buf_size, "%-11sr%d,0x%08x",
+            snprintf(buf, buf_size, "%-11sr%d,0x%08"PRIx64,
                      "jal", i.uj.rd, addr);
 
         break;
@@ -219,20 +235,18 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
               case 0xC02: snprintf(buf, buf_size, "%-11sr%d", "rdinstret", i.i.rd); return;
               default:    snprintf(buf, buf_size, "%-11sr%d,$%d", "csrr",  i.i.rd, i.i.imm11_0); return;
               }
-          } else {
-              assert(i.i.rd == 0);
-              snprintf(buf, buf_size, "%-11s$%d,%d",  "csrs", i.i.imm11_0, i.i.rs1); return;
-          }
+          } else
+              snprintf(buf, buf_size, "%-11sr%d,$%d,r%d",  "csrrs", i.i.rd, i.i.imm11_0, i.i.rs1); return;
           break;
 
-      case CSRRSI: snprintf(buf, buf_size, "%-11s$%d,%d",  "csrsi", i.i.imm11_0, i.i.rs1); return;
-      case CSRRC:  snprintf(buf, buf_size, "%-11s$%d,r%d", "csrc",  i.i.imm11_0, i.i.rs1); return;
-      case CSRRCI: snprintf(buf, buf_size, "%-11s$%d,%d",  "csrci", i.i.imm11_0, i.i.rs1); return;
-      case CSRRW:  snprintf(buf, buf_size, "%-11s$%d,r%d", "csrw",  i.i.imm11_0, i.i.rs1); return;
-      case CSRRWI: snprintf(buf, buf_size, "%-11s$%d,%d",  "csrwi", i.i.imm11_0, i.i.rs1); return;
+      case CSRRSI: snprintf(buf, buf_size, "%-11sr%d,$%d,%d",  "csrrsi", i.i.rd, i.i.imm11_0, i.i.rs1); return;
+      case CSRRC:  snprintf(buf, buf_size, "%-11sr%d,$%d,r%d", "csrrc",  i.i.rd, i.i.imm11_0, i.i.rs1); return;
+      case CSRRCI: snprintf(buf, buf_size, "%-11sr%d,$%d,%d",  "csrrci", i.i.rd, i.i.imm11_0, i.i.rs1); return;
+      case CSRRW:  snprintf(buf, buf_size, "%-11sr%d,$%d,r%d", "csrrw",  i.i.rd, i.i.imm11_0, i.i.rs1); return;
+      case CSRRWI: snprintf(buf, buf_size, "%-11sr%d,$%d,%d",  "csrrwi", i.i.rd, i.i.imm11_0, i.i.rs1); return;
 
       default:
-          assert(0);
+          assert(0); // XXX more to implement
       }
       break;
 
@@ -262,8 +276,8 @@ decode(uint64_t inst_addr, uint32_t inst)
     case LOAD:
         dec.class        = isa_inst_class_load;
         dec.loadstore_size = 1 << (i.i.funct3 & 3);
-        if (i.i.funct3 <= 1)
-            // LB or LH needs sign-extension.
+        // LB, LH, LW needs sign-extension.
+        if (i.i.funct3 <= LW)
             dec.loadstore_size = -dec.loadstore_size;
         dec.source_reg_a = i.i.rs1;
         dec.dest_reg     = i.i.rd;
@@ -274,6 +288,7 @@ decode(uint64_t inst_addr, uint32_t inst)
         break;
 
     case OP_IMM:
+    case OP_IMM_32:
     case AUIPC:
     case LUI:
         dec.dest_reg     = i.i.rd;
@@ -289,6 +304,7 @@ decode(uint64_t inst_addr, uint32_t inst)
         break;
 
     case OP:
+    case OP_32:
         /* RV32M */
         if (i.r.funct7 != 1)
             assert((i.r.funct3 == ADDSUB || i.r.funct3 == SR_) && i.r.funct7 == 0x20 ||
@@ -347,21 +363,15 @@ decode(uint64_t inst_addr, uint32_t inst)
           }
 
       case CSRRS:
-          if (i.i.rs1 == 0) {
-              // CSRR
-              dec.source_msr_a = i.i.imm11_0;
-              dec.dest_reg     = i.i.rd;
-              break;
-          }
-          /* Fall-through */
       case CSRRC:
+      case CSRRW:
               dec.source_reg_a = i.i.rs1;
       case CSRRSI:
       case CSRRCI:
-              dec.source_msr_a = i.i.imm11_0;
-      case CSRRW:
       case CSRRWI:
               dec.dest_msr     = i.i.imm11_0;
+              dec.source_msr_a = i.i.imm11_0;
+              dec.dest_reg     = i.i.rd;
               break;
       default:
           assert(0);
@@ -380,17 +390,44 @@ decode(uint64_t inst_addr, uint32_t inst)
 }
 
 static isa_result_t
-inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b, uint64_t msr_a)
+inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
 {
-    inst_t i = { .raw = dec.inst };
-    isa_result_t res = { 0 };
-    uint32_t ea_load = op_a + i.i.imm11_0;
-    uint32_t ea_store = op_a + (i.s.imm11_5 << 5 | i.s.imm4_0);
-    res.fatal_error = false;
+    int64_t op_a      = (int64_t) op_a_u;
+    int64_t op_b      = (int64_t) op_b_u;
+    int32_t op_a_32   = (int32_t) op_a;
+    int32_t op_b_32   = (int32_t) op_b;
+    uint32_t op_a_u_32= (uint32_t) op_a_u;
+    uint32_t op_b_u_32= (uint32_t) op_b_u;
+    inst_t i          = { .raw = dec.inst };
+    isa_result_t res  = { 0 };
+    uint64_t ea_load  = op_a + i.i.imm11_0;
+    uint64_t ea_store = op_a + (i.s.imm11_5 << 5 | i.s.imm4_0);
+    res.fatal_error   = false;
+    int xlen          = 64; // XXX need a way to support both 32- and 64-bit here
 
     switch (i.r.opcode) {
     case LOAD:
         res.result = ea_load;
+        return res;
+
+    case OP_IMM_32:
+        switch (i.i.funct3) {
+        case ADDI: // ADDIW
+            res.result = op_a_32 + i.i.imm11_0;
+            break;
+        case SLLI: // SLLIW
+            res.result = op_a_32 << (i.i.imm11_0 & (xlen - 1));
+            break;
+        case SR_I: // SRLIW/SRAIW
+            if (i.i.imm11_0 & 1 << 10)
+                res.result = op_a_32 >> (i.i.imm11_0 & (xlen - 1));
+            else
+                res.result = op_a_u_32 >> (i.i.imm11_0 & (xlen - 1));
+            res.result = (int32_t)res.result;
+            break;
+        default:
+            assert(0);
+        }
         return res;
 
     case OP_IMM:
@@ -399,22 +436,22 @@ inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b, uint64_t msr_a)
             res.result = op_a + i.i.imm11_0;
             break;
         case SLLI:
-            res.result = op_a << (i.i.imm11_0 & 31);
+            res.result = op_a << (i.i.imm11_0 & (xlen - 1));
             break;
         case SLTI:
-            res.result = (int32_t) op_a < i.i.imm11_0;
+            res.result = op_a < i.i.imm11_0;
             break;
         case SLTIU:
-            res.result = (uint32_t) op_a < (uint32_t) (int) i.i.imm11_0;
+            res.result = op_a_u < (uint64_t) (int64_t) i.i.imm11_0;
             break;
         case XORI:
             res.result = op_a ^ i.i.imm11_0;
             break;
         case SR_I:
             if (i.i.imm11_0 & 1 << 10)
-                res.result = op_a >> (i.i.imm11_0 & 31);
+                res.result = op_a >> (i.i.imm11_0 & (xlen - 1));
             else
-                res.result = (uint32_t) op_a >> (i.i.imm11_0 & 31);
+                res.result = op_a_u >> (i.i.imm11_0 & (xlen - 1));
             break;
         case ORI:
             res.result = op_a | i.i.imm11_0;
@@ -440,44 +477,44 @@ inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b, uint64_t msr_a)
         if (i.r.funct7 == 1)
             switch (i.r.funct3) {
             case MUL:
-                res.result = (int32_t) op_a * (int32_t) op_b;
+                res.result = op_a * op_b;
                 return res;
             case MULH:
-                res.result = ((int64_t) op_a * (int64_t) op_b) >> 32;
+                res.result = (op_a * op_b) >> 32;
                 return res;
             case MULHSU:
-                res.result = ((int64_t) op_a * (uint64_t) (uint32_t) op_b) >> 32;
+                res.result = (op_a * op_b_u) >> 32;
                 return res;
             case MULHU:
-                res.result = ((uint64_t) (uint32_t) op_a * (uint64_t) (uint32_t) op_b) >> 32;
+                res.result = (op_a_u * op_b_u) >> 32;
                 return res;
             case DIV:
                 if (op_b == 0)
                     res.result = -1LL;
-                else if (op_b == -1 && (uint32_t)op_a == (1 << 31))
-                    res.result = -1 << 31;
+                else if (op_b == -1 && op_a == (1LL << (xlen - 1)))
+                    res.result = -1LL << (xlen - 1);
                 else
-                    res.result = (int32_t) op_a / (int32_t) op_b;
+                    res.result = op_a / op_b;
                 return res;
             case DIVU:
                 if (op_b == 0)
                     res.result = -1LL;
                 else
-                    res.result = (uint32_t) op_a / (uint32_t) op_b;
+                    res.result = op_a_u / op_b_u;
                 return res;
             case REM:
                 if (op_b == 0)
                     res.result = op_a;
-                else if (op_b == -1 && (uint32_t) op_a == (1 << 31))
-                    res.result = -1 << 31;
+                else if (op_b == -1 && op_a == (1LL << (xlen - 1)))
+                    res.result = -1LL << (xlen - 1);
                 else
-                    res.result = (int32_t) op_a % (int32_t) op_b;
+                    res.result = op_a % op_b;
                 return res;
             case REMU:
                 if (op_b == 0)
                     res.result = op_a;
                 else
-                    res.result = op_a % op_b;
+                    res.result = op_a_u % op_b_u;
                 return res;
             }
         else
@@ -486,22 +523,22 @@ inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b, uint64_t msr_a)
                 res.result = i.i.imm11_0 >> 10 & 1 ? op_a - op_b : op_a + op_b;
                 break;
             case SLL:
-                res.result = op_a << (op_b & 31);
+                res.result = op_a << (op_b & (xlen - 1));
                 break;
             case SLT:
-                res.result = (int32_t) op_a < (int32_t) op_b;
+                res.result = op_a < op_b;
                 break;
             case SLTU:
-                res.result = (uint32_t) op_a < (uint32_t) op_b;
+                res.result = op_a_u < op_b_u;
                 break;
             case XOR:
                 res.result = op_a ^ op_b;
                 break;
             case SR_:
                 if (i.i.imm11_0 & 1 << 10)
-                    res.result = op_a >> (op_b & 31);
+                    res.result = op_a >> (op_b & (xlen - 1));
                 else
-                    res.result = (uint32_t) op_a >> (op_b & 31);
+                    res.result = op_a_u >> (op_b & (xlen - 1));
                 break;
             case OR:
                 res.result = op_a | op_b;
@@ -512,12 +549,65 @@ inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b, uint64_t msr_a)
             default:
                 assert(0);
             }
-        res.result = (int32_t) res.result;
+        return res;
+
+    case OP_32:
+        if (i.r.funct7 == 1)
+            switch (i.r.funct3) {
+            case MUL: // MULW
+                res.result = op_a_32 * op_b_32;
+                return res;
+            case DIV: // DIVW
+                if (op_b_32 == 0)
+                    res.result = -1LL;
+                else if (op_b_32 == -1 && op_a_32 == (1 << 31))
+                    res.result = -1LL << 31;
+                else
+                    res.result = op_a_32 / op_b_32;
+                return res;
+            case DIVU: // DIVW
+                if (op_b_32 == 0)
+                    res.result = -1LL;
+                else
+                    res.result = (int32_t) (op_a_u_32 / op_b_u_32);
+                return res;
+            case REM: // REMW
+                if (op_b_32 == 0)
+                    res.result = op_a_32;
+                else if (op_b_32 == -1 && op_a_32 == (1 << 31))
+                    res.result = -1LL << 31;
+                else
+                    res.result = (int32_t) (op_a_32 % op_b_32);
+                return res;
+            case REMU: // REMUW
+                if (op_b_32 == 0)
+                    res.result = op_a_32;
+                else
+                    res.result = (int32_t) (op_a_u % op_b_u);
+                return res;
+            }
+        else
+            switch (i.r.funct3) {
+            case ADDSUB: // ADDSUBW
+                res.result = i.i.imm11_0 >> 10 & 1 ? op_a_32 - op_b_32 : op_a_32 + op_b_32;
+                break;
+            case SLL:
+                res.result = op_a_32 << (op_b & 31);
+                break;
+            case SR_:
+                if (i.i.imm11_0 & 1 << 10)
+                    res.result = op_a_32 >> (op_b & 31);
+                else
+                    res.result = op_a_u_32 >> (op_b & 31);
+                res.result = (int32_t)res.result;
+                break;
+            default:
+                assert(0);
+            }
         return res;
 
     case LUI:
         res.result = i.u.imm31_12 << 12;
-        res.result = (int32_t) res.result;
         return res;
 
     case MISC_MEM:
@@ -531,11 +621,11 @@ inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b, uint64_t msr_a)
             break;
         case BLT:
         case BGE:
-            res.branch_taken = (i.sb.funct3 & 1) ^ ((int32_t)op_a < (int32_t)op_b);
+            res.branch_taken = (i.sb.funct3 & 1) ^ (op_a < op_b);
             break;
         case BLTU:
         case BGEU:
-            res.branch_taken = (i.sb.funct3 & 1) ^ (op_a < op_b);
+            res.branch_taken = (i.sb.funct3 & 1) ^ (op_a_u < op_b_u);
             break;
         default:
             assert(0);
@@ -544,13 +634,11 @@ inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b, uint64_t msr_a)
 
     case JALR:
         res.result = dec.inst_addr + 4;
-        res.result = (int32_t) res.result;
-        res.compjump_target = (int32_t) (op_a + i.i.imm11_0) & -2;
+        res.compjump_target = (op_a + i.i.imm11_0) & -2LL;
         return res;
 
     case JAL:
         res.result = dec.inst_addr + 4;
-        res.result = (int32_t) res.result;
         return res;
 
     case SYSTEM:
@@ -599,13 +687,37 @@ static void tick(cpu_state_t *state)
     ++state->counter;
 }
 
+static uint64_t csr_ptbr = 0;
+
+/*
+#define CSR_STATUS_S	0:0
+#define CSR_STATUS_PS	1:1
+#define CSR_STATUS_EI	2:2
+#define CSR_STATUS_PEI	3:3
+#define CSR_STATUS_EF	4:4
+#define CSR_STATUS_U64	5:5
+#define CSR_STATUS_S64	6:6
+#define CSR_STATUS_IM  23:16
+#define CSR_STATUS_IP  31:24
+*/
+#define CSR_STATUS_S	(1 << 0)
+#define CSR_STATUS_PS	(1 << 1)
+#define CSR_STATUS_EI	(1 << 2)
+#define CSR_STATUS_PEI	(1 << 3)
+#define CSR_STATUS_EF	(1 << 4)
+#define CSR_STATUS_U64	(1 << 5)
+#define CSR_STATUS_S64	(1 << 6)
+
+static uint32_t csr_status = CSR_STATUS_U64 | CSR_STATUS_S64 | CSR_STATUS_S;
+static uint64_t csr_evec = 0x2000;
+
 static uint64_t read_msr(cpu_state_t *state, unsigned csr)
 {
-    printf("Read CSR %x\n", csr);
     switch (csr) {
     case CSR_CYCLE:
         printf("  RDCYCLE -> %"PRIu64"\n", state->counter);
         return state->counter;
+
     case CSR_TIME: {
      struct timeval tv;
      gettimeofday(&tv, NULL);
@@ -613,19 +725,57 @@ static uint64_t read_msr(cpu_state_t *state, unsigned csr)
      printf("  RDTIME -> %"PRIu64"\n", now);
      return now;
     }
+
     case CSR_INSTRET:
         // XXX for now, an instruction per tick
         printf("  RDCYCLE -> %"PRIu64"\n", state->counter);
         return state->counter;
+
+    case 0x504:
+        printf("  Read  CSR ptbr\n");
+        return csr_ptbr;
+
+    case 0x508:
+        printf("  Read  CSR evec\n");
+        return csr_evec;
+
+    case 0x50a:
+        printf("  Read  CSR status\n");
+        return csr_status;
+
+    case 0x50b:
+        printf("  Read  CSR hartid\n");
+        return 0;
+
     default:
+        printf("  Read  CSR %x\n", csr);
         return 0;
     }
 }
 
 static void write_msr(cpu_state_t *state, unsigned csr, uint64_t value)
 {
-    printf("Write CSR %x <- %"PRIu64"\n", csr, value);
-    if (csr == 0x51e) {
+    switch (csr) {
+    case 0x504:
+        printf("  Write ptbr <- %"PRIx64"\n", value);
+        csr_ptbr = value;
+        break;
+
+    case 0x508:
+        printf("  Write evec <- %"PRIx64"\n", value);
+        csr_evec = value;
+        break;
+
+    case 0x50a:
+        printf("  Write status <- %"PRIx64"\n", value);
+        csr_status = value;
+        break;
+
+    default:
+        printf("  Write CSR %x <- %"PRIx64"\n", csr, value);
+        break;
+
+    case 0x51e: // tohost
         printf("HOST RESULT %"PRId64"\n", value);
         exit(0);
     }
@@ -661,7 +811,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size)
 
     if (!p) {
         fprintf(stderr, "SEGFAULT, load from unmapped memory %08"PRIx64"\n", address);
-        s->fatal_error = true;
+        //XXX s->fatal_error = true;
         return 0;
     }
 
@@ -743,6 +893,9 @@ setup(cpu_state_t *state, elf_info_t *info)
 
 
     // <HACK>
+    const int memory_size       = 0x90000;
+                                //0x30000;
+    const uint32_t memory_start = 0;
     memory_ensure_mapped_range(state->mem, memory_start, memory_size);
     state->r[31] = memory_start + memory_size / 2; // GP
     state->r[14] = memory_start + memory_size - 4; // SP
@@ -767,8 +920,8 @@ const arch_t arch_riscv32 = {
     .tick = tick,
     .read_msr = read_msr,
     .write_msr = write_msr,
-    .load = load,
-    .store = store,
+    .load = 0 /*load*/,
+    .store = 0 /*store*/,
 };
 
 const arch_t arch_riscv64 = {
