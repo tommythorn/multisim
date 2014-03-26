@@ -51,7 +51,7 @@
  * places).
  */
 
-#define ISA_REGISTERS 128
+#define ISA_REGISTERS 64
 #define ISA_MSRS      (1 << 12)
 #define ISA_NO_REG    (-1)
 

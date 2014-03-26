@@ -626,18 +626,18 @@ static uint64_t read_msr(cpu_state_t *state, unsigned csr)
     printf("Read CSR %x\n", csr);
     switch (csr) {
     case CSR_CYCLE:
-        printf("  RDCYCLE -> %ju\n", state->counter);
+        printf("  RDCYCLE -> %"PRIu64"\n", state->counter);
         return state->counter;
     case CSR_TIME: {
      struct timeval tv;
      gettimeofday(&tv, NULL);
      uint64_t now = tv.tv_sec * 1000000LL + tv.tv_usec;
-     printf("  RDTIME -> %ju\n", now);
+     printf("  RDTIME -> %"PRIu64"\n", now);
      return now;
     }
     case CSR_INSTRET:
         // XXX for now, an instruction per tick
-        printf("  RDCYCLE -> %ju\n", state->counter);
+        printf("  RDCYCLE -> %"PRIu64"\n", state->counter);
         return state->counter;
     default:
         return 0;
@@ -646,7 +646,7 @@ static uint64_t read_msr(cpu_state_t *state, unsigned csr)
 
 static void write_msr(cpu_state_t *state, unsigned csr, uint64_t value)
 {
-    printf("Write CSR %x <- %ju\n", csr, value);
+    printf("Write CSR %x <- %"PRIu64"\n", csr, value);
     if (csr == 0x51e) {
         printf("HOST RESULT %"PRId64"\n", value);
         exit(0);
