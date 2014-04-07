@@ -45,6 +45,9 @@
 #include "arch.h"
 #include "riscv.h"
 
+const uint32_t memory_start = 0x00000000;
+const int memory_size       = 128 * 1024;
+
 const char *reg_name[32] = {
     //  0     1     2     3     4     5     6     7     8     9    10    11
     "zero", "ra", "s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9",
@@ -746,10 +749,8 @@ dump(cpu_state_t *s, const char *filename, unsigned width, unsigned shift)
     }
 
     memory_t *m = s->mem;
-    uint32_t base = 0x10000000;
-
     for (int i = 0; i < 128 * 1024; i += 4) {
-        uint32_t *p = memory_physical(m, base + i, 4);
+        uint32_t *p = memory_physical(m, memory_start + i, 4);
         if (!p)
             break;
         fprintf(f, "%0*x\n", width / 4, (*p >> shift) & mask);
@@ -765,8 +766,6 @@ setup(cpu_state_t *state, elf_info_t *info)
     state->pc = info->program_entry;
 
     // <HACK>
-    const int memory_size       = 128 * 1024;
-    const uint32_t memory_start = 0x10000000;
     memory_ensure_mapped_range(state->mem, memory_start, memory_size);
     state->r[31] = memory_start + memory_size / 2; // GP
     state->r[14] = memory_start + memory_size - 4; // SP
@@ -783,7 +782,7 @@ setup(cpu_state_t *state, elf_info_t *info)
 
 const arch_t arch_riscv = {
     .zero_reg = 0,
-    .is_64bit = false,
+    .is_64bit = true,
     .setup = setup,
     .decode = decode,
     .inst_exec = inst_exec,

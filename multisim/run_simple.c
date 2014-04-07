@@ -134,6 +134,12 @@ void run_simple(int num_images, char *images[], verbosity_t verbosity)
     int cycle;
 
     loadelfs(state->mem, num_images, images, &info);
+
+    // hack to support vmlinux which expects to be recolated?
+    if (info.text_segments >= 1 &&
+        (int64_t) info.text_start < 0)
+        info.program_entry += info.text_start;
+
     arch = get_arch(info.machine);
     arch->setup(state, &info);
 
