@@ -32,9 +32,9 @@ static const bool enable_verb_elf      = false;
 
 static void
 loadsection(FILE *f, unsigned f_offset, unsigned f_len,
-            memory_t *m, uint32_t m_addr, size_t m_len, elf_info_t *info)
+            memory_t *m, uint64_t m_addr, uint64_t m_len, elf_info_t *info)
 {
-    memory_ensure_mapped_range(m, m_addr, m_len);
+    memory_ensure_mapped_range(m, m_addr, m_addr + m_len);
 
     info->section_start[info->nsections]  = m_addr;
     info->section_size[info->nsections++] = m_len;

@@ -34,8 +34,8 @@
 typedef struct memory_st memory_t;
 
 memory_t *memory_create(void);
-void memory_ensure_mapped_range(memory_t *m, uint32_t addr, size_t len);
-void *memory_physical(memory_t *m, uint32_t addr, size_t len);
+void memory_ensure_mapped_range(memory_t *m, uint64_t start, uint64_t end);
+void *memory_physical(memory_t *m, uint64_t addr, uint64_t size);
 void memory_destroy(memory_t *);
 
 void memory_set_endian(memory_t *m, bool bigendian);

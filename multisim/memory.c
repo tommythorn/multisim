@@ -20,106 +20,55 @@
 
 #include "memory.h"
 #include <assert.h>
+#include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <inttypes.h>
 #include <arpa/inet.h>
 
 /*
   The simulation space address to physical address translation is a
-  key operation, so it has been optimized slightly.
+  key operation.
 
-  First off, we can't implement a 1-1 mapping as the virtual address
-  space on the host is smaller than the target (both are 32-bit), so
-  we have to live with some sort of segmentation.  An obvious first
-  approach is to divide the simulation space into 2^S segments with a
-  mapping from segments to physical segments:
-
-  N = 32 - S
-  segment(x)   = x >> N
-  offset(x)    = x & ((1 << N) - 1)
-  Inv: for all x, (segment(x) << N) + offset(x) == x
-
-  addr2phys(x) = memory_segment[segment(x)] + offset(x)
-
-  As we can't map all segments, we represent the "holes" as areas
-  laying outside the segment space:
-
-  addr_mapped(x) = offset(x) < memory_segment_size[segment(x)]
-
-  OPTIMIZATION
-
-  Note, the offset(x) can also be written
-
-  offset(x) = x - (segment(x) << N)
-
-  thus
-
-  addr2phys(x) = memory_segment[segment(x)] + x - (segment(x) << N)
-
-  or by arranging for memory_segment'[s] = memory_segment[s] - (s << N)
-
-  addr2phys(x) = memory_segment'[segment(x)] + x
-
-  BUT we don't do it like that below, for clairity.
+  We simply use a list of translations.
 */
 
-#define MEMORY_SEGMENTBITS 4
-#define MEMORY_OFFSETBITS (32 - MEMORY_SEGMENTBITS)
-#define MEMORY_NSEGMENT (1 << MEMORY_SEGMENTBITS)
+#define MEMORY_NSEGMENT 8
 
-struct memory_st {
-    void    *segment[MEMORY_NSEGMENT];
-    unsigned segment_size[MEMORY_NSEGMENT];
-    bool     endian_is_big;
+struct entry {
+    void *phys;
+    uint64_t start, end;  // [start; end)
 };
 
-#define memory_segment(m, x)     (((unsigned)(x)) >> MEMORY_OFFSETBITS)
-#define memory_seg2virt(m, s)    (((unsigned)(s)) << MEMORY_OFFSETBITS)
-#define memory_offset(m, x)      (((unsigned)(x)) & ((1 << MEMORY_OFFSETBITS) - 1))
-#define memory_addr2phys(m, x)   ((m)->segment[memory_segment(m, x)] + memory_offset(m, x))
-#define memory_addr_mapped(m, x) (memory_offset(m, x) < (m)->segment_size[memory_segment(m, x)])
+struct memory_st {
+    struct entry segment[MEMORY_NSEGMENT];
+    int segments;
+    bool endian_is_big;
+};
 
-void
-memory_ensure_mapped_range(memory_t *m, uint32_t addr, size_t len)
+struct entry *memory_lookup(memory_t *m, uint64_t addr)
 {
-    unsigned seg;
+    for (int i = 0; i < m->segments; ++i)
+        if (m->segment[i].start <= addr && addr < m->segment[i].end)
+            return m->segment + i;
 
-    // Split it up
-    while (memory_segment(m, addr) != memory_segment(m, addr + len - 1)) {
-        memory_ensure_mapped_range(m, addr, (1 << MEMORY_OFFSETBITS) - memory_offset(m, addr));
-        addr += (1 << MEMORY_OFFSETBITS) - memory_offset(m, addr);
-        assert(len >= (1 << MEMORY_OFFSETBITS) - memory_offset(m, addr));
-        len  -= (1 << MEMORY_OFFSETBITS) - memory_offset(m, addr);
-    }
-
-    seg = memory_segment(m, addr);
-    if (!memory_addr_mapped(m, addr + len - 1)) {
-        m->segment_size[seg] = 1 + memory_offset(m, addr + len - 1);
-        m->segment[seg] = realloc(m->segment[seg], m->segment_size[seg]);
-
-        // Make sure it's good
-        *(char*)(m->segment[seg] + m->segment_size[seg] - 1) = 0;
-    }
-
-    assert(memory_addr_mapped(m, addr + len - 1));
+    return NULL;
 }
 
-void *memory_physical(memory_t *m, uint32_t addr, size_t len)
+void *memory_physical(memory_t *m, uint64_t addr, uint64_t size)
 {
-    void *phys = memory_addr2phys(m, addr);
+    struct entry *e = memory_lookup(m, addr);
 
-    if (!memory_addr_mapped(m, addr))
+    assert(e == memory_lookup(m, addr + size - 1));
+
+    if (e)
+        return e->phys + (addr - e->start);
+    else
         return NULL;
-
-    if (!memory_addr_mapped(m, addr + len - 1))
-        return NULL;
-
-    if (memory_segment(m, addr) != memory_segment(m, addr + len - 1))
-        return NULL;
-
-    return phys;
 }
 
-memory_t *memory_create()
+memory_t *memory_create(void)
 {
     return calloc(sizeof (memory_t), 1);
 }
@@ -150,6 +99,121 @@ uint16_t memory_endian_fix16(memory_t *m, uint16_t v)
     return m->endian_is_big ? htons(v) : v;
 }
 
+static struct entry
+mk_entry(uint64_t start, uint64_t end)
+{
+    return (struct entry) {calloc(end - start, 1), start, end};
+}
+
+
+static void test(memory_t *m);
+
+/*
+ * There is little doubt that this could be implemented more elegantly
+ * and more efficiently.
+ */
+void
+memory_ensure_mapped_range(memory_t *m, uint64_t start, uint64_t end)
+{
+    static int test_it = 0;
+
+    if (test_it) {
+        test_it = 0;
+        test(m);
+    }
+
+    if (end <= start)
+        return;
+
+    struct entry *s0 = memory_lookup(m, start - 1);
+    struct entry *s1 = memory_lookup(m, end   + 1);
+
+    if (!s0 && !s1) {
+        // new entry
+        m->segment[m->segments++] = mk_entry(start, end);
+        return;
+    }
+
+    if (s0 == s1)
+        return;
+
+    if (s0) {
+        // start in [s0.start; s0.end) => grow s0 to [s0.start; end)
+        if (s1) {
+            // Merge 2nd
+            struct entry e = mk_entry(s0->start, s1->end);
+            memcpy(e.phys, s0->phys, s0->end - s0->start);
+            memcpy(e.phys + (s1->start - s0->start),
+                   s1->phys, s1->end - s1->start);
+            free(s0->phys);
+            free(s1->phys);
+            *s1 = m->segment[--m->segments];
+            *s0 = e;
+            return;
+        }
+
+        struct entry e = mk_entry(start = s0->start, end);
+        memcpy(e.phys, s0->phys, s0->end - start);
+        free(s0->phys);
+        *s0 = e;
+
+        return;
+    }
+
+    if (s1) {
+        // end in [s1.start; s1.end) => grow s1 to [start; s1.end)
+        struct entry e = mk_entry(start, end = s1->end);
+        memcpy(e.phys + (s1->start - start),
+               s1->phys,
+               end - s1->start);
+        free(s1->phys);
+        *s1 = e;
+        return;
+    }
+
+    assert(s0 && s1 && s0 != s1);
+
+    // Grow and merge two segments
+    struct entry e = mk_entry(s0->start, s1->end);
+
+    memcpy(e.phys, s0->phys, s0->end - s0->start);
+    memcpy(e.phys + (s1->start - s0->start),
+           s1->phys, s1->end - s1->start);
+
+    free(s0->phys);
+    *s0 = e;
+    free(s1->phys);
+    if (m->segments > 2)
+        *s1 = m->segment[--m->segments];
+}
+
+static void
+list_segments(memory_t *m)
+{
+    printf("Segments\n");
+    for (int i = 0; i < m->segments; ++i)
+        printf("  [%016"PRIx64"; %016"PRIx64")\n",
+               m->segment[i].start,
+               m->segment[i].end);
+}
+
+static void
+test(memory_t *m)
+{
+    static uint64_t starts[] = {
+        0x1000, 0x4000, 0x5000, 0x2000, 0x3000, 0
+    };
+
+    for (int i = 0; starts[i]; ++i) {
+        printf("Add segment [%016"PRIx64"; %016"PRIx64")\n",
+               starts[i], starts[i] + 0x1000);
+
+        memory_ensure_mapped_range(m, starts[i], starts[i] + 0x1000);
+        list_segments(m);
+    }
+
+    exit(0);
+}
 
 // Local Variables:
 // mode: C

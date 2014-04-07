@@ -521,17 +521,20 @@ setup(cpu_state_t *state, elf_info_t *info)
     const uint32_t cmdline_base = 0x0bfff000;
 
     state->pc = info->program_entry;
-    memory_ensure_mapped_range(state->mem, 0x200103f0, 1024*1024);
+    memory_ensure_mapped_range(state->mem, 0x200103f0,
+                               0x200103f0 + 1024*1024);
 
     /* This is mostly copied from lm32_sys.js */
-    memory_ensure_mapped_range(state->mem, 0x08000000, 64*1024*1024);
+    memory_ensure_mapped_range(state->mem, 0x08000000,
+                               0x08000000 + 64*1024*1024);
 
     state->r[1] = hwsetup_base;
     state->r[2] = cmdline_base;
     state->r[3] = initrd_base;
     state->r[4] = initrd_base + initrd_size;
 
-    memory_ensure_mapped_range(state->mem, hwsetup_base, 8192);
+    memory_ensure_mapped_range(state->mem, hwsetup_base,
+                               hwsetup_base + 8192);
     strcpy(memory_physical(state->mem, cmdline_base, 64),
            "root=/dev/ram0 console=ttyS0,115200 ramdisk_size=16384");
 
@@ -548,7 +551,7 @@ static uint64_t
 load(cpu_state_t *s, uint64_t address, int mem_access_size)
 {
     memory_t *m = s->mem;
-    void *p = memory_physical(m, (uint32_t)address, mem_access_size);
+    void *p = memory_physical(m, address, mem_access_size);
 
     if (!p) {
         fprintf(stderr, "SEGFAULT, load from unmapped memory %08"PRIx64"\n", address);
@@ -573,7 +576,7 @@ static void
 store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size)
 {
     memory_t *m = s->mem;
-    void *p = memory_physical(m, (uint32_t)address, mem_access_size);
+    void *p = memory_physical(m, address, mem_access_size);
 
     if (!p) {
         fprintf(stderr, "SEGFAULT, store to unmapped memory %08"PRIx64"\n", address);

@@ -292,7 +292,8 @@ static void
 setup(cpu_state_t *state, elf_info_t *info)
 {
     state->r[27] = state->pc = info->program_entry;
-    memory_ensure_mapped_range(state->mem, 0x200103f0, 1024*1024);
+    memory_ensure_mapped_range(state->mem, 0x200103f0,
+                               0x200103f0 + 1024*1024);
 }
 
 /* executed every cycle */
@@ -305,7 +306,7 @@ static uint64_t
 load(cpu_state_t *s, uint64_t address, int mem_access_size)
 {
     memory_t *m = s->mem;
-    void *p = memory_physical(m, (uint32_t)address, mem_access_size);
+    void *p = memory_physical(m, address, mem_access_size);
 
     if (!p) {
         fprintf(stderr, "SEGFAULT, load from unmapped memory %08"PRIx64"\n", address);
@@ -332,7 +333,7 @@ static void
 store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size)
 {
     memory_t *m = s->mem;
-    void *p = memory_physical(m, (uint32_t)address, mem_access_size);
+    void *p = memory_physical(m, address, mem_access_size);
 
     if (!p) {
         fprintf(stderr, "SEGFAULT, store to unmapped memory %08"PRIx64"\n", address);

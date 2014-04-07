@@ -45,8 +45,8 @@
 #include "arch.h"
 #include "riscv.h"
 
-const uint32_t memory_start = 0x00000000;
-const int memory_size       = 128 * 1024;
+const uint64_t memory_start = 0x00000000;
+const uint64_t memory_size  = 128 * 1024;
 
 const char *reg_name[32] = {
     //  0     1     2     3     4     5     6     7     8     9    10    11
@@ -682,7 +682,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size)
         p = (void *)&iodata + (address & 3);
     }
     else
-        p = memory_physical(m, (uint32_t)address, mem_access_size);
+        p = memory_physical(m, address, mem_access_size);
 
     if (!p) {
         fprintf(stderr, "SEGFAULT, load from unmapped memory %08"PRIx64"\n", address);
@@ -717,7 +717,7 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size)
     }
 
     memory_t *m = s->mem;
-    void *p = memory_physical(m, (uint32_t)address, mem_access_size);
+    void *p = memory_physical(m, address, mem_access_size);
 
     if (!p) {
         fprintf(stderr, "SEGFAULT, store to unmapped memory %08"PRIx64"\n", address);

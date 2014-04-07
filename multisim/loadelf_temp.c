@@ -112,14 +112,12 @@ int SZ(loadelf,)(memory_t *m, char *name, FILE *f, elf_info_t *elf_info)
                         (uint64_t)NATIVE(ph[i].p_vaddr),
                         (uint64_t)NATIVE(ph[i].p_vaddr) + NATIVE(ph[i].p_memsz) - 1);
 
-            // XXX memory_t only supports 32-bit address space - this depends on luck
-            // to work.
             loadsection(f,
                         (unsigned)NATIVE(ph[i].p_offset),
                         (unsigned)NATIVE(ph[i].p_filesz),
                         m,
-                        (uint32_t)NATIVE(ph[i].p_vaddr),
-                        (size_t)NATIVE(ph[i].p_memsz),
+                        NATIVE(ph[i].p_vaddr),
+                        NATIVE(ph[i].p_memsz),
                         elf_info);
         }
 
