@@ -663,7 +663,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size)
     void *p;
     uint32_t iodata;
 
-    if (address & 1 << 31) {
+    if (0 && address & 1 << 31) {
         /* We follow Altera's JTAG UART interface:
 
            The core has two registers, data (addr 0) and control (addr 1):
@@ -708,7 +708,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size)
 static void
 store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size)
 {
-    if (address & 1 << 31) {
+    if (0 && address & 1 << 31) {
         if (address == (1U << 31))
             putchar(value & 255);
         else
