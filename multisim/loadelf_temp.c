@@ -116,7 +116,7 @@ int SZ(loadelf,)(memory_t *m, char *name, FILE *f, elf_info_t *elf_info)
                         (unsigned)NATIVE(ph[i].p_offset),
                         (unsigned)NATIVE(ph[i].p_filesz),
                         m,
-                        NATIVE(ph[i].p_vaddr),
+                        NATIVE(ph[i].p_paddr),
                         NATIVE(ph[i].p_memsz),
                         elf_info);
         }
