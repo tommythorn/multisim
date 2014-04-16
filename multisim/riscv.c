@@ -226,7 +226,6 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
           }
           break;
 
-      // XXX this is not right
       case CSRRS:
           if (i.i.rs1 == 0) {
               switch ((unsigned)i.i.imm11_0) {
@@ -707,9 +706,59 @@ static uint64_t csr_ptbr = 0;
 #define CSR_STATUS_EF	(1 << 4)
 #define CSR_STATUS_U64	(1 << 5)
 #define CSR_STATUS_S64	(1 << 6)
+#define CSR_STATUS_VM	(1 << 7)
+
+static const char *status_field_name[] = {
+    "S",
+    "PS",
+    "EI",
+    "PEI",
+    "EF",
+    "U64",
+    "S64",
+    "VM",
+    "",
+    "IM",
+    "IP",
+};
+
+static int status_field_size[] = {
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    8,
+    8,
+    8,
+    0,
+};
+
+static void print_status(uint32_t status)
+{
+    for (int i = 0; status_field_size[i];
+         ++i, status >>= status_field_size[i]) {
+
+        if (!status_field_name[i][0])
+            continue;
+
+        int v = status & ((1 << status_field_size[i]) - 1);
+
+        if (status_field_size[i] == 1) {
+            if (v)
+                printf(" %s", status_field_name[i]);
+        } else
+            printf(" %s=0x%x", status_field_name[i], v);
+    }
+}
 
 static uint32_t csr_status = CSR_STATUS_U64 | CSR_STATUS_S64 | CSR_STATUS_S;
 static uint64_t csr_evec = 0x2000;
+static uint32_t csr_fatc;
+static uint64_t csr_sup[2];
 
 static uint64_t read_msr(cpu_state_t *state, unsigned csr)
 {
@@ -731,6 +780,11 @@ static uint64_t read_msr(cpu_state_t *state, unsigned csr)
         printf("  RDCYCLE -> %"PRIu64"\n", state->counter);
         return state->counter;
 
+    case 0x500:
+    case 0x501:
+        printf("  Read  CSR sup%d\n", csr & 1);
+        return csr_sup[csr & 1];
+
     case 0x504:
         printf("  Read  CSR ptbr\n");
         return csr_ptbr;
@@ -747,6 +801,10 @@ static uint64_t read_msr(cpu_state_t *state, unsigned csr)
         printf("  Read  CSR hartid\n");
         return 0;
 
+    case 0x50d:
+        printf("  Read  CSR fatc\n");
+        return 0;
+
     default:
         printf("  Read  CSR %x\n", csr);
         return 0;
@@ -756,23 +814,57 @@ static uint64_t read_msr(cpu_state_t *state, unsigned csr)
 static void write_msr(cpu_state_t *state, unsigned csr, uint64_t value)
 {
     switch (csr) {
+    case 0x500:
+    case 0x501:
+        printf("  Write CSR sup%d <- %"PRIx64"\n", csr & 1, value);
+        csr_sup[csr & 1] = value;
+        break;
+
     case 0x504:
-        printf("  Write ptbr <- %"PRIx64"\n", value);
+        printf("  Write CSR ptbr <- %"PRIx64"\n", value);
         csr_ptbr = value;
         break;
 
     case 0x508:
-        printf("  Write evec <- %"PRIx64"\n", value);
+        printf("  Write CSR evec <- %"PRIx64"\n", value);
         csr_evec = value;
         break;
 
     case 0x50a:
-        printf("  Write status <- %"PRIx64"\n", value);
+        /*
+          XXX
+
+          The status register is the same as for RVSbare, with the
+          addition of the VM bit. When a hart’s VM bit is 0, virtual
+          memory is disabled and addresses are untranslated. When the
+          VM bit is set to 1, addresses are translated as described in
+          Chapter 3.3.
+
+        */
+
+
+        printf("  Write CSR status <- %"PRIx64, value);
         csr_status = value;
+        print_status(value); printf("\n");
+        break;
+
+    case 0x50d:
+        /*
+          XXX
+
+          fatc is an ASIDLEN-bit write-only register.  When an address
+          space ID is written to the fatc register, all entries that
+          have the corresponding address space ID in address
+          translation caches will be flushed, except for translations
+          marked as global. When 0 is written, all translations,
+          including globals, are flushed.
+         */
+        printf("  Write CSR fatc <- %"PRIx64"\n", value);
+        csr_fatc = value;
         break;
 
     default:
-        printf("  Write CSR %x <- %"PRIx64"\n", csr, value);
+        printf("  Write CSR 0x%x <- %"PRIx64"\n", csr, value);
         break;
 
     case 0x51e: // tohost
@@ -787,6 +879,9 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size)
     memory_t *m = s->mem;
     void *p;
     uint32_t iodata;
+
+    if (csr_status & CSR_STATUS_VM)
+        warn("VM not yet implemented\n");
 
     if (0 && address & 1 << 31) {
         /* We follow Altera's JTAG UART interface:
@@ -807,7 +902,8 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size)
         p = (void *)&iodata + (address & 3);
     }
     else
-        p = memory_physical(m, address, mem_access_size);
+        p = memory_physical(m, address,
+                            mem_access_size > 0 ? mem_access_size : -mem_access_size);
 
     if (!p) {
         fprintf(stderr, "SEGFAULT, load from unmapped memory %08"PRIx64"\n", address);
@@ -833,6 +929,9 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size)
 static void
 store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size)
 {
+    if (csr_status & CSR_STATUS_VM)
+        warn("VM not yet implemented\n");
+
     if (0 && address & 1 << 31) {
         if (address == (1U << 31))
             putchar(value & 255);
