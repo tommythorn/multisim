@@ -378,7 +378,8 @@ decode(uint64_t inst_addr, uint32_t inst)
       break;
 
     default:
-        warn("Opcode %s not decoded, inst 0x%08x\n", opcode_name[i.r.opcode], i.raw);
+        warn("Opcode %s not decoded, inst %016"PRIx64":%08x\n",
+             opcode_name[i.r.opcode], inst_addr, i.raw);
         break;
     }
 
@@ -641,6 +642,8 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
         return res;
 
     case SYSTEM:
+        res.result = msr_a; // XXX is this needed?
+
         switch (i.r.funct3) {
         case SCALLSBREAK:
             assert(i.r.rs1 == 0 && i.r.funct7 == 0 && i.r.rd == 0);
@@ -652,12 +655,12 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
             assert(0);
             return res;
 
-        case CSRRS:  res.msr_result = i.i.rs1 ? msr_a | op_a : msr_a ; return res;
-        case CSRRSI: res.msr_result = msr_a | i.i.rs1; return res;
-        case CSRRC:  res.msr_result = msr_a &~ op_a; return res;
+        case CSRRS:  res.msr_result = msr_a |  op_a;    return res;
+        case CSRRC:  res.msr_result = msr_a &~ op_a;    return res;
+        case CSRRW:  res.msr_result =          op_a;    return res;
+        case CSRRSI: res.msr_result = msr_a |  i.i.rs1; return res;
         case CSRRCI: res.msr_result = msr_a &~ i.i.rs1; return res;
-        case CSRRW:  res.msr_result = op_a; return res;
-        case CSRRWI: res.msr_result = i.i.rs1; return res;
+        case CSRRWI: res.msr_result =          i.i.rs1; return res;
 
         default:
             assert(0);
@@ -665,9 +668,9 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
         break;
 
     default:
-        warn("Opcode %s exec not implemented, inst 0x%08x "
+        warn("Opcode %s exec not implemented, inst %016"PRIx64":%08x "
              "i{%x,%s,%x,%s,%s,%x}\n",
-             opcode_name[i.r.opcode], i.raw,
+             opcode_name[i.r.opcode], dec.inst_addr, i.raw,
              i.i.imm11_0, reg_name[i.r.rs1], i.r.funct3,
              reg_name[i.r.rd],
              opcode_name[i.r.opcode], i.r.opext);
@@ -874,6 +877,95 @@ static void write_msr(cpu_state_t *state, unsigned csr, uint64_t value)
 }
 
 static uint64_t
+virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size)
+{
+    int vpn[3] = {
+        address >> 13 & 1023,
+        address >> 23 & 1023,
+        address >> 33 & 1023,
+    };
+
+    if (0)
+    warn("virt2phys(%016"PRIx64" = <%d,%d,%d,%d>)\n", address, vpn[2], vpn[1], vpn[0],
+         (int)address & 8191);
+
+    uint64_t a = csr_ptbr;
+
+    for (int i = 2;; --i) {
+
+        if (0) { // XXX I could walk the complete table, counting virtual and physical pages, looking
+            // for aliases and virtual and physical memory holes...
+
+            warn("  Level %d page table @ %016"PRIx64"\n", i, a);
+            for (int j = 0; j < 1024; ++j) {
+                uint64_t pte = *(uint64_t *)memory_physical(s->mem, a + j * 8, 8);
+
+                warn("   %016"PRIx64" = %4d %4d %4d Perm 0%o%s%s%s\n",
+                     pte,
+                     (int)(pte >> 33 & 1023),
+                     (int)(pte >> 23 & 1023),
+                     (int)(pte >> 13 & 1023),
+
+                     (int)(pte >> 3 & 077),
+
+                     pte >> 2 & 1 ? "G" : " ",
+                     pte >> 1 & 1 ? "T" : " ",
+                     pte >> 0 & 1 ? "V" : " ");
+            }
+        }
+
+        uint64_t pte = *(uint64_t *)memory_physical(s->mem, a + vpn[i] * 8, 8);
+
+        if (0)
+        warn("  %016"PRIx64"[%d]: pte[%d] = %016"PRIx64" = %4d %4d %4d Perm 0%o%s%s%s\n",
+             a, vpn[i],
+             i, pte,
+             (int)(pte >> 33 & 1023),
+             (int)(pte >> 23 & 1023),
+             (int)(pte >> 13 & 1023),
+
+             (int)(pte >> 3 & 077),
+
+             pte >> 2 & 1 ? "G" : " ",
+             pte >> 1 & 1 ? "T" : " ",
+             pte >> 0 & 1 ? "V" : " ");
+
+        if ((pte >> 0 & 1) == 0) // V
+            break; // Error, not valid
+
+        if ((pte >> 1 & 1) == 0) { // T
+            uint64_t ppn[3];
+
+            for (int j = 0; j < 3; ++j) {
+                ppn[j] = pte >> (10 * j + 13) & 1023;
+                if (j < i)
+                    ppn[j] = vpn[j];
+            }
+
+            uint64_t phys =
+                ppn[2] << 33 |
+                ppn[1] << 23 |
+                ppn[0] << 13 |
+                address & 8191;
+
+            if (0)
+            warn("  final physical address = %016"PRIx64"\n", phys);
+
+            return phys;
+        }
+
+        if (i == 0)
+            break;
+
+        a = pte & ~8191ULL;
+    }
+
+    warn("  Address error\n");
+
+    exit(1);
+}
+
+static uint64_t
 load(cpu_state_t *s, uint64_t address, int mem_access_size)
 {
     memory_t *m = s->mem;
@@ -881,7 +973,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size)
     uint32_t iodata;
 
     if (csr_status & CSR_STATUS_VM)
-        warn("VM not yet implemented\n");
+        address = virt2phys(s, address, mem_access_size);
 
     if (0 && address & 1 << 31) {
         /* We follow Altera's JTAG UART interface:
@@ -930,7 +1022,7 @@ static void
 store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size)
 {
     if (csr_status & CSR_STATUS_VM)
-        warn("VM not yet implemented\n");
+        address = virt2phys(s, address, mem_access_size);
 
     if (0 && address & 1 << 31) {
         if (address == (1U << 31))
