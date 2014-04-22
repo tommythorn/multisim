@@ -79,6 +79,7 @@ typedef enum isa_inst_class_e {
     isa_inst_class_jump,
     isa_inst_class_branch,
     isa_inst_class_compjump,
+    isa_inst_class_atomic,
 } isa_inst_class_t;
 
 /*
@@ -133,6 +134,12 @@ typedef struct isa_result_st {
 
 typedef struct cpu_state_st cpu_state_t;
 
+typedef enum memory_exception_e {
+    MEMORY_SUCCESS	= 0,	// normal
+    MEMORY_EXCEPTION	= 1,	// load/store updated the state
+    MEMORY_FATAL	= 2,	// cannot proceed simulation
+} memory_exception_t;
+
 typedef struct isa_st {
     /*
      * Many RISC architectures have a special register which reads as
@@ -175,8 +182,8 @@ typedef struct isa_st {
      * Memory access - is responsible for dealing with any MMU, IO,
      * etc mapping and semantic.
      */
-    uint64_t (*load)(cpu_state_t *, uint64_t address, int mem_access_size);
-    void (*store)(cpu_state_t *, uint64_t address, uint64_t value, int mem_access_size);
+    uint64_t (*load)(cpu_state_t *, uint64_t address, int mem_access_size, memory_exception_t *e);
+    void (*store)(cpu_state_t *, uint64_t address, uint64_t value, int mem_access_size, memory_exception_t *e);
 } arch_t;
 
 const arch_t *get_arch(uint16_t machine, bool is_64bit);

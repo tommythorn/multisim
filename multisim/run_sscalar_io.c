@@ -55,6 +55,7 @@ step_sscalar_in_order(
     const arch_t *arch, cpu_state_t *state, cpu_state_t *costate,
     verbosity_t verbosity)
 {
+    memory_exception_t error;
     uint64_t *r = state->r;
     int n_load = 0;
     int n_store = 0;
@@ -66,11 +67,14 @@ step_sscalar_in_order(
      */
 
     while ((fetch_number + 1) % WINDOW_SIZE != issue_number % WINDOW_SIZE) {
-        uint32_t i = arch->load(state, state->pc, 4);
+        memory_exception_t error;
+        uint32_t i = arch->load(state, state->pc, 4, &error);
 
-        if (state->fatal_error)
-            // XXX We should be able to poison the instruction instead
+        if (error == MEMORY_FATAL)
             return true;
+
+        if (error != MEMORY_SUCCESS)
+            break;
 
         isa_decoded_t dec = arch->decode(state->pc, i);
 
@@ -140,26 +144,27 @@ step_sscalar_in_order(
             return true;
 
         switch (rs->dec.class) {
+        case isa_inst_class_atomic:
+            assert(0); // This would require a bit more thought
+
         case isa_inst_class_alu:
             break;
 
         case isa_inst_class_load:
             loadaddress = res.result;
-            res.result = arch->load(state, res.result, rs->dec.loadstore_size);
+            res.result = arch->load(state, res.result, rs->dec.loadstore_size, &error);
             res.result = CANONICALIZE(res.result);
 
-            if (state->fatal_error)
-                // XXX We should be able to poison the instruction instead
-                return true;
+            if (error != MEMORY_SUCCESS)
+                return (error == MEMORY_FATAL);
 
             break;
 
         case isa_inst_class_store:
-            arch->store(state, res.result, res.store_value, rs->dec.loadstore_size);
+            arch->store(state, res.result, res.store_value, rs->dec.loadstore_size, &error);
 
-            if (state->fatal_error)
-                // XXX We should be able to poison the instruction instead
-                return true;
+            if (error != MEMORY_SUCCESS)
+                return (error == MEMORY_FATAL);
 
             break;
 

@@ -19,18 +19,17 @@
  */
 
 /*
- * Goal is RV32G (== RV32I2M2A2F2D2, but really RV32IMAFD)
- * thought RV64G would get me closer to Linux
+ * Goal is RV64G, booting Linux
  *
  * Status:
  *
  * I - Implemented all,
- *   SYSTEM (SCALL, SBREAK) and all the CSRs
+ *   SYSTEM (SCALL, SBREAK) and all the CSRs -- Partially done
  *
  * M - Fix the implementation of
- *   MULH, MULHSU, MULHU, REM, REMW
+ *   MULH, MULHSU, MULHU, REM, REMW -- DONE
  *
- * A - Atomics, not sure how they would fit in the framework
+ * A - Atomics -- DONE
  *
  * FD - Floating point, Just Do It!
  */
@@ -40,9 +39,47 @@
 #include <stdint.h>
 #include <assert.h>
 #include <sys/time.h>
+#include "bitfields.h"
 #include "sim.h"
 #include "arch.h"
 #include "riscv.h"
+
+static const char *csr_name[0x1000] = {
+    [CSR_FFLAGS]	= "fflags",
+    [CSR_FRM]		= "frm",
+    [CSR_FCSR]		= "fcsr",
+
+    [CSR_SUP0]		= "sup0",
+    [CSR_SUP1]		= "sup1",
+    [CSR_EPC]		= "epc",
+    [CSR_BADVADDR]	= "badvaddr",
+    [CSR_PTBR]		= "ptbr",
+    [CSR_ASID]		= "asid",
+    [CSR_COUNT]		= "count",
+    [CSR_COMPARE]	= "compare",
+    [CSR_EVEC]		= "evec",
+    [CSR_CAUSE]		= "cause",
+    [CSR_STATUS]	= "status",
+    [CSR_HARTID]	= "hartid",
+    [CSR_IMPL]		= "impl",
+    [CSR_FATC]		= "fatc",
+    [CSR_SEND_IPI]	= "send_ipi",
+    [CSR_CLEAR_IPI]	= "clear_ipi",
+    [CSR_TOHOST]	= "tohost",
+    [CSR_FROMHOST]	= "fromhost",
+
+    [CSR_CYCLE]		= "cycle",
+    [CSR_TIME]		= "time",
+    [CSR_INSTRET]	= "instret",
+};
+
+static uint64_t csr[0x1000] = {
+    [CSR_EVEC] = 0x2000,
+    [CSR_STATUS] =
+    BF_PACK(CSR_STATUS_U64_BF, 1) |
+    BF_PACK(CSR_STATUS_S64_BF, 1) |
+    BF_PACK(CSR_STATUS_S_BF,   1),
+};
 
 const uint64_t memory_start = 0x00000000;
 const uint64_t memory_size  = 128 * 1024;
@@ -83,6 +120,67 @@ const char *opcode_op_div_name[8] = {
 const char *opcode_op_branch_name[8] = {
     "beq", "bne", "?", "?", "blt", "bge", "bltu", "bgeu",
 };
+
+const char *opcode_amo_name[32] = {
+    [AMOADD]    = "amoadd",
+    [AMOAND]    = "amoand",
+    [AMOMAX]    = "amomax",
+    [AMOMAXU]   = "amomaxu",
+    [AMOMIN]    = "amomin",
+    [AMOMINU]   = "amominu",
+    [AMOOR]     = "amoor",
+    [AMOSWAP]   = "amoswap",
+    [AMOXOR]    = "amoxor",
+    [LR]        = "lr",
+    [SC]        = "sc",
+};
+
+static const char *status_field_name[] = {
+    "S",
+    "PS",
+    "EI",
+    "PEI",
+    "EF",
+    "U64",
+    "S64",
+    "VM",
+    "",
+    "IM",
+    "IP",
+};
+
+static int status_field_size[] = {
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    8,
+    8,
+    8,
+    0,
+};
+
+static void print_status(uint32_t status)
+{
+    for (int i = 0; status_field_size[i];
+         ++i, status >>= status_field_size[i]) {
+
+        if (!status_field_name[i][0])
+            continue;
+
+        int v = status & ((1 << status_field_size[i]) - 1);
+
+        if (status_field_size[i] == 1) {
+            if (v)
+                printf(" %s", status_field_name[i]);
+        } else
+            printf(" %s=0x%x", status_field_name[i], v);
+    }
+}
 
 static void
 disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
@@ -136,7 +234,37 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
 
 //  case STORE_FP:
 //  case CUSTOM1:
-//  case AMO:
+    case AMO: {
+        char inst[16];
+        char *suffix = i.r.funct3 & 1 ? ".d" : ".w";
+        char *aq = i.r.funct7 & 2 ? ".aq" : "";
+        char *rl = i.r.funct7 & 1 ? ".rl" : "";
+
+        switch (i.r.funct7 >> 2) {
+        case LR:
+            snprintf(inst, sizeof inst, "lr%s%s%s", suffix, aq, rl);
+            snprintf(buf, buf_size, "%-11sr%d,(r%d)", inst,
+                     i.r.rd, i.r.rs1);
+            break;
+        case SC:
+        case AMOSWAP:
+        case AMOADD:
+        case AMOXOR:
+        case AMOAND:
+        case AMOOR:
+        case AMOMIN:
+        case AMOMAX:
+        case AMOMINU:
+        case AMOMAXU:
+            snprintf(inst, sizeof inst, "%s%s%s%s",
+                     opcode_amo_name[i.r.funct7 >> 2], suffix, aq, rl);
+            snprintf(buf, buf_size, "%-11sr%d,r%d,(r%d)", inst,
+                     i.r.rd, i.r.rs2, i.r.rs1);
+            break;
+        }
+        }
+        break;
+
     case OP:
         if (i.r.funct7 == 1)
             snprintf(buf, buf_size, "%-11sr%d,r%d,r%d",
@@ -217,11 +345,10 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
   case SYSTEM:
       switch (i.r.funct3) {
       case SCALLSBREAK:
-          assert(i.r.rs1 == 0 && i.r.funct7 == 0 && i.r.rd == 0);
-
-          switch (i.s.rs2) {
+          switch (i.i.imm11_0) {
           case 0: snprintf(buf, buf_size, "%-11s", "scall"); return;
           case 1: snprintf(buf, buf_size, "%-11s", "sbreak"); return;
+          case -0x800: snprintf(buf, buf_size, "%-11s", "sret"); return;
           default: assert(0);
           }
           break;
@@ -232,17 +359,17 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
               case 0xC00: snprintf(buf, buf_size, "%-11sr%d", "rdcycle",   i.i.rd); return;
               case 0xC01: snprintf(buf, buf_size, "%-11sr%d", "rdtime",    i.i.rd); return;
               case 0xC02: snprintf(buf, buf_size, "%-11sr%d", "rdinstret", i.i.rd); return;
-              default:    snprintf(buf, buf_size, "%-11sr%d,$%d", "csrr",  i.i.rd, i.i.imm11_0); return;
+              default:    snprintf(buf, buf_size, "%-11sr%d,$%03x", "csrr",  i.i.rd, i.i.imm11_0); return;
               }
           } else
-              snprintf(buf, buf_size, "%-11sr%d,$%d,r%d",  "csrrs", i.i.rd, i.i.imm11_0, i.i.rs1); return;
+              snprintf(buf, buf_size, "%-11sr%d,$%03x,r%d",  "csrrs", i.i.rd, i.i.imm11_0, i.i.rs1); return;
           break;
 
-      case CSRRSI: snprintf(buf, buf_size, "%-11sr%d,$%d,%d",  "csrrsi", i.i.rd, i.i.imm11_0, i.i.rs1); return;
-      case CSRRC:  snprintf(buf, buf_size, "%-11sr%d,$%d,r%d", "csrrc",  i.i.rd, i.i.imm11_0, i.i.rs1); return;
-      case CSRRCI: snprintf(buf, buf_size, "%-11sr%d,$%d,%d",  "csrrci", i.i.rd, i.i.imm11_0, i.i.rs1); return;
-      case CSRRW:  snprintf(buf, buf_size, "%-11sr%d,$%d,r%d", "csrrw",  i.i.rd, i.i.imm11_0, i.i.rs1); return;
-      case CSRRWI: snprintf(buf, buf_size, "%-11sr%d,$%d,%d",  "csrrwi", i.i.rd, i.i.imm11_0, i.i.rs1); return;
+      case CSRRSI: snprintf(buf, buf_size, "%-11sr%d,$%03x,%d",  "csrrsi", i.i.rd, i.i.imm11_0, i.i.rs1); return;
+      case CSRRC:  snprintf(buf, buf_size, "%-11sr%d,$%03x,r%d", "csrrc",  i.i.rd, i.i.imm11_0, i.i.rs1); return;
+      case CSRRCI: snprintf(buf, buf_size, "%-11sr%d,$%03x,%d",  "csrrci", i.i.rd, i.i.imm11_0, i.i.rs1); return;
+      case CSRRW:  snprintf(buf, buf_size, "%-11sr%d,$%03x,r%d", "csrrw",  i.i.rd, i.i.imm11_0, i.i.rs1); return;
+      case CSRRWI: snprintf(buf, buf_size, "%-11sr%d,$%03x,%d",  "csrrwi", i.i.rd, i.i.imm11_0, i.i.rs1); return;
 
       default:
           assert(0); // XXX more to implement
@@ -302,6 +429,41 @@ decode(uint64_t inst_addr, uint32_t inst)
         dec.source_reg_b = i.s.rs2;
         break;
 
+    case AMO: {
+        switch (i.r.funct7 >> 2) {
+        case LR:
+            dec.class        = isa_inst_class_load;
+            dec.loadstore_size = i.r.funct3 & 1 ? 8 : 4;
+            dec.source_reg_a = i.i.rs1;
+            dec.dest_reg     = i.i.rd;
+            break;
+
+        case SC:
+            dec.class        = isa_inst_class_store;
+            dec.loadstore_size = i.r.funct3 & 1 ? 8 : 4;
+            dec.source_reg_a = i.s.rs1;
+            dec.source_reg_b = i.s.rs2;
+            break;
+
+        case AMOADD:
+        case AMOAND:
+        case AMOMAX:
+        case AMOMAXU:
+        case AMOMIN:
+        case AMOMINU:
+        case AMOOR:
+        case AMOSWAP:
+        case AMOXOR:
+            dec.class          = isa_inst_class_atomic;
+            dec.loadstore_size = i.r.funct3 & 1 ? 8 : -4;
+            dec.source_reg_a   = i.s.rs1;
+            dec.source_reg_b   = i.s.rs2;
+            dec.dest_reg       = i.i.rd;
+            break;
+        };
+        break;
+    }
+
     case OP:
     case OP_32:
         /* RV32M */
@@ -321,13 +483,13 @@ decode(uint64_t inst_addr, uint32_t inst)
 
         dec.class             = isa_inst_class_branch;
         dec.jumpbranch_target = inst_addr + imm;
-        dec.source_reg_a = i.r.rs1;
-        dec.source_reg_b = i.r.rs2;
+        dec.source_reg_a      = i.r.rs1;
+        dec.source_reg_b      = i.r.rs2;
         break;
     }
 
     case JALR:
-        dec.class             = isa_inst_class_compjump;
+        dec.class        = isa_inst_class_compjump;
         dec.source_reg_a = i.i.rs1;
         dec.dest_reg     = i.i.rd;
         break;
@@ -349,28 +511,38 @@ decode(uint64_t inst_addr, uint32_t inst)
   case SYSTEM:
       switch (i.r.funct3) {
       case SCALLSBREAK:
-          assert(i.r.rs1 == 0 && i.r.funct7 == 0 && i.r.rd == 0);
-          assert(0); // Not implemented yet
-
-          switch (i.s.rs2) {
+          switch (i.i.imm11_0) {
           case 0: // SCALL
               assert(0);
           case 1: // SBREAK
               assert(0);
+          case -0x800: // SRET
+              // XXX but it has a speculation barrier not accounted for
+              dec.class = isa_inst_class_compjump;
+              dec.source_msr_a = CSR_STATUS;
+              dec.dest_msr = CSR_STATUS;
+              break;
           default:
               assert(0);
           }
+          break;
 
       case CSRRS:
+          if (i.i.rs1 == 0) {
+              dec.source_msr_a = 0xFFF & (unsigned) i.i.imm11_0;
+              dec.dest_reg     = i.i.rd;
+              break;
+          }
+
       case CSRRC:
       case CSRRW:
-              dec.source_reg_a = i.i.rs1;
+          dec.source_reg_a = i.i.rs1;
       case CSRRSI:
       case CSRRCI:
       case CSRRWI:
-              dec.dest_msr     = i.i.imm11_0;
-              dec.source_msr_a = i.i.imm11_0;
-              dec.dest_reg     = i.i.rd;
+          dec.dest_msr     = 0xFFF & (unsigned) i.i.imm11_0;
+          dec.source_msr_a = 0xFFF & (unsigned) i.i.imm11_0;
+          dec.dest_reg     = i.i.rd;
               break;
       default:
           assert(0);
@@ -472,6 +644,33 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
         res.store_value = op_b;
         res.result = ea_store;
         return res;
+
+    case AMO: {
+        switch (i.r.funct7 >> 2) {
+        case LR:
+            res.result = op_a;
+            break;
+
+        case SC:
+            res.store_value = op_b;
+            res.result = op_a;
+            assert(0); // XXX The framework current doesn't allow for
+            // seperate store and writeback values
+            break;
+
+        case AMOADD:	res.result = op_a + op_b; break;
+        case AMOAND:	res.result = op_a & op_b; break;
+        case AMOMAX:	res.result = op_a   < op_b   ? op_b : op_a; break;
+        case AMOMAXU:	res.result = op_a_u < op_b_u ? op_b : op_a; break;
+        case AMOMIN:	res.result = op_a   > op_b   ? op_b : op_a; break;
+        case AMOMINU:	res.result = op_a_u > op_b_u ? op_b : op_a; break;
+        case AMOOR:	res.result = op_a | op_b; break;
+        case AMOSWAP:	res.result = op_b; break;
+        case AMOXOR:	res.result = op_a ^ op_b; break;
+        }
+
+        return res;
+    }
 
     case OP:
         if (i.r.funct7 == 1)
@@ -646,11 +845,24 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
 
         switch (i.r.funct3) {
         case SCALLSBREAK:
-            assert(i.r.rs1 == 0 && i.r.funct7 == 0 && i.r.rd == 0);
-
-            switch (i.s.rs2) {
+            switch (i.i.imm11_0) {
             case 0: printf("SCALL"); break;
             case 1: printf("SBREAK"); break;
+            case -0x800:
+                res.compjump_target = csr[CSR_EPC];
+
+                /* Pop the S and EI bits from PS and PEI respectively */
+                res.msr_result =
+                    BF_SET(msr_a, CSR_STATUS_S_BF,
+                           BF_GET(CSR_STATUS_PS_BF, msr_a));
+                res.msr_result =
+                    BF_SET(res.msr_result, CSR_STATUS_EI_BF,
+                           BF_GET(CSR_STATUS_PEI_BF, msr_a));
+                printf("\n SRET; status now ");
+                print_status(res.msr_result);
+                printf("\n");
+
+                return res;
             }
             assert(0);
             return res;
@@ -683,157 +895,70 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
     return res;
 }
 
-/* executed every cycle */
-static void tick(cpu_state_t *state)
+static void raise(cpu_state_t *s, uint64_t cause)
 {
-    ++state->counter;
+    s->pc = csr[CSR_EVEC];
+    // XXX not correct in case of instruction fetches
+    csr[CSR_CAUSE] = cause;
+
+    /* Save S in PS, and set S */
+    csr[CSR_STATUS] =
+        BF_SET(csr[CSR_STATUS], CSR_STATUS_PS_BF,
+               BF_GET(CSR_STATUS_S_BF, csr[CSR_STATUS]))
+        | BF_PACK(CSR_STATUS_S_BF, 1);
+
+    /* Save EI in PEI and clear EI */
+    csr[CSR_STATUS] =
+        BF_SET(csr[CSR_STATUS], CSR_STATUS_PEI_BF,
+               BF_GET(CSR_STATUS_EI_BF, csr[CSR_STATUS]));
+    csr[CSR_STATUS] =
+        BF_SET(csr[CSR_STATUS], CSR_STATUS_EI_BF, 0);
 }
 
-static uint64_t csr_ptbr = 0;
-
-/*
-#define CSR_STATUS_S	0:0
-#define CSR_STATUS_PS	1:1
-#define CSR_STATUS_EI	2:2
-#define CSR_STATUS_PEI	3:3
-#define CSR_STATUS_EF	4:4
-#define CSR_STATUS_U64	5:5
-#define CSR_STATUS_S64	6:6
-#define CSR_STATUS_IM  23:16
-#define CSR_STATUS_IP  31:24
-*/
-#define CSR_STATUS_S	(1 << 0)
-#define CSR_STATUS_PS	(1 << 1)
-#define CSR_STATUS_EI	(1 << 2)
-#define CSR_STATUS_PEI	(1 << 3)
-#define CSR_STATUS_EF	(1 << 4)
-#define CSR_STATUS_U64	(1 << 5)
-#define CSR_STATUS_S64	(1 << 6)
-#define CSR_STATUS_VM	(1 << 7)
-
-static const char *status_field_name[] = {
-    "S",
-    "PS",
-    "EI",
-    "PEI",
-    "EF",
-    "U64",
-    "S64",
-    "VM",
-    "",
-    "IM",
-    "IP",
-};
-
-static int status_field_size[] = {
-    1,
-    1,
-    1,
-    1,
-    1,
-    1,
-    1,
-    1,
-    8,
-    8,
-    8,
-    0,
-};
-
-static void print_status(uint32_t status)
+/* executed every cycle */
+static void tick(cpu_state_t *s)
 {
-    for (int i = 0; status_field_size[i];
-         ++i, status >>= status_field_size[i]) {
+    // XXX for now, an instruction per tick
+    ++csr[CSR_INSTRET];
+    ++csr[CSR_CYCLE];
+    csr[CSR_COUNT] = (uint32_t) (csr[CSR_COUNT] + 1);
 
-        if (!status_field_name[i][0])
-            continue;
+    if ((uint32_t)csr[CSR_COUNT] == (uint32_t)csr[CSR_COMPARE] &&
+        BF_GET(CSR_STATUS_IM_BF, csr[CSR_STATUS]) & 128 &&
+        BF_GET(CSR_STATUS_EI_BF, csr[CSR_STATUS])) {
 
-        int v = status & ((1 << status_field_size[i]) - 1);
-
-        if (status_field_size[i] == 1) {
-            if (v)
-                printf(" %s", status_field_name[i]);
-        } else
-            printf(" %s=0x%x", status_field_name[i], v);
+        raise(s, (1ULL << 63) | 7);
     }
 }
 
-static uint32_t csr_status = CSR_STATUS_U64 | CSR_STATUS_S64 | CSR_STATUS_S;
-static uint64_t csr_evec = 0x2000;
-static uint32_t csr_fatc;
-static uint64_t csr_sup[2];
-
-static uint64_t read_msr(cpu_state_t *state, unsigned csr)
+static uint64_t read_msr(cpu_state_t *state, unsigned csrno)
 {
-    switch (csr) {
-    case CSR_CYCLE:
-        printf("  RDCYCLE -> %"PRIu64"\n", state->counter);
-        return state->counter;
-
+    switch (csrno) {
     case CSR_TIME: {
      struct timeval tv;
      gettimeofday(&tv, NULL);
      uint64_t now = tv.tv_sec * 1000000LL + tv.tv_usec;
-     printf("  RDTIME -> %"PRIu64"\n", now);
+     //printf("  RDTIME -> %"PRIu64"\n", now);
      return now;
     }
 
-    case CSR_INSTRET:
-        // XXX for now, an instruction per tick
-        printf("  RDCYCLE -> %"PRIu64"\n", state->counter);
-        return state->counter;
-
-    case 0x500:
-    case 0x501:
-        printf("  Read  CSR sup%d\n", csr & 1);
-        return csr_sup[csr & 1];
-
-    case 0x504:
-        printf("  Read  CSR ptbr\n");
-        return csr_ptbr;
-
-    case 0x508:
-        printf("  Read  CSR evec\n");
-        return csr_evec;
-
-    case 0x50a:
-        printf("  Read  CSR status\n");
-        return csr_status;
-
-    case 0x50b:
-        printf("  Read  CSR hartid\n");
-        return 0;
-
-    case 0x50d:
-        printf("  Read  CSR fatc\n");
-        return 0;
-
     default:
-        printf("  Read  CSR %x\n", csr);
-        return 0;
+        //printf("  Read  CSR 0x%03x -> %"PRIu64"\n", csrno, csr[csrno]);
+        return csr[csrno];
     }
 }
 
-static void write_msr(cpu_state_t *state, unsigned csr, uint64_t value)
+static void write_msr(cpu_state_t *state, unsigned csrno, uint64_t value)
 {
-    switch (csr) {
-    case 0x500:
-    case 0x501:
-        printf("  Write CSR sup%d <- %"PRIx64"\n", csr & 1, value);
-        csr_sup[csr & 1] = value;
+    printf("  Write CSR %s <- %"PRIx64"\n", csr_name[csrno], value);
+    csr[csrno] = value; // XXX should check permissions and width
+                        // constraints, as well as non-existing CSRs.
+
+    switch (csrno) {
+    default:
         break;
 
-    case 0x504:
-        printf("  Write CSR ptbr <- %"PRIx64"\n", value);
-        csr_ptbr = value;
-        break;
-
-    case 0x508:
-        printf("  Write CSR evec <- %"PRIx64"\n", value);
-        csr_evec = value;
-        break;
-
-    case 0x50a:
+    case CSR_STATUS:
         /*
           XXX
 
@@ -843,41 +968,24 @@ static void write_msr(cpu_state_t *state, unsigned csr, uint64_t value)
           VM bit is set to 1, addresses are translated as described in
           Chapter 3.3.
 
+        printf("  ");
+        print_status(value);
+        printf("\n");
+
         */
 
-
-        printf("  Write CSR status <- %"PRIx64, value);
-        csr_status = value;
-        print_status(value); printf("\n");
         break;
 
-    case 0x50d:
-        /*
-          XXX
-
-          fatc is an ASIDLEN-bit write-only register.  When an address
-          space ID is written to the fatc register, all entries that
-          have the corresponding address space ID in address
-          translation caches will be flushed, except for translations
-          marked as global. When 0 is written, all translations,
-          including globals, are flushed.
-         */
-        printf("  Write CSR fatc <- %"PRIx64"\n", value);
-        csr_fatc = value;
-        break;
-
-    default:
-        printf("  Write CSR 0x%x <- %"PRIx64"\n", csr, value);
-        break;
-
-    case 0x51e: // tohost
+    case CSR_TOHOST: // tohost
         printf("HOST RESULT %"PRId64"\n", value);
-        exit(0);
+        //exit(0);
     }
 }
 
+bool debug_vm = false; // to be enabled in the debugger
+
 static uint64_t
-virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size)
+virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *error)
 {
     int vpn[3] = {
         address >> 13 & 1023,
@@ -885,22 +993,27 @@ virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size)
         address >> 33 & 1023,
     };
 
-    if (0)
-    warn("virt2phys(%016"PRIx64" = <%d,%d,%d,%d>)\n", address, vpn[2], vpn[1], vpn[0],
+    //XXX
+    //if (address == 0x4000) debug_vm = true;
+
+    *error = MEMORY_SUCCESS;
+
+    if (debug_vm)
+    printf("virt2phys(%016"PRIx64" = <%d,%d,%d,%d>)\n", address, vpn[2], vpn[1], vpn[0],
          (int)address & 8191);
 
-    uint64_t a = csr_ptbr;
+    uint64_t a = csr[CSR_PTBR];
 
-    for (int i = 2;; --i) {
+    for (int i = 2; 0 <= i; --i) {
 
         if (0) { // XXX I could walk the complete table, counting virtual and physical pages, looking
             // for aliases and virtual and physical memory holes...
 
-            warn("  Level %d page table @ %016"PRIx64"\n", i, a);
+            printf("  Level %d page table @ %016"PRIx64"\n", i, a);
             for (int j = 0; j < 1024; ++j) {
                 uint64_t pte = *(uint64_t *)memory_physical(s->mem, a + j * 8, 8);
 
-                warn("   %016"PRIx64" = %4d %4d %4d Perm 0%o%s%s%s\n",
+                printf("   %016"PRIx64" = %4d %4d %4d Perm 0%o%s%s%s\n",
                      pte,
                      (int)(pte >> 33 & 1023),
                      (int)(pte >> 23 & 1023),
@@ -916,8 +1029,8 @@ virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size)
 
         uint64_t pte = *(uint64_t *)memory_physical(s->mem, a + vpn[i] * 8, 8);
 
-        if (0)
-        warn("  %016"PRIx64"[%d]: pte[%d] = %016"PRIx64" = %4d %4d %4d Perm 0%o%s%s%s\n",
+        if (debug_vm)
+        printf("  %016"PRIx64"[%d]: pte[%d] = %016"PRIx64" = %4d %4d %4d Perm 0%o%s%s%s\n",
              a, vpn[i],
              i, pte,
              (int)(pte >> 33 & 1023),
@@ -930,8 +1043,21 @@ virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size)
              pte >> 1 & 1 ? "T" : " ",
              pte >> 0 & 1 ? "V" : " ");
 
-        if ((pte >> 0 & 1) == 0) // V
-            break; // Error, not valid
+        if ((pte >> 0 & 1) == 0) { // V
+            printf("  Invalid mapping: %016"PRIx64"[%d]: pte[%d] = %016"PRIx64" = %4d %4d %4d Perm 0%o%s%s%s\n",
+             a, vpn[i],
+             i, pte,
+             (int)(pte >> 33 & 1023),
+             (int)(pte >> 23 & 1023),
+             (int)(pte >> 13 & 1023),
+
+             (int)(pte >> 3 & 077),
+
+             pte >> 2 & 1 ? "G" : " ",
+             pte >> 1 & 1 ? "T" : " ",
+             pte >> 0 & 1 ? "V" : " ");
+            goto exception;
+        }
 
         if ((pte >> 1 & 1) == 0) { // T
             uint64_t ppn[3];
@@ -948,40 +1074,49 @@ virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size)
                 ppn[0] << 13 |
                 address & 8191;
 
-            if (0)
-            warn("  final physical address = %016"PRIx64"\n", phys);
+            if (debug_vm)
+            printf("  final physical address = %016"PRIx64"\n", phys);
 
             return phys;
         }
 
-        if (i == 0)
-            break;
-
         a = pte & ~8191ULL;
     }
 
-    warn("  Address error\n");
+    printf("Impossible?\n");
 
-    exit(1);
+exception:
+    *error = MEMORY_EXCEPTION;
+
+    return 0;
 }
 
 static uint64_t
-load(cpu_state_t *s, uint64_t address, int mem_access_size)
+load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *error)
 {
     memory_t *m = s->mem;
     void *p;
     uint32_t iodata;
 
-    if (csr_status & CSR_STATUS_VM)
-        address = virt2phys(s, address, mem_access_size);
+    *error = MEMORY_SUCCESS;
+
+    if (BF_GET(CSR_STATUS_VM_BF, csr[CSR_STATUS])) {
+        address = virt2phys(s, address, mem_access_size, error);
+        if (*error != MEMORY_SUCCESS) {
+            raise(s, 10); // XXX CSR_CAUSE_LOAD_FAULT_BF
+            csr[CSR_BADVADDR] = address;
+
+            return 0;
+        }
+    }
 
     if (0 && address & 1 << 31) {
         /* We follow Altera's JTAG UART interface:
 
            The core has two registers, data (addr 0) and control (addr 1):
 
-           data    (R/W): RAVAIL:16 	   RVALID:1 RSERV:7	     DATA:8
-           control (R/W): WSPACE:16 	   RSERV:5 AC:1 WI:1 RI:1    RSERV:6 WE:1 RE:1
+           data    (R/W): RAVAIL:16        RVALID:1 RSERV:7          DATA:8
+           control (R/W): WSPACE:16        RSERV:5 AC:1 WI:1 RI:1    RSERV:6 WE:1 RE:1
         */
         iodata = 0;
         if ((address & 4) == 0) {
@@ -998,7 +1133,9 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size)
                             mem_access_size > 0 ? mem_access_size : -mem_access_size);
 
     if (!p) {
-        fprintf(stderr, "SEGFAULT, load from unmapped memory %08"PRIx64"\n", address);
+        raise(s, 10); // XXX CSR_CAUSE_LOAD_FAULT_BF
+        csr[CSR_BADVADDR] = address;
+        printf("load from illegal physical memory %08"PRIx64"\n", address);
         //XXX s->fatal_error = true;
         return 0;
     }
@@ -1019,10 +1156,18 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size)
 }
 
 static void
-store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size)
+store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, memory_exception_t *error)
 {
-    if (csr_status & CSR_STATUS_VM)
-        address = virt2phys(s, address, mem_access_size);
+    *error = MEMORY_SUCCESS;
+
+    if (BF_GET(CSR_STATUS_VM_BF, csr[CSR_STATUS])) {
+        address = virt2phys(s, address, mem_access_size, error);
+        if (*error != MEMORY_SUCCESS) {
+            raise(s, 11); // XXX CSR_CAUSE_STORE_FAULT_BF
+            csr[CSR_BADVADDR] = address;
+            return;
+        }
+    }
 
     if (0 && address & 1 << 31) {
         if (address == (1U << 31))
@@ -1036,15 +1181,17 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size)
     void *p = memory_physical(m, address, mem_access_size);
 
     if (!p) {
-        fprintf(stderr, "SEGFAULT, store to unmapped memory %08"PRIx64"\n", address);
-        s->fatal_error = true;
+        raise(s, 10); // XXX CSR_CAUSE_LOAD_FAULT_BF
+        csr[CSR_BADVADDR] = address;
+        printf("store to illegal physical memory %08"PRIx64"\n", address);
+        // s->fatal_error = true;
         return;
     }
 
     switch (mem_access_size) {
-    case 1: *(uint8_t  *)p = value; return;
-    case 2: *(uint16_t *)p = value; return;
-    case 4: *(uint32_t *)p = value; return;
+    case 1: case -1: *(uint8_t  *)p = value; return;
+    case 2: case -2: *(uint16_t *)p = value; return;
+    case 4: case -4: *(uint32_t *)p = value; return;
     case 8: *(uint64_t *)p = value; return;
     default:
         assert(mem_access_size > 0);
@@ -1084,13 +1231,14 @@ setup(cpu_state_t *state, elf_info_t *info)
 
 
     // <HACK>
-    const int memory_size       = 0x90000;
-                                //0x30000;
+    const int memory_size       = 256 * 1024 * 1024; // 256 MiB
     const uint32_t memory_start = 0;
     memory_ensure_mapped_range(state->mem, memory_start, memory_size);
     state->r[31] = memory_start + memory_size / 2; // GP
     state->r[14] = memory_start + memory_size - 4; // SP
-    store(state, state->r[14], 0, 4);
+    memory_exception_t dummy;
+    store(state, state->r[14], 0, 4, &dummy);
+    assert(dummy == MEMORY_SUCCESS);
     // </HACK>
 
     // <HACK> <HACK>

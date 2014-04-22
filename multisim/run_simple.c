@@ -35,10 +35,11 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     uint64_t orig_r[32];
     uint64_t loadaddress = 0;
     uint64_t pc       = state->pc;
-    uint32_t inst     = (uint32_t)arch->load(state, pc, 4);
+    memory_exception_t error;
+    uint32_t inst     = (uint32_t)arch->load(state, pc, 4, &error); // XXX handle illegal fetches
 
-    if (state->fatal_error)
-        return true;
+    if (error != MEMORY_SUCCESS)
+        return (error == MEMORY_FATAL);
 
     if (verbosity & VERBOSE_TRACE)
         fprintf(stderr, "%5d:%08"PRIx64" %08x\n", cycle, pc, inst);
@@ -56,9 +57,17 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
 
     uint64_t op_a     = state->r[dec.source_reg_a];
     uint64_t op_b     = state->r[dec.source_reg_b];
-    uint64_t msr_a    = 0;
-    if (dec.source_msr_a != ISA_NO_REG)
-        msr_a = arch->read_msr(state, dec.source_msr_a);
+    uint64_t msr_a    = dec.source_msr_a != ISA_NO_REG ?
+        arch->read_msr(state, dec.source_msr_a) : 0;
+
+    uint64_t atomic_load_addr = op_a;
+
+    if (dec.class == isa_inst_class_atomic)
+        op_a = arch->load(state, atomic_load_addr, dec.loadstore_size, &error);
+
+    if (error != MEMORY_SUCCESS)
+        return (error == MEMORY_FATAL);
+
     isa_result_t res  = arch->inst_exec(dec, op_a, op_b, msr_a);
     res.result = CANONICALIZE(res.result);
 
@@ -68,23 +77,34 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     switch (dec.class) {
     case isa_inst_class_load:
         loadaddress = res.result;
-        res.result = arch->load(state, res.result, dec.loadstore_size);
+        res.result = arch->load(state, res.result, dec.loadstore_size, &error);
         res.result = CANONICALIZE(res.result);
 
-        if (state->fatal_error)
-            return true;
+        if (error != MEMORY_SUCCESS)
+            return (error == MEMORY_FATAL);
 
         state->pc += 4;
         break;
 
     case isa_inst_class_store:
-        arch->store(state, res.result, res.store_value, dec.loadstore_size);
+        arch->store(state, res.result, res.store_value, dec.loadstore_size, &error);
 
-        if (state->fatal_error)
-            return true;
+        if (error != MEMORY_SUCCESS)
+            return (error == MEMORY_FATAL);
 
         state->pc += 4;
         break;
+
+    case isa_inst_class_atomic:
+        arch->store(state, atomic_load_addr, res.result, dec.loadstore_size, &error);
+
+        if (error != MEMORY_SUCCESS)
+            return (error == MEMORY_FATAL);
+
+        res.result = op_a;
+        state->pc += 4;
+        break;
+
 
     case isa_inst_class_branch:
         state->pc = res.branch_taken ? dec.jumpbranch_target : state->pc + 4;

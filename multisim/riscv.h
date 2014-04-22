@@ -124,11 +124,62 @@ enum riscv_opcode_op_div_e {
     MUL, MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU,
 };
 
+enum riscv_opcode_amo_e {
+    AMOADD      = 0,
+    AMOSWAP     = 1,
+    LR          = 2,
+    SC          = 3,
+    AMOXOR      = 4,
+
+    AMOOR       = 8,
+    AMOAND      =12,
+    AMOMIN      =16,
+    AMOMAX      =20,
+    AMOMINU     =24,
+    AMOMAXU     =28,
+};
+
 /* CSRs */
 
 enum riscv_csr_e {
-    CSR_CYCLE = 0xC00, CSR_TIME, CSR_INSTRET,
+    CSR_FFLAGS		= 0x001,
+    CSR_FRM,
+    CSR_FCSR,
+
+    CSR_SUP0		= 0x500,
+    CSR_SUP1		= 0x501,
+    CSR_EPC		= 0x502,
+    CSR_BADVADDR	= 0x503,
+    CSR_PTBR		= 0x504,
+    CSR_ASID		= 0x505,
+    CSR_COUNT		= 0x506,
+    CSR_COMPARE		= 0x507,
+    CSR_EVEC		= 0x508,
+    CSR_CAUSE		= 0x509,
+    CSR_STATUS		= 0x50a,
+    CSR_HARTID		= 0x50b,
+    CSR_IMPL		= 0x50c,
+    CSR_FATC		= 0x50d,
+    CSR_SEND_IPI	= 0x50e,
+    CSR_CLEAR_IPI	= 0x50f,
+    CSR_TOHOST		= 0x51e,
+    CSR_FROMHOST	= 0x51f,
+
+    CSR_CYCLE		= 0xC00,
+    CSR_TIME,
+    CSR_INSTRET,
 };
+
+#define CSR_STATUS_S_BF    0:0
+#define CSR_STATUS_PS_BF   1:1
+#define CSR_STATUS_EI_BF   2:2
+#define CSR_STATUS_PEI_BF  3:3
+#define CSR_STATUS_EF_BF   4:4
+#define CSR_STATUS_U64_BF  5:5
+#define CSR_STATUS_S64_BF  6:6
+#define CSR_STATUS_VM_BF   7:7
+#define CSR_STATUS_IM_BF  23:16
+#define CSR_STATUS_IP_BF  31:24
 
 #endif
 

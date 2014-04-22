@@ -548,14 +548,16 @@ setup(cpu_state_t *state, elf_info_t *info)
 }
 
 static uint64_t
-load(cpu_state_t *s, uint64_t address, int mem_access_size)
+load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *error)
 {
     memory_t *m = s->mem;
     void *p = memory_physical(m, address, mem_access_size);
 
+    *error = MEMORY_SUCCESS;
+
     if (!p) {
         fprintf(stderr, "SEGFAULT, load from unmapped memory %08"PRIx64"\n", address);
-        s->fatal_error = true;
+        *error = MEMORY_FATAL;
         return 0;
     }
 
@@ -573,14 +575,16 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size)
 }
 
 static void
-store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size)
+store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, memory_exception_t *error)
 {
     memory_t *m = s->mem;
     void *p = memory_physical(m, address, mem_access_size);
 
+    *error = MEMORY_SUCCESS;
+
     if (!p) {
         fprintf(stderr, "SEGFAULT, store to unmapped memory %08"PRIx64"\n", address);
-        s->fatal_error = true;
+        *error = MEMORY_FATAL;
         return;
     }
 

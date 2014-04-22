@@ -56,7 +56,7 @@ isa_disass(const arch_t *arch, isa_decoded_t dec, isa_result_t res, uint64_t loa
             printf(" r%d <- 0x%08"PRIx64"", dec.dest_reg, mask & res.result);
 
         if (dec.dest_msr != ISA_NO_REG)
-            printf(" MSR%d <- 0x%08"PRIx64"", dec.dest_msr, mask & res.msr_result);
+            printf(" MSR%04x <- 0x%08"PRIx64"", dec.dest_msr, mask & res.msr_result);
 
         printf("\n");
     }

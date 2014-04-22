@@ -29,9 +29,11 @@ VERB=-d
 
 all: multisim
 
+boot_riscv_linux: multisim
+	./multisim $(VERB) ../../RISC-V/vmlinux
+
 boot_linux: multisim
 	./multisim $(VERB) ../workloads/vmlinux.lm32
-
 
 sieve_lm32: multisim
 	./multisim $(VERB) ../workloads/sieve.lm32
