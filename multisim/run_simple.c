@@ -33,7 +33,6 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
 {
     static int cycle = 0;
     uint64_t orig_r[32];
-    uint64_t loadaddress = 0;
     uint64_t pc       = state->pc;
     memory_exception_t error;
     uint32_t inst     = (uint32_t)arch->load(state, pc, 4, &error); // XXX handle illegal fetches
@@ -76,8 +75,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
 
     switch (dec.class) {
     case isa_inst_class_load:
-        loadaddress = res.result;
-        res.result = arch->load(state, res.result, dec.loadstore_size, &error);
+        res.result = arch->load(state, res.load_addr, dec.loadstore_size, &error);
         res.result = CANONICALIZE(res.result);
 
         if (error != MEMORY_SUCCESS)
@@ -87,7 +85,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
         break;
 
     case isa_inst_class_store:
-        arch->store(state, res.result, res.store_value, dec.loadstore_size, &error);
+        arch->store(state, res.store_addr, res.store_value, dec.loadstore_size, &error);
 
         if (error != MEMORY_SUCCESS)
             return (error == MEMORY_FATAL);
@@ -130,8 +128,6 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     if (dec.dest_msr != ISA_NO_REG)
         arch->write_msr(state, dec.dest_msr, res.msr_result);
 
-    arch->tick(state);
-
     if (verbosity & VERBOSE_TRACE) {
         if (dec.dest_reg != ISA_NO_REG && orig_r[dec.dest_reg] != res.result)
             fprintf(stderr,"%d:r%d=0x%08"PRIx64"\n", cycle, dec.dest_reg,
@@ -141,7 +137,9 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     }
 
     if (verbosity & VERBOSE_DISASS)
-        isa_disass(arch, dec, res, loadaddress);
+        isa_disass(arch, dec, res);
+
+    arch->tick(state);
 
     return false;
 }

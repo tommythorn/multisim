@@ -135,7 +135,6 @@ step_sscalar_in_order(
      */
 
     while (fetch_number % WINDOW_SIZE != issue_number % WINDOW_SIZE) {
-        uint64_t loadaddress = 0;
         reservation_station_t *rs = reservation_stations + issue_number++ % WINDOW_SIZE;
         isa_result_t res = arch->inst_exec(rs->dec, rs->op_a, rs->op_b, 0);
         res.result = CANONICALIZE(res.result);
@@ -151,7 +150,6 @@ step_sscalar_in_order(
             break;
 
         case isa_inst_class_load:
-            loadaddress = res.result;
             res.result = arch->load(state, res.result, rs->dec.loadstore_size, &error);
             res.result = CANONICALIZE(res.result);
 
@@ -187,7 +185,7 @@ step_sscalar_in_order(
             scoreboard[rs->dec.dest_reg] = true;
         }
 
-        isa_disass(arch, rs->dec, res, loadaddress);
+        isa_disass(arch, rs->dec, res);
 
         /* Co-simulate */
         assert(rs->dec.inst_addr == costate->pc);

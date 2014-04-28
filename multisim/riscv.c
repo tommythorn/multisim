@@ -21,6 +21,10 @@
 /*
  * Goal is RV64G, booting Linux
  *
+ * Question:
+ * - how does the timer interrupt work if IE = 0? Does it stay pending
+ *   and fire when IE is set, or is it gone forever?
+ *
  * Status:
  *
  * I - Implemented all,
@@ -71,6 +75,37 @@ static const char *csr_name[0x1000] = {
     [CSR_CYCLE]		= "cycle",
     [CSR_TIME]		= "time",
     [CSR_INSTRET]	= "instret",
+};
+
+/* Per CSR bit mask of csrXX settable bits (in addition to other constraints) */
+static const uint64_t csr_mask[0x1000] = {
+    [CSR_FFLAGS]	= 0x1F,
+    [CSR_FRM]   	= 7,
+    [CSR_FCSR]		= 0xFF,
+
+    [CSR_SUP0]		= ~0ULL,
+    [CSR_SUP1]		= ~0ULL,
+
+    [CSR_EPC]		= ~0ULL,
+    [CSR_BADVADDR]	= 0, //  ?? writable?
+    [CSR_PTBR]		= ~0ULL,
+    [CSR_ASID]		= 0,
+    [CSR_COUNT]		= 0xFFFFFFFF,
+    [CSR_COMPARE]	= 0xFFFFFFFF,
+    [CSR_EVEC]		= ~0ULL,
+    [CSR_CAUSE]		= 0, // Read-only
+    [CSR_STATUS]	= 0xFF008F, // IM,  VM,  PEI, EI, PS, S
+    [CSR_HARTID]	= 0, // Read-only
+    [CSR_IMPL]		= 0, // Read-only
+    [CSR_FATC]		= 0,
+    [CSR_SEND_IPI]	= 0, // Single processor
+    [CSR_CLEAR_IPI]	= 1, // Write only!
+    [CSR_TOHOST]	= ~0ULL,
+    [CSR_FROMHOST]	= ~0ULL,
+
+    [CSR_CYCLE]		= 0xFFFFFFFF,
+    [CSR_TIME]		= 0xFFFFFFFF,
+    [CSR_INSTRET]	= 0xFFFFFFFF,
 };
 
 static uint64_t csr[0x1000] = {
@@ -135,6 +170,7 @@ const char *opcode_amo_name[32] = {
     [SC]        = "sc",
 };
 
+/*
 static const char *status_field_name[] = {
     "S",
     "PS",
@@ -181,6 +217,7 @@ static void print_status(uint32_t status)
             printf(" %s=0x%x", status_field_name[i], v);
     }
 }
+*/
 
 static void
 disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
@@ -434,15 +471,16 @@ decode(uint64_t inst_addr, uint32_t inst)
         case LR:
             dec.class        = isa_inst_class_load;
             dec.loadstore_size = i.r.funct3 & 1 ? 8 : 4;
-            dec.source_reg_a = i.i.rs1;
-            dec.dest_reg     = i.i.rd;
+            dec.source_reg_a = i.r.rs1;
+            dec.dest_reg     = i.r.rd;
             break;
 
         case SC:
             dec.class        = isa_inst_class_store;
             dec.loadstore_size = i.r.funct3 & 1 ? 8 : 4;
-            dec.source_reg_a = i.s.rs1;
-            dec.source_reg_b = i.s.rs2;
+            dec.source_reg_a = i.r.rs1;
+            dec.source_reg_b = i.r.rs2;
+            dec.dest_reg     = i.r.rd;
             break;
 
         case AMOADD:
@@ -579,7 +617,7 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
 
     switch (i.r.opcode) {
     case LOAD:
-        res.result = ea_load;
+        res.load_addr = ea_load;
         return res;
 
     case OP_IMM_32:
@@ -642,20 +680,19 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
 
     case STORE:
         res.store_value = op_b;
-        res.result = ea_store;
+        res.store_addr = ea_store;
         return res;
 
     case AMO: {
         switch (i.r.funct7 >> 2) {
         case LR:
-            res.result = op_a;
+            res.load_addr = op_a;
             break;
 
         case SC:
             res.store_value = op_b;
-            res.result = op_a;
-            assert(0); // XXX The framework current doesn't allow for
-            // seperate store and writeback values
+            res.store_addr = op_a;
+            res.result = 0; // 0 = success
             break;
 
         case AMOADD:	res.result = op_a + op_b; break;
@@ -846,8 +883,8 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
         switch (i.r.funct3) {
         case SCALLSBREAK:
             switch (i.i.imm11_0) {
-            case 0: printf("SCALL"); break;
-            case 1: printf("SBREAK"); break;
+            case 0: printf("  SCALL"); break;
+            case 1: printf("  SBREAK"); break;
             case -0x800:
                 res.compjump_target = csr[CSR_EPC];
 
@@ -855,12 +892,10 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
                 res.msr_result =
                     BF_SET(msr_a, CSR_STATUS_S_BF,
                            BF_GET(CSR_STATUS_PS_BF, msr_a));
+
                 res.msr_result =
                     BF_SET(res.msr_result, CSR_STATUS_EI_BF,
                            BF_GET(CSR_STATUS_PEI_BF, msr_a));
-                printf("\n SRET; status now ");
-                print_status(res.msr_result);
-                printf("\n");
 
                 return res;
             }
@@ -897,6 +932,29 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
 
 static void raise(cpu_state_t *s, uint64_t cause)
 {
+    if (cause & (1ULL << 63)) {
+        int intr_pend = BF_GET(CSR_STATUS_IP_BF, csr[CSR_STATUS]);
+        int intr_mask = BF_GET(CSR_STATUS_IM_BF, csr[CSR_STATUS]);
+
+        intr_pend |= 1 << (cause & 7);
+
+        csr[CSR_STATUS] =
+            BF_SET(csr[CSR_STATUS], CSR_STATUS_IP_BF, intr_pend);
+
+        if (!BF_GET(CSR_STATUS_EI_BF, csr[CSR_STATUS]) ||
+            (intr_pend & intr_mask) == 0) {
+
+            printf("  Interrupt 0x%"PRIx64" ignored (for now) as it's disabled\n", cause & ~(1ULL << 63));
+            printf("    (EI = %d IP = 0x%x, IM = 0x%x)\n",
+                   BF_GET(CSR_STATUS_EI_BF, csr[CSR_STATUS]),
+                   intr_pend, intr_mask);
+            return;
+        }
+    }
+
+    printf("  Raised 0x%"PRIx64"\n", cause);
+
+    csr[CSR_EPC] = s->pc;
     s->pc = csr[CSR_EVEC];
     // XXX not correct in case of instruction fetches
     csr[CSR_CAUSE] = cause;
@@ -911,75 +969,108 @@ static void raise(cpu_state_t *s, uint64_t cause)
     csr[CSR_STATUS] =
         BF_SET(csr[CSR_STATUS], CSR_STATUS_PEI_BF,
                BF_GET(CSR_STATUS_EI_BF, csr[CSR_STATUS]));
-    csr[CSR_STATUS] =
-        BF_SET(csr[CSR_STATUS], CSR_STATUS_EI_BF, 0);
+    csr[CSR_STATUS] &= ~BF_PACK(CSR_STATUS_EI_BF, 1);
 }
 
 /* executed every cycle */
 static void tick(cpu_state_t *s)
 {
     // XXX for now, an instruction per tick
-    ++csr[CSR_INSTRET];
-    ++csr[CSR_CYCLE];
-    csr[CSR_COUNT] = (uint32_t) (csr[CSR_COUNT] + 1);
+    csr[CSR_INSTRET] = (uint32_t) (csr[CSR_INSTRET] + 1);
+    csr[CSR_CYCLE]   = (uint32_t) (csr[CSR_CYCLE]   + 1);
+    csr[CSR_COUNT]   = (uint32_t) (csr[CSR_COUNT]   + 1);
 
-    if ((uint32_t)csr[CSR_COUNT] == (uint32_t)csr[CSR_COMPARE] &&
-        BF_GET(CSR_STATUS_IM_BF, csr[CSR_STATUS]) & 128 &&
-        BF_GET(CSR_STATUS_EI_BF, csr[CSR_STATUS])) {
-
-        raise(s, (1ULL << 63) | 7);
-    }
+    if (csr[CSR_COUNT] == csr[CSR_COMPARE])
+        raise(s, (1ULL << 63) | TRAP_INTR_TIMER);
 }
 
-static uint64_t read_msr(cpu_state_t *state, unsigned csrno)
+static uint64_t read_msr(cpu_state_t *s, unsigned csrno)
 {
+    int top_priv = BF_GET(11:10, csrno);
+    int bot_priv = BF_GET( 9: 8, csrno);
+    int user_ok  = top_priv == 0 || top_priv == 3 && bot_priv == 0;
+
+    if (!BF_GET(CSR_STATUS_S_BF, csr[CSR_STATUS]) && !user_ok) {
+        printf("  Illegal Read of CSR %3x in user mode\n", csrno);
+        raise(s, TRAP_INST_PRIVILEGE);
+        return 0;
+    }
+
     switch (csrno) {
     case CSR_TIME: {
      struct timeval tv;
      gettimeofday(&tv, NULL);
      uint64_t now = tv.tv_sec * 1000000LL + tv.tv_usec;
-     //printf("  RDTIME -> %"PRIu64"\n", now);
+     printf("  Read  CSR %s -> %"PRIx64"\n", csr_name[csrno], now);
      return now;
     }
 
+    case CSR_FROMHOST:
+        printf("  Read  CSR fromhost -> ??\n");
+        assert(0);
+        break;
+
     default:
-        //printf("  Read  CSR 0x%03x -> %"PRIu64"\n", csrno, csr[csrno]);
+        printf("  Read  CSR %s -> %"PRIx64"\n", csr_name[csrno], csr[csrno]);
         return csr[csrno];
     }
 }
 
-static void write_msr(cpu_state_t *state, unsigned csrno, uint64_t value)
+static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value)
 {
-    printf("  Write CSR %s <- %"PRIx64"\n", csr_name[csrno], value);
-    csr[csrno] = value; // XXX should check permissions and width
-                        // constraints, as well as non-existing CSRs.
+    int top_priv = BF_GET(11:10, csrno);
+    int bot_priv = BF_GET( 9: 8, csrno);
+    int user_ok  = top_priv == 0 && bot_priv == 0;
+
+    if (!BF_GET(CSR_STATUS_S_BF, csr[CSR_STATUS]) && !user_ok) {
+        printf("  Illegal Write of CSR %3x in user mode\n", csrno);
+        raise(s, TRAP_INST_PRIVILEGE);
+        return;
+    }
+
+    if (top_priv == 3) {
+        printf("  Illegal Write of CSR %3x\n", csrno);
+        raise(s, TRAP_INST_PRIVILEGE);
+        return;
+    }
+
+    uint64_t oldvalue = csr[csrno];
+
+    csr[csrno] = value & csr_mask[csrno] | csr[csrno] & ~csr_mask[csrno];
+
+    printf("  Write CSR %s <- %"PRIx64"\n", csr_name[csrno], csr[csrno]);
+
+    if (value & ~csr[csrno])
+        printf("    NB: bits %"PRIx64" are masked off\n", value & ~csr[csrno]);
 
     switch (csrno) {
     default:
         break;
 
-    case CSR_STATUS:
-        /*
-          XXX
+    case CSR_STATUS: {
+        int pending =
+            BF_GET(CSR_STATUS_IP_BF, value) & BF_GET(CSR_STATUS_IM_BF, value);
 
-          The status register is the same as for RVSbare, with the
-          addition of the VM bit. When a hart’s VM bit is 0, virtual
-          memory is disabled and addresses are untranslated. When the
-          VM bit is set to 1, addresses are translated as described in
-          Chapter 3.3.
+        if (BF_GET(CSR_STATUS_EI_BF, ~oldvalue & value) && pending)
+            raise(s, (1ULL << 63) | __builtin_clz(pending));
+        break;
+    }
 
-        printf("  ");
-        print_status(value);
-        printf("\n");
-
-        */
-
+    case CSR_COMPARE:
+        csr[CSR_STATUS] &= ~BF_PACK(CSR_STATUS_IP_BF, 1 << TRAP_INTR_TIMER);
         break;
 
     case CSR_TOHOST: // tohost
-        printf("HOST RESULT %"PRId64"\n", value);
+        printf("  HOST RESULT %"PRId64"\n", value);
+        if ((value >> 48) == 0x101) {
+            csr[CSR_TOHOST] = 0; // ACK it
+            // csr[CSR_FROMHOST] = 1; // ACK it
+            fprintf(stderr, "%c", (char)value);
+        } else
+            assert(0);
         //exit(0);
     }
+
 }
 
 bool debug_vm = false; // to be enabled in the debugger
@@ -999,7 +1090,7 @@ virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exceptio
     *error = MEMORY_SUCCESS;
 
     if (debug_vm)
-    printf("virt2phys(%016"PRIx64" = <%d,%d,%d,%d>)\n", address, vpn[2], vpn[1], vpn[0],
+    printf("  virt2phys(%016"PRIx64" = <%d,%d,%d,%d>)\n", address, vpn[2], vpn[1], vpn[0],
          (int)address & 8191);
 
     uint64_t a = csr[CSR_PTBR];
@@ -1044,19 +1135,26 @@ virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exceptio
              pte >> 0 & 1 ? "V" : " ");
 
         if ((pte >> 0 & 1) == 0) { // V
-            printf("  Invalid mapping: %016"PRIx64"[%d]: pte[%d] = %016"PRIx64" = %4d %4d %4d Perm 0%o%s%s%s\n",
-             a, vpn[i],
-             i, pte,
-             (int)(pte >> 33 & 1023),
-             (int)(pte >> 23 & 1023),
-             (int)(pte >> 13 & 1023),
+            if (debug_vm) {
+                printf("  Invalid mapping: %016"PRIx64"[%d]: pte[%d] = %016"PRIx64" = %4d %4d %4d Perm 0%o%s%s%s\n",
+                       a, vpn[i],
+                       i, pte,
+                       (int)(pte >> 33 & 1023),
+                       (int)(pte >> 23 & 1023),
+                       (int)(pte >> 13 & 1023),
 
-             (int)(pte >> 3 & 077),
+                       (int)(pte >> 3 & 077),
 
-             pte >> 2 & 1 ? "G" : " ",
-             pte >> 1 & 1 ? "T" : " ",
-             pte >> 0 & 1 ? "V" : " ");
-            goto exception;
+                       pte >> 2 & 1 ? "G" : " ",
+                       pte >> 1 & 1 ? "T" : " ",
+                       pte >> 0 & 1 ? "V" : " ");
+
+                goto exception;
+            }
+            else {
+                debug_vm = 1;
+                return virt2phys(s, address, mem_access_size, error);
+            }
         }
 
         if ((pte >> 1 & 1) == 0) { // T
@@ -1083,7 +1181,7 @@ virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exceptio
         a = pte & ~8191ULL;
     }
 
-    printf("Impossible?\n");
+    printf("  Impossible?\n");
 
 exception:
     *error = MEMORY_EXCEPTION;
@@ -1103,7 +1201,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *
     if (BF_GET(CSR_STATUS_VM_BF, csr[CSR_STATUS])) {
         address = virt2phys(s, address, mem_access_size, error);
         if (*error != MEMORY_SUCCESS) {
-            raise(s, 10); // XXX CSR_CAUSE_LOAD_FAULT_BF
+            raise(s, TRAP_LOAD_FAULT);
             csr[CSR_BADVADDR] = address;
 
             return 0;
@@ -1133,9 +1231,9 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *
                             mem_access_size > 0 ? mem_access_size : -mem_access_size);
 
     if (!p) {
-        raise(s, 10); // XXX CSR_CAUSE_LOAD_FAULT_BF
+        raise(s, TRAP_LOAD_FAULT);
         csr[CSR_BADVADDR] = address;
-        printf("load from illegal physical memory %08"PRIx64"\n", address);
+        printf("  load from illegal physical memory %08"PRIx64"\n", address);
         //XXX s->fatal_error = true;
         return 0;
     }
@@ -1163,7 +1261,7 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, mem
     if (BF_GET(CSR_STATUS_VM_BF, csr[CSR_STATUS])) {
         address = virt2phys(s, address, mem_access_size, error);
         if (*error != MEMORY_SUCCESS) {
-            raise(s, 11); // XXX CSR_CAUSE_STORE_FAULT_BF
+            raise(s, TRAP_STORE_FAULT);
             csr[CSR_BADVADDR] = address;
             return;
         }
@@ -1173,7 +1271,7 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, mem
         if (address == (1U << 31))
             putchar(value & 255);
         else
-            fprintf(stderr, "IGNORED: store to unmapped IO memory %08"PRIx64"\n", address);
+            fprintf(stderr, "  IGNORED: store to unmapped IO memory %08"PRIx64"\n", address);
         return;
     }
 
@@ -1181,9 +1279,9 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, mem
     void *p = memory_physical(m, address, mem_access_size);
 
     if (!p) {
-        raise(s, 10); // XXX CSR_CAUSE_LOAD_FAULT_BF
+        raise(s, TRAP_STORE_FAULT);
         csr[CSR_BADVADDR] = address;
-        printf("store to illegal physical memory %08"PRIx64"\n", address);
+        printf("  store to illegal physical memory %08"PRIx64"\n", address);
         // s->fatal_error = true;
         return;
     }

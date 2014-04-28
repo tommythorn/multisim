@@ -23,7 +23,7 @@
 #include "arch.h"
 
 void
-isa_disass(const arch_t *arch, isa_decoded_t dec, isa_result_t res, uint64_t loadaddress)
+isa_disass(const arch_t *arch, isa_decoded_t dec, isa_result_t res)
 {
     char dis_buf[99];
     uint64_t mask = arch->is_64bit ? ~0ULL : ~0U;
@@ -36,14 +36,14 @@ isa_disass(const arch_t *arch, isa_decoded_t dec, isa_result_t res, uint64_t loa
     case isa_inst_class_load:
         if (dec.dest_reg != ISA_NO_REG)
             printf("%-32s r%d <- 0x%08"PRIx64" [0x%08"PRIx64"]\n",
-                   dis_buf, dec.dest_reg, res.result, loadaddress);
+                   dis_buf, dec.dest_reg, res.result, res.load_addr);
         else
             printf("%-32s  <- 0x%08"PRIx64" [0x%08"PRIx64"]\n",
-                   dis_buf, res.result, loadaddress);
+                   dis_buf, res.result, res.load_addr);
         break;
 
     case isa_inst_class_store:
-        printf("%-32s [0x%08"PRIx64"] <- 0x%08"PRIx64"\n", dis_buf, res.result, res.store_value);
+        printf("%-32s [0x%08"PRIx64"] <- 0x%08"PRIx64"\n", dis_buf, res.store_addr, res.store_value);
         break;
 
     default:

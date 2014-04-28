@@ -144,7 +144,7 @@ enum riscv_opcode_amo_e {
 enum riscv_csr_e {
     CSR_FFLAGS		= 0x001,
     CSR_FRM,
-    CSR_FCSR,
+    CSR_FCSR,			// alias for the frm + fflags
 
     CSR_SUP0		= 0x500,
     CSR_SUP1		= 0x501,
@@ -180,6 +180,29 @@ enum riscv_csr_e {
 #define CSR_STATUS_VM_BF   7:7
 #define CSR_STATUS_IM_BF  23:16
 #define CSR_STATUS_IP_BF  31:24
+
+
+/* Interrupts */
+enum {
+    TRAP_INTR_IPI	= 5,
+    TRAP_INTR_HOST	= 6,
+    TRAP_INTR_TIMER	= 7,
+};
+
+/* Exceptions */
+enum {
+    TRAP_INST_MISALIGN	= 0,
+    TRAP_INST_ADDR	= 1,
+    TRAP_INST_ILLEGAL	= 2,
+    TRAP_INST_PRIVILEGE = 3,
+    TRAP_FP_DISABLED	= 4,
+    TRAP_SYSTEM_CALL	= 6,
+    TRAP_BREAKPOINT	= 7,
+    TRAP_LOAD_MISALIGN	= 8,
+    TRAP_STORE_MISALIGN	= 9,
+    TRAP_LOAD_FAULT	= 10,
+    TRAP_STORE_FAULT	= 11,
+};
 
 #endif
 

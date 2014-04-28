@@ -112,6 +112,9 @@ typedef struct isa_result_st {
      * etc.  Includes fx. the return address for a call instruction.
      */
     uint64_t    result;
+    uint64_t    load_addr;
+    uint64_t    store_value;
+    uint64_t    store_addr;
 
     union {
         /*
@@ -119,7 +122,6 @@ typedef struct isa_result_st {
          * result holds the memory address.  In the case of stores we need
          * an extra value which is communited with store_value.
          */
-        uint64_t    store_value;
         bool        branch_taken;
         uint64_t    compjump_target;
     };
@@ -188,7 +190,7 @@ typedef struct isa_st {
 
 const arch_t *get_arch(uint16_t machine, bool is_64bit);
 
-void isa_disass(const arch_t *, isa_decoded_t, isa_result_t, uint64_t loadaddress);
+void isa_disass(const arch_t *, isa_decoded_t, isa_result_t);
 
 #endif
 

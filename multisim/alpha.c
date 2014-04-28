@@ -223,16 +223,16 @@ inst_exec(isa_decoded_t dec, uint64_t op_a, uint64_t op_b, uint64_t msr_a)
     case OP_LDBU:
     case OP_LDA:
     case OP_LDQ:
-        res.result = ea;
+        res.load_addr = ea;
         return res;
     case OP_LDQ_U:
-        res.result = ea & ~7;
+        res.load_addr = ea & ~7;
         return res;
 
     case OP_STB:
     case OP_STL:
         res.store_value = op_b;
-        res.result = ea;
+        res.store_addr = ea;
         return res;
 
     case OP_INTL_:

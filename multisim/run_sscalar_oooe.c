@@ -210,7 +210,6 @@ step_sscalar_oooe(
         uint64_t op_b = prf[rs->pr_b];
         unsigned pwbr = rs->pr_wb;
         unsigned wbr  = rs->dec.dest_reg;
-        uint64_t loadaddress = 0;
 
         rs->issued  = true;
 
@@ -228,7 +227,6 @@ step_sscalar_oooe(
             break;
 
         case isa_inst_class_load:
-            loadaddress = res.result;
             res.result = arch->load(state, res.result, rs->dec.loadstore_size, &error);
             res.result = CANONICALIZE(res.result);
 
@@ -275,7 +273,7 @@ step_sscalar_oooe(
         }
 
         printf("\t");
-        isa_disass(arch, rs->dec, res, loadaddress);
+        isa_disass(arch, rs->dec, res);
 
         ++issued;
         ++n_issue;

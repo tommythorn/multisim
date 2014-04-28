@@ -485,9 +485,9 @@ inst_exec(isa_decoded_t dec, uint64_t op_Y, uint64_t op_ZX, uint64_t msr_a)
     case CMPGEUI: case CMPGEU:  res.result = uy >= uz_imm; break;
 
     case LB: case LBU:
-    case LH: case LHU: case LW: res.result = uy + i.ri.imm16; break;
+    case LH: case LHU: case LW: res.load_addr = uy + i.ri.imm16; break;
 
-    case SB: case SH: case SW:  res.result = uy + i.ri.imm16;
+    case SB: case SH: case SW:  res.store_addr = uy + i.ri.imm16;
                                 res.store_value = uzx; break;
     }
 
