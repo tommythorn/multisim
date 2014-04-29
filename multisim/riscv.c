@@ -37,11 +37,15 @@
  *
  * FD - Floating point, Just Do It!
  */
-
+#define _XOPEN_SOURCE 500
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
 #include <assert.h>
+#include <unistd.h>
 #include <sys/time.h>
 #include "bitfields.h"
 #include "sim.h"
@@ -79,20 +83,20 @@ static const char *csr_name[0x1000] = {
 
 /* Per CSR bit mask of csrXX settable bits (in addition to other constraints) */
 static const uint64_t csr_mask[0x1000] = {
-    [CSR_FFLAGS]	= 0x1F,
-    [CSR_FRM]   	= 7,
-    [CSR_FCSR]		= 0xFF,
+    [CSR_FFLAGS]	= 0x1F,  // XXX still needs special handling in write_msr
+    [CSR_FRM]   	= 7,     // - " -
+    [CSR_FCSR]		= 0xFF,  // - " -
 
     [CSR_SUP0]		= ~0ULL,
     [CSR_SUP1]		= ~0ULL,
 
-    [CSR_EPC]		= ~0ULL,
+    [CSR_EPC]		= -4LL,
     [CSR_BADVADDR]	= 0, //  ?? writable?
-    [CSR_PTBR]		= ~0ULL,
+    [CSR_PTBR]		= -8192LL,
     [CSR_ASID]		= 0,
     [CSR_COUNT]		= 0xFFFFFFFF,
     [CSR_COMPARE]	= 0xFFFFFFFF,
-    [CSR_EVEC]		= ~0ULL,
+    [CSR_EVEC]		= -4LL,
     [CSR_CAUSE]		= 0, // Read-only
     [CSR_STATUS]	= 0xFF008F, // IM,  VM,  PEI, EI, PS, S
     [CSR_HARTID]	= 0, // Read-only
@@ -115,6 +119,10 @@ static uint64_t csr[0x1000] = {
     BF_PACK(CSR_STATUS_S64_BF, 1) |
     BF_PACK(CSR_STATUS_S_BF,   1),
 };
+
+#define HTIF_CMD_READ       (0x00UL)
+#define HTIF_CMD_WRITE      (0x01UL)
+#define HTIF_CMD_IDENTITY   (0xFFUL)
 
 const uint64_t memory_start = 0x00000000;
 const uint64_t memory_size  = 128 * 1024;
@@ -218,6 +226,10 @@ static void print_status(uint32_t status)
     }
 }
 */
+
+#define DEBUG(...) if (0) printf(__VA_ARGS__)
+
+int disk_fd;
 
 static void
 disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
@@ -944,15 +956,15 @@ static void raise(cpu_state_t *s, uint64_t cause)
         if (!BF_GET(CSR_STATUS_EI_BF, csr[CSR_STATUS]) ||
             (intr_pend & intr_mask) == 0) {
 
-            printf("  Interrupt 0x%"PRIx64" ignored (for now) as it's disabled\n", cause & ~(1ULL << 63));
-            printf("    (EI = %d IP = 0x%x, IM = 0x%x)\n",
+            DEBUG("  Interrupt %d ignored (for now) as it's disabled\n", (int) cause);
+            DEBUG("    (EI = %d IP = 0x%x, IM = 0x%x)\n",
                    BF_GET(CSR_STATUS_EI_BF, csr[CSR_STATUS]),
                    intr_pend, intr_mask);
             return;
         }
     }
 
-    printf("  Raised 0x%"PRIx64"\n", cause);
+    DEBUG("  Raised 0x%"PRIx64"\n", cause);
 
     csr[CSR_EPC] = s->pc;
     s->pc = csr[CSR_EVEC];
@@ -991,7 +1003,7 @@ static uint64_t read_msr(cpu_state_t *s, unsigned csrno)
     int user_ok  = top_priv == 0 || top_priv == 3 && bot_priv == 0;
 
     if (!BF_GET(CSR_STATUS_S_BF, csr[CSR_STATUS]) && !user_ok) {
-        printf("  Illegal Read of CSR %3x in user mode\n", csrno);
+        DEBUG("  Illegal Read of CSR %3x in user mode\n", csrno);
         raise(s, TRAP_INST_PRIVILEGE);
         return 0;
     }
@@ -1001,19 +1013,99 @@ static uint64_t read_msr(cpu_state_t *s, unsigned csrno)
      struct timeval tv;
      gettimeofday(&tv, NULL);
      uint64_t now = tv.tv_sec * 1000000LL + tv.tv_usec;
-     printf("  Read  CSR %s -> %"PRIx64"\n", csr_name[csrno], now);
+     DEBUG("  Read  CSR %s -> %"PRIx64"\n", csr_name[csrno], now);
      return now;
     }
 
     case CSR_FROMHOST:
-        printf("  Read  CSR fromhost -> ??\n");
-        assert(0);
-        break;
-
-    default:
+    case CSR_TOHOST:
         printf("  Read  CSR %s -> %"PRIx64"\n", csr_name[csrno], csr[csrno]);
         return csr[csrno];
+
+    default:
+        DEBUG("  Read  CSR %s -> %"PRIx64"\n", csr_name[csrno], csr[csrno]);
+        return csr[csrno];
     }
+}
+
+static void handle_tohost(cpu_state_t *s, uint64_t value)
+{
+    csr[CSR_TOHOST] = 0; // ACK it
+    csr[CSR_FROMHOST] = 1; // ACK it
+
+    int dev = value >> 56 & 0xFF;
+    int cmd = value >> 48 & 0xFF;
+    uint64_t payload = value << 16 >> 16;
+    char *p;
+
+    switch (dev) {
+    case 1:
+        switch (cmd) {
+        case HTIF_CMD_READ:
+            // ignore this request for now
+            return;
+        case HTIF_CMD_WRITE:
+            fprintf(stderr, "%c", (char)payload);
+            return;
+        case HTIF_CMD_IDENTITY:
+            if (p = memory_physical(s->mem, payload >> 8, 4))
+                strcpy(p, "bcd");
+            return;
+        }
+        break;
+
+    case 2:
+        switch (cmd) {
+        case HTIF_CMD_READ:
+        case HTIF_CMD_WRITE: {
+            volatile struct htifbd_dap {
+		unsigned long address;
+		unsigned long offset;	/* offset in bytes */
+		unsigned long length;	/* length in bytes */
+		unsigned long tag;
+            } *req = memory_physical(s->mem, payload, 4);
+
+            assert(req);
+
+            printf("%s request for address %"PRIx64" offset %"PRIx64
+                   " length %"PRIx64"\n",
+                   cmd == HTIF_CMD_READ ? "read" : "write",
+                   req->address,
+                   req->offset,
+                   req->length);
+
+            void *buf = memory_physical(s->mem, req->address, 4);
+
+            assert(buf);
+
+            ssize_t r;
+
+            if (cmd == HTIF_CMD_READ)
+                r = pread(disk_fd, buf, req->length, req->offset);
+            else
+                r = pwrite(disk_fd, buf, req->length, req->offset);
+
+            assert(r >= 0);
+            return;
+        }
+
+        case HTIF_CMD_IDENTITY:
+            if (p = memory_physical(s->mem, payload >> 8, 4))
+                strcpy(p, "disk size=67108864");
+            return;
+        }
+        break;
+    default:
+        if (cmd == HTIF_CMD_IDENTITY) {
+            if (p = memory_physical(s->mem, payload >> 8, 4))
+                strcpy(p, "");
+            return;
+        }
+    }
+
+    printf("Got cmd %d for dev %d, payload %"PRIx64" I'm too young!!\n",
+           cmd, dev, payload);
+    assert(0);
 }
 
 static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value)
@@ -1023,13 +1115,13 @@ static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value)
     int user_ok  = top_priv == 0 && bot_priv == 0;
 
     if (!BF_GET(CSR_STATUS_S_BF, csr[CSR_STATUS]) && !user_ok) {
-        printf("  Illegal Write of CSR %3x in user mode\n", csrno);
+        DEBUG("  Illegal Write of CSR %3x in user mode\n", csrno);
         raise(s, TRAP_INST_PRIVILEGE);
         return;
     }
 
     if (top_priv == 3) {
-        printf("  Illegal Write of CSR %3x\n", csrno);
+        DEBUG("  Illegal Write of CSR %3x\n", csrno);
         raise(s, TRAP_INST_PRIVILEGE);
         return;
     }
@@ -1038,10 +1130,10 @@ static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value)
 
     csr[csrno] = value & csr_mask[csrno] | csr[csrno] & ~csr_mask[csrno];
 
-    printf("  Write CSR %s <- %"PRIx64"\n", csr_name[csrno], csr[csrno]);
+    DEBUG("  Write CSR %s <- %"PRIx64"\n", csr_name[csrno], csr[csrno]);
 
     if (value & ~csr[csrno])
-        printf("    NB: bits %"PRIx64" are masked off\n", value & ~csr[csrno]);
+        DEBUG("    NB: bits %"PRIx64" are masked off\n", value & ~csr[csrno]);
 
     switch (csrno) {
     default:
@@ -1060,17 +1152,15 @@ static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value)
         csr[CSR_STATUS] &= ~BF_PACK(CSR_STATUS_IP_BF, 1 << TRAP_INTR_TIMER);
         break;
 
-    case CSR_TOHOST: // tohost
-        printf("  HOST RESULT %"PRId64"\n", value);
-        if ((value >> 48) == 0x101) {
-            csr[CSR_TOHOST] = 0; // ACK it
-            // csr[CSR_FROMHOST] = 1; // ACK it
-            fprintf(stderr, "%c", (char)value);
-        } else
-            assert(0);
-        //exit(0);
-    }
+    case CSR_TOHOST:
+        printf("  Write CSR %s <- %"PRIx64"\n", csr_name[csrno], csr[csrno]);
+        handle_tohost(s, value);
+        break;
 
+    case CSR_FROMHOST:
+        printf("  Write CSR %s <- %"PRIx64"\n", csr_name[csrno], csr[csrno]);
+        break;
+    }
 }
 
 bool debug_vm = false; // to be enabled in the debugger
@@ -1090,7 +1180,7 @@ virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exceptio
     *error = MEMORY_SUCCESS;
 
     if (debug_vm)
-    printf("  virt2phys(%016"PRIx64" = <%d,%d,%d,%d>)\n", address, vpn[2], vpn[1], vpn[0],
+    DEBUG("  virt2phys(%016"PRIx64" = <%d,%d,%d,%d>)\n", address, vpn[2], vpn[1], vpn[0],
          (int)address & 8191);
 
     uint64_t a = csr[CSR_PTBR];
@@ -1100,11 +1190,11 @@ virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exceptio
         if (0) { // XXX I could walk the complete table, counting virtual and physical pages, looking
             // for aliases and virtual and physical memory holes...
 
-            printf("  Level %d page table @ %016"PRIx64"\n", i, a);
+            DEBUG("  Level %d page table @ %016"PRIx64"\n", i, a);
             for (int j = 0; j < 1024; ++j) {
                 uint64_t pte = *(uint64_t *)memory_physical(s->mem, a + j * 8, 8);
 
-                printf("   %016"PRIx64" = %4d %4d %4d Perm 0%o%s%s%s\n",
+                DEBUG("   %016"PRIx64" = %4d %4d %4d Perm 0%o%s%s%s\n",
                      pte,
                      (int)(pte >> 33 & 1023),
                      (int)(pte >> 23 & 1023),
@@ -1121,7 +1211,7 @@ virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exceptio
         uint64_t pte = *(uint64_t *)memory_physical(s->mem, a + vpn[i] * 8, 8);
 
         if (debug_vm)
-        printf("  %016"PRIx64"[%d]: pte[%d] = %016"PRIx64" = %4d %4d %4d Perm 0%o%s%s%s\n",
+        DEBUG("  %016"PRIx64"[%d]: pte[%d] = %016"PRIx64" = %4d %4d %4d Perm 0%o%s%s%s\n",
              a, vpn[i],
              i, pte,
              (int)(pte >> 33 & 1023),
@@ -1136,7 +1226,7 @@ virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exceptio
 
         if ((pte >> 0 & 1) == 0) { // V
             if (debug_vm) {
-                printf("  Invalid mapping: %016"PRIx64"[%d]: pte[%d] = %016"PRIx64" = %4d %4d %4d Perm 0%o%s%s%s\n",
+                DEBUG("  Invalid mapping: %016"PRIx64"[%d]: pte[%d] = %016"PRIx64" = %4d %4d %4d Perm 0%o%s%s%s\n",
                        a, vpn[i],
                        i, pte,
                        (int)(pte >> 33 & 1023),
@@ -1173,7 +1263,7 @@ virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exceptio
                 address & 8191;
 
             if (debug_vm)
-            printf("  final physical address = %016"PRIx64"\n", phys);
+            DEBUG("  final physical address = %016"PRIx64"\n", phys);
 
             return phys;
         }
@@ -1181,7 +1271,7 @@ virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exceptio
         a = pte & ~8191ULL;
     }
 
-    printf("  Impossible?\n");
+    DEBUG("  Impossible?\n");
 
 exception:
     *error = MEMORY_EXCEPTION;
@@ -1233,7 +1323,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *
     if (!p) {
         raise(s, TRAP_LOAD_FAULT);
         csr[CSR_BADVADDR] = address;
-        printf("  load from illegal physical memory %08"PRIx64"\n", address);
+        DEBUG("  load from illegal physical memory %08"PRIx64"\n", address);
         //XXX s->fatal_error = true;
         return 0;
     }
@@ -1281,7 +1371,7 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, mem
     if (!p) {
         raise(s, TRAP_STORE_FAULT);
         csr[CSR_BADVADDR] = address;
-        printf("  store to illegal physical memory %08"PRIx64"\n", address);
+        DEBUG("  store to illegal physical memory %08"PRIx64"\n", address);
         // s->fatal_error = true;
         return;
     }
@@ -1337,6 +1427,8 @@ setup(cpu_state_t *state, elf_info_t *info)
     memory_exception_t dummy;
     store(state, state->r[14], 0, 4, &dummy);
     assert(dummy == MEMORY_SUCCESS);
+
+    disk_fd = open("/home/tommy/BTSync/RISCV/root-20140226.bin", O_RDWR);
     // </HACK>
 
     // <HACK> <HACK>

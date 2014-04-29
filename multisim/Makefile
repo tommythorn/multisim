@@ -29,8 +29,8 @@ VERB=-d
 
 all: multisim
 
-boot_riscv_linux: multisim
-	./multisim $(VERB) ../../RISC-V/vmlinux
+boot: multisim
+	./multisim ~/BTSync/RISCV/vmlinux
 
 boot_linux: multisim
 	./multisim $(VERB) ../workloads/vmlinux.lm32
