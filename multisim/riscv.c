@@ -431,17 +431,17 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
               case 0xC00: snprintf(buf, buf_size, "%-11sr%d", "rdcycle",   i.i.rd); return;
               case 0xC01: snprintf(buf, buf_size, "%-11sr%d", "rdtime",    i.i.rd); return;
               case 0xC02: snprintf(buf, buf_size, "%-11sr%d", "rdinstret", i.i.rd); return;
-              default:    snprintf(buf, buf_size, "%-11sr%d,$%03x", "csrr",  i.i.rd, i.i.imm11_0); return;
+              default:    snprintf(buf, buf_size, "%-11sr%d,%s", "csrr",  i.i.rd, csr_name[i.i.imm11_0 & 0xFFFU]); return;
               }
           } else
-              snprintf(buf, buf_size, "%-11sr%d,$%03x,r%d",  "csrrs", i.i.rd, i.i.imm11_0, i.i.rs1); return;
+              snprintf(buf, buf_size, "%-11sr%d,%s,r%d",  "csrrs", i.i.rd, csr_name[i.i.imm11_0 & 0xFFFU], i.i.rs1); return;
           break;
 
-      case CSRRSI: snprintf(buf, buf_size, "%-11sr%d,$%03x,%d",  "csrrsi", i.i.rd, i.i.imm11_0, i.i.rs1); return;
-      case CSRRC:  snprintf(buf, buf_size, "%-11sr%d,$%03x,r%d", "csrrc",  i.i.rd, i.i.imm11_0, i.i.rs1); return;
-      case CSRRCI: snprintf(buf, buf_size, "%-11sr%d,$%03x,%d",  "csrrci", i.i.rd, i.i.imm11_0, i.i.rs1); return;
-      case CSRRW:  snprintf(buf, buf_size, "%-11sr%d,$%03x,r%d", "csrrw",  i.i.rd, i.i.imm11_0, i.i.rs1); return;
-      case CSRRWI: snprintf(buf, buf_size, "%-11sr%d,$%03x,%d",  "csrrwi", i.i.rd, i.i.imm11_0, i.i.rs1); return;
+      case CSRRSI: snprintf(buf, buf_size, "%-11sr%d,%s,%d",  "csrrsi", i.i.rd, csr_name[i.i.imm11_0 & 0xFFFU], i.i.rs1); return;
+      case CSRRC:  snprintf(buf, buf_size, "%-11sr%d,%s,r%d", "csrrc",  i.i.rd, csr_name[i.i.imm11_0 & 0xFFFU], i.i.rs1); return;
+      case CSRRCI: snprintf(buf, buf_size, "%-11sr%d,%s,%d",  "csrrci", i.i.rd, csr_name[i.i.imm11_0 & 0xFFFU], i.i.rs1); return;
+      case CSRRW:  snprintf(buf, buf_size, "%-11sr%d,%s,r%d", "csrrw",  i.i.rd, csr_name[i.i.imm11_0 & 0xFFFU], i.i.rs1); return;
+      case CSRRWI: snprintf(buf, buf_size, "%-11sr%d,%s,%d",  "csrrwi", i.i.rd, csr_name[i.i.imm11_0 & 0xFFFU], i.i.rs1); return;
 
       default:
           assert(0); // XXX more to implement
