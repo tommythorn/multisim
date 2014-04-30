@@ -239,6 +239,21 @@ static void print_status(uint32_t status)
 
 int disk_fd;
 
+static void push_SEI(void)
+{
+    /* Save S in PS, and set S */
+    csr[CSR_STATUS] =
+        BF_SET(csr[CSR_STATUS], CSR_STATUS_PS_BF,
+               BF_GET(CSR_STATUS_S_BF, csr[CSR_STATUS]))
+        | BF_PACK(CSR_STATUS_S_BF, 1);
+
+    /* Save EI in PEI and clear EI */
+    csr[CSR_STATUS] =
+        BF_SET(csr[CSR_STATUS], CSR_STATUS_PEI_BF,
+               BF_GET(CSR_STATUS_EI_BF, csr[CSR_STATUS]));
+    csr[CSR_STATUS] &= ~BF_PACK(CSR_STATUS_EI_BF, 1);
+}
+
 static void
 disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
 {
@@ -985,18 +1000,7 @@ static void raise(cpu_state_t *s, uint64_t cause)
     s->pc = csr[CSR_EVEC];
     // XXX not correct in case of instruction fetches
     csr[CSR_CAUSE] = cause;
-
-    /* Save S in PS, and set S */
-    csr[CSR_STATUS] =
-        BF_SET(csr[CSR_STATUS], CSR_STATUS_PS_BF,
-               BF_GET(CSR_STATUS_S_BF, csr[CSR_STATUS]))
-        | BF_PACK(CSR_STATUS_S_BF, 1);
-
-    /* Save EI in PEI and clear EI */
-    csr[CSR_STATUS] =
-        BF_SET(csr[CSR_STATUS], CSR_STATUS_PEI_BF,
-               BF_GET(CSR_STATUS_EI_BF, csr[CSR_STATUS]));
-    csr[CSR_STATUS] &= ~BF_PACK(CSR_STATUS_EI_BF, 1);
+    push_SEI();
 }
 
 /* executed every cycle */
@@ -1019,7 +1023,7 @@ static uint64_t read_msr(cpu_state_t *s, unsigned csrno)
 
     if (!BF_GET(CSR_STATUS_S_BF, csr[CSR_STATUS]) && !user_ok) {
         ERROR("  Illegal Read of CSR %3x in user mode\n", csrno);
-        s->pc = raise(s->pc, TRAP_INST_PRIVILEGE);
+        raise(s, TRAP_INST_PRIVILEGE);
         return 0;
     }
 
@@ -1131,13 +1135,13 @@ static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value)
 
     if (!BF_GET(CSR_STATUS_S_BF, csr[CSR_STATUS]) && !user_ok) {
         ERROR("  Illegal Write of CSR %3x in user mode\n", csrno);
-        s->pc = raise(s->pc, TRAP_INST_PRIVILEGE);
+        raise(s, TRAP_INST_PRIVILEGE);
         return;
     }
 
     if (top_priv == 3) {
         ERROR("  Illegal Write of CSR %3x\n", csrno);
-        s->pc = raise(s->pc, TRAP_INST_PRIVILEGE);
+        raise(s, TRAP_INST_PRIVILEGE);
         return;
     }
 
