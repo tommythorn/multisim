@@ -587,13 +587,9 @@ decode(uint64_t inst_addr, uint32_t inst)
           switch (i.i.imm11_0) {
           case 0: // SCALL
           case 1: // SBREAK
-              dec.class = isa_inst_class_compjump;
-              break;
           case -0x800: // SRET
               // XXX but it has a speculation barrier not accounted for
               dec.class = isa_inst_class_compjump;
-              dec.source_msr_a = CSR_STATUS;
-              dec.dest_msr = CSR_STATUS;
               break;
           default:
               assert(0);
@@ -918,27 +914,51 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
         switch (i.r.funct3) {
         case SCALLSBREAK:
             switch (i.i.imm11_0) {
-            case 0:
-                printf("   SCALL\n");
-                res.compjump_target = raise(dec.inst_addr + 4, TRAP_SYSTEM_CALL);
+            case 0: {
+                uint32_t orig_status = csr[CSR_STATUS];
+                // XXX because sharing raise() cause problems
+                res.compjump_target = csr[CSR_EVEC];
+                csr[CSR_EPC] = dec.inst_addr;
+                csr[CSR_CAUSE] = TRAP_SYSTEM_CALL;
+                push_SEI();
+                DEBUG("  %016"PRIx64":SCALL: status was %08x, now %08x, will vector to %016"PRIx64"\n",
+                      dec.inst_addr, orig_status,
+                      (uint32_t) csr[CSR_STATUS],
+                      csr[CSR_EVEC]);
+
+//verbosity_override |= VERBOSE_DISASS;
+
                 return res;
+            }
 
             case 1: assert(0); printf("  SBREAK");
-                res.compjump_target = raise(dec.inst_addr + 4, TRAP_BREAKPOINT);
+                res.compjump_target = csr[CSR_EVEC];
+                csr[CSR_EPC] = dec.inst_addr;
+                csr[CSR_CAUSE] = TRAP_BREAKPOINT;
+                push_SEI();
                 return res;
 
             case -0x800: // SRET
+ {
+                uint32_t orig_status = csr[CSR_STATUS];
+
                 res.compjump_target = csr[CSR_EPC];
 
                 /* Pop the S and EI bits from PS and PEI respectively */
-                res.msr_result =
-                    BF_SET(msr_a, CSR_STATUS_S_BF,
-                           BF_GET(CSR_STATUS_PS_BF, msr_a));
 
-                res.msr_result =
-                    BF_SET(res.msr_result, CSR_STATUS_EI_BF,
-                           BF_GET(CSR_STATUS_PEI_BF, msr_a));
+                csr[CSR_STATUS] =
+                    BF_SET(csr[CSR_STATUS], CSR_STATUS_S_BF,
+                           BF_GET(CSR_STATUS_PS_BF, csr[CSR_STATUS]));
 
+                csr[CSR_STATUS] =
+                    BF_SET(csr[CSR_STATUS], CSR_STATUS_EI_BF,
+                           BF_GET(CSR_STATUS_PEI_BF, csr[CSR_STATUS]));
+
+                DEBUG("  %016"PRIx64":SRET:  status was %08x, now %08x, will vector to %016"PRIx64"\n",
+                      dec.inst_addr, orig_status,
+                      (uint32_t) csr[CSR_STATUS],
+                      csr[CSR_EPC]);
+ }
                 return res;
             }
             assert(0);
