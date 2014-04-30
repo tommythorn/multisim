@@ -28,6 +28,9 @@
 #include "run_simple.h"
 #include "loadelf.h"
 
+extern verbosity_t verbosity_override;
+
+
 bool
 step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
 {
@@ -136,7 +139,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
         ++cycle;
     }
 
-    if (verbosity & VERBOSE_DISASS)
+    if ((verbosity | verbosity_override) & VERBOSE_DISASS)
         isa_disass(arch, dec, res);
 
     arch->tick(state);
