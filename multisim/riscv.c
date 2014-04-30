@@ -52,6 +52,16 @@
 #include "arch.h"
 #include "riscv.h"
 
+static int debug = 0;
+static int info  = 0;
+static int error = 1;
+
+#define DEBUG(...) ({ if (debug) fprintf(stderr, __VA_ARGS__); })
+#define INFO(...)  ({ if (info) fprintf(stderr, __VA_ARGS__); })
+#define ERROR(...) ({ if (error) fprintf(stderr, __VA_ARGS__); })
+
+verbosity_t verbosity_override = 0;
+
 static const char *csr_name[0x1000] = {
     [CSR_FFLAGS]	= "fflags",
     [CSR_FRM]		= "frm",
@@ -226,8 +236,6 @@ static void print_status(uint32_t status)
     }
 }
 */
-
-#define DEBUG(...) if (0) printf(__VA_ARGS__)
 
 int disk_fd;
 
@@ -563,9 +571,9 @@ decode(uint64_t inst_addr, uint32_t inst)
       case SCALLSBREAK:
           switch (i.i.imm11_0) {
           case 0: // SCALL
-              assert(0);
           case 1: // SBREAK
-              assert(0);
+              dec.class = isa_inst_class_compjump;
+              break;
           case -0x800: // SRET
               // XXX but it has a speculation barrier not accounted for
               dec.class = isa_inst_class_compjump;
@@ -895,9 +903,16 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
         switch (i.r.funct3) {
         case SCALLSBREAK:
             switch (i.i.imm11_0) {
-            case 0: printf("  SCALL"); break;
-            case 1: printf("  SBREAK"); break;
-            case -0x800:
+            case 0:
+                printf("   SCALL\n");
+                res.compjump_target = raise(dec.inst_addr + 4, TRAP_SYSTEM_CALL);
+                return res;
+
+            case 1: assert(0); printf("  SBREAK");
+                res.compjump_target = raise(dec.inst_addr + 4, TRAP_BREAKPOINT);
+                return res;
+
+            case -0x800: // SRET
                 res.compjump_target = csr[CSR_EPC];
 
                 /* Pop the S and EI bits from PS and PEI respectively */
@@ -956,15 +971,15 @@ static void raise(cpu_state_t *s, uint64_t cause)
         if (!BF_GET(CSR_STATUS_EI_BF, csr[CSR_STATUS]) ||
             (intr_pend & intr_mask) == 0) {
 
-            DEBUG("  Interrupt %d ignored (for now) as it's disabled\n", (int) cause);
-            DEBUG("    (EI = %d IP = 0x%x, IM = 0x%x)\n",
+            ERROR("  Interrupt %d ignored (for now) as it's disabled\n", (int) cause);
+            ERROR("    (EI = %d IP = 0x%x, IM = 0x%x)\n",
                    BF_GET(CSR_STATUS_EI_BF, csr[CSR_STATUS]),
                    intr_pend, intr_mask);
             return;
         }
     }
 
-    DEBUG("  Raised 0x%"PRIx64"\n", cause);
+    INFO("  Raised 0x%"PRIx64"\n", cause);
 
     csr[CSR_EPC] = s->pc;
     s->pc = csr[CSR_EVEC];
@@ -1003,8 +1018,8 @@ static uint64_t read_msr(cpu_state_t *s, unsigned csrno)
     int user_ok  = top_priv == 0 || top_priv == 3 && bot_priv == 0;
 
     if (!BF_GET(CSR_STATUS_S_BF, csr[CSR_STATUS]) && !user_ok) {
-        DEBUG("  Illegal Read of CSR %3x in user mode\n", csrno);
-        raise(s, TRAP_INST_PRIVILEGE);
+        ERROR("  Illegal Read of CSR %3x in user mode\n", csrno);
+        s->pc = raise(s->pc, TRAP_INST_PRIVILEGE);
         return 0;
     }
 
@@ -1019,7 +1034,7 @@ static uint64_t read_msr(cpu_state_t *s, unsigned csrno)
 
     case CSR_FROMHOST:
     case CSR_TOHOST:
-        printf("  Read  CSR %s -> %"PRIx64"\n", csr_name[csrno], csr[csrno]);
+        INFO("  Read  CSR %s -> %"PRIx64"\n", csr_name[csrno], csr[csrno]);
         return csr[csrno];
 
     default:
@@ -1115,14 +1130,14 @@ static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value)
     int user_ok  = top_priv == 0 && bot_priv == 0;
 
     if (!BF_GET(CSR_STATUS_S_BF, csr[CSR_STATUS]) && !user_ok) {
-        DEBUG("  Illegal Write of CSR %3x in user mode\n", csrno);
-        raise(s, TRAP_INST_PRIVILEGE);
+        ERROR("  Illegal Write of CSR %3x in user mode\n", csrno);
+        s->pc = raise(s->pc, TRAP_INST_PRIVILEGE);
         return;
     }
 
     if (top_priv == 3) {
-        DEBUG("  Illegal Write of CSR %3x\n", csrno);
-        raise(s, TRAP_INST_PRIVILEGE);
+        ERROR("  Illegal Write of CSR %3x\n", csrno);
+        s->pc = raise(s->pc, TRAP_INST_PRIVILEGE);
         return;
     }
 
@@ -1153,12 +1168,12 @@ static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value)
         break;
 
     case CSR_TOHOST:
-        printf("  Write CSR %s <- %"PRIx64"\n", csr_name[csrno], csr[csrno]);
+        INFO("  Write CSR %s <- %"PRIx64"\n", csr_name[csrno], csr[csrno]);
         handle_tohost(s, value);
         break;
 
     case CSR_FROMHOST:
-        printf("  Write CSR %s <- %"PRIx64"\n", csr_name[csrno], csr[csrno]);
+        INFO("  Write CSR %s <- %"PRIx64"\n", csr_name[csrno], csr[csrno]);
         break;
     }
 }
@@ -1180,7 +1195,7 @@ virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exceptio
     *error = MEMORY_SUCCESS;
 
     if (debug_vm)
-    DEBUG("  virt2phys(%016"PRIx64" = <%d,%d,%d,%d>)\n", address, vpn[2], vpn[1], vpn[0],
+    ERROR("  virt2phys(%016"PRIx64" = <%d,%d,%d,%d>)\n", address, vpn[2], vpn[1], vpn[0],
          (int)address & 8191);
 
     uint64_t a = csr[CSR_PTBR];
@@ -1190,11 +1205,11 @@ virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exceptio
         if (0) { // XXX I could walk the complete table, counting virtual and physical pages, looking
             // for aliases and virtual and physical memory holes...
 
-            DEBUG("  Level %d page table @ %016"PRIx64"\n", i, a);
+            ERROR("  Level %d page table @ %016"PRIx64"\n", i, a);
             for (int j = 0; j < 1024; ++j) {
                 uint64_t pte = *(uint64_t *)memory_physical(s->mem, a + j * 8, 8);
 
-                DEBUG("   %016"PRIx64" = %4d %4d %4d Perm 0%o%s%s%s\n",
+                ERROR("   %016"PRIx64" = %4d %4d %4d Perm 0%o%s%s%s\n",
                      pte,
                      (int)(pte >> 33 & 1023),
                      (int)(pte >> 23 & 1023),
@@ -1211,7 +1226,7 @@ virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exceptio
         uint64_t pte = *(uint64_t *)memory_physical(s->mem, a + vpn[i] * 8, 8);
 
         if (debug_vm)
-        DEBUG("  %016"PRIx64"[%d]: pte[%d] = %016"PRIx64" = %4d %4d %4d Perm 0%o%s%s%s\n",
+        ERROR("  %016"PRIx64"[%d]: pte[%d] = %016"PRIx64" = %4d %4d %4d Perm 0%o%s%s%s\n",
              a, vpn[i],
              i, pte,
              (int)(pte >> 33 & 1023),
@@ -1226,7 +1241,7 @@ virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exceptio
 
         if ((pte >> 0 & 1) == 0) { // V
             if (debug_vm) {
-                DEBUG("  Invalid mapping: %016"PRIx64"[%d]: pte[%d] = %016"PRIx64" = %4d %4d %4d Perm 0%o%s%s%s\n",
+                ERROR("  Invalid mapping: %016"PRIx64"[%d]: pte[%d] = %016"PRIx64" = %4d %4d %4d Perm 0%o%s%s%s\n",
                        a, vpn[i],
                        i, pte,
                        (int)(pte >> 33 & 1023),
@@ -1271,7 +1286,7 @@ virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exceptio
         a = pte & ~8191ULL;
     }
 
-    DEBUG("  Impossible?\n");
+    ERROR("  Impossible?\n");
 
 exception:
     *error = MEMORY_EXCEPTION;
@@ -1323,7 +1338,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *
     if (!p) {
         raise(s, TRAP_LOAD_FAULT);
         csr[CSR_BADVADDR] = address;
-        DEBUG("  load from illegal physical memory %08"PRIx64"\n", address);
+        ERROR("  load from illegal physical memory %08"PRIx64"\n", address);
         //XXX s->fatal_error = true;
         return 0;
     }
@@ -1371,7 +1386,7 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, mem
     if (!p) {
         raise(s, TRAP_STORE_FAULT);
         csr[CSR_BADVADDR] = address;
-        DEBUG("  store to illegal physical memory %08"PRIx64"\n", address);
+        ERROR("  store to illegal physical memory %08"PRIx64"\n", address);
         // s->fatal_error = true;
         return;
     }
