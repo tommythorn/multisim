@@ -1098,33 +1098,33 @@ static void handle_tohost(cpu_state_t *s, uint64_t value)
         case HTIF_CMD_READ:
         case HTIF_CMD_WRITE: {
             volatile struct htifbd_dap {
-		unsigned long address;
-		unsigned long offset;	/* offset in bytes */
-		unsigned long length;	/* length in bytes */
-		unsigned long tag;
+		uint64_t address;
+		uint64_t offset;	/* offset in bytes */
+		uint64_t length;	/* length in bytes */
+		uint64_t tag;
             } *req = memory_physical(s->mem, payload, 4);
 
             assert(req);
 
-            printf("%s request for address %"PRIx64" offset %"PRIx64
+            INFO("%s request for address %"PRIx64" offset %"PRIx64
                    " length %"PRIx64"\n",
                    cmd == HTIF_CMD_READ ? "read" : "write",
                    req->address,
                    req->offset,
                    req->length);
 
-            void *buf = memory_physical(s->mem, req->address, 4);
+            uint8_t *buf = memory_physical(s->mem, req->address, 4);
+            ssize_t r;
 
             assert(buf);
-
-            ssize_t r;
 
             if (cmd == HTIF_CMD_READ)
                 r = pread(disk_fd, buf, req->length, req->offset);
             else
                 r = pwrite(disk_fd, buf, req->length, req->offset);
 
-            assert(r >= 0);
+            assert(r == req->length);
+
             return;
         }
 
@@ -1144,6 +1144,7 @@ static void handle_tohost(cpu_state_t *s, uint64_t value)
 
     ERROR("Got cmd %d for dev %d, payload %"PRIx64" I'm too young!!\n",
            cmd, dev, payload);
+
     assert(0);
 }
 
@@ -1469,7 +1470,8 @@ setup(cpu_state_t *state, elf_info_t *info)
     store(state, state->r[14], 0, 4, &dummy);
     assert(dummy == MEMORY_SUCCESS);
 
-    disk_fd = open("/home/tommy/BTSync/RISCV/root-20140226.bin", O_RDWR);
+    disk_fd = open(disk_image /* "/home/tommy/BTSync/RISCV/root-20140226.bin" */, O_RDWR);
+    assert(disk_fd >= 0);
     // </HACK>
 
     // <HACK> <HACK>
