@@ -93,6 +93,11 @@ int main(int argc, char **argv)
         case 0:
             break;
 
+	case 'i':
+	    disk_image = optarg;
+	    printf("specified %s\n", disk_image);
+	    break;
+
         case 'd':
             verbosity |= VERBOSE_DISASS;
             break;
