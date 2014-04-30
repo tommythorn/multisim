@@ -1458,12 +1458,14 @@ setup(cpu_state_t *state, elf_info_t *info)
 
 
     // <HACK>
+    memory_exception_t dummy;
     const int memory_size       = 256 * 1024 * 1024; // 256 MiB
     const uint32_t memory_start = 0;
     memory_ensure_mapped_range(state->mem, memory_start, memory_size);
+    store(state, 0, memory_size >> 20, 4, &dummy);
+    assert(dummy == MEMORY_SUCCESS);
     state->r[31] = memory_start + memory_size / 2; // GP
     state->r[14] = memory_start + memory_size - 4; // SP
-    memory_exception_t dummy;
     store(state, state->r[14], 0, 4, &dummy);
     assert(dummy == MEMORY_SUCCESS);
 
