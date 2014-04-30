@@ -1058,7 +1058,7 @@ static uint64_t read_msr(cpu_state_t *s, unsigned csrno)
 
     case CSR_FROMHOST:
     case CSR_TOHOST:
-        INFO("  Read  CSR %s -> %"PRIx64"\n", csr_name[csrno], csr[csrno]);
+        DEBUG("  Read  CSR %s -> %"PRIx64"\n", csr_name[csrno], csr[csrno]);
         return csr[csrno];
 
     default:
@@ -1142,7 +1142,7 @@ static void handle_tohost(cpu_state_t *s, uint64_t value)
         }
     }
 
-    printf("Got cmd %d for dev %d, payload %"PRIx64" I'm too young!!\n",
+    ERROR("Got cmd %d for dev %d, payload %"PRIx64" I'm too young!!\n",
            cmd, dev, payload);
     assert(0);
 }
@@ -1197,7 +1197,7 @@ static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value)
         break;
 
     case CSR_FROMHOST:
-        INFO("  Write CSR %s <- %"PRIx64"\n", csr_name[csrno], csr[csrno]);
+        DEBUG("  Write CSR %s <- %"PRIx64"\n", csr_name[csrno], csr[csrno]);
         break;
     }
 }
