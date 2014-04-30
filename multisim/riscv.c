@@ -505,7 +505,7 @@ decode(uint64_t inst_addr, uint32_t inst)
         switch (i.r.funct7 >> 2) {
         case LR:
             dec.class        = isa_inst_class_load;
-            dec.loadstore_size = i.r.funct3 & 1 ? 8 : 4;
+            dec.loadstore_size = i.r.funct3 & 1 ? 8 : -4;
             dec.source_reg_a = i.r.rs1;
             dec.dest_reg     = i.r.rd;
             break;
