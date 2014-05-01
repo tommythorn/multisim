@@ -1282,6 +1282,7 @@ virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exceptio
                 goto exception;
             }
             else {
+                goto exception;
                 debug_vm = 1;
                 return virt2phys(s, address, mem_access_size, error);
             }
@@ -1316,7 +1317,7 @@ virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exceptio
 exception:
     *error = MEMORY_EXCEPTION;
 
-    return 0;
+    return address; // XXX This is a hack, but it makes the clients simpler. Fix later.
 }
 
 static uint64_t
@@ -1412,7 +1413,6 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, mem
         raise(s, TRAP_STORE_FAULT);
         csr[CSR_BADVADDR] = address;
         ERROR("  store to illegal physical memory %08"PRIx64"\n", address);
-        // s->fatal_error = true;
         return;
     }
 
