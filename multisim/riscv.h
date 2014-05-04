@@ -104,6 +104,10 @@ enum riscv_opcode_load_e {
     LBU, LHU, LWU, UIMP_LOAD7,
 };
 
+enum riscv_opcode_load_fp_e {
+    FLW = 2, FLD = 3,
+};
+
 enum riscv_opcode_op_imm_e {
     ADDI, SLLI, SLTI, SLTIU, XORI, SR_I, ORI, ANDI,
 };
@@ -203,6 +207,20 @@ enum {
     TRAP_LOAD_FAULT	= 10,
     TRAP_STORE_FAULT	= 11,
 };
+
+/* Virtual memory, page table entries */
+
+#define PTE_V		0:0
+#define PTE_T		1:1
+#define PTE_G		2:2
+#define PTE_UR		3:3
+#define PTE_UW		4:4
+#define PTE_UX		5:5
+#define PTE_SR		6:6
+#define PTE_SW		7:7
+#define PTE_SX		8:8
+
+#define PTE_PERMISSION  8:3
 
 #endif
 

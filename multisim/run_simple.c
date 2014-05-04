@@ -38,7 +38,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     uint64_t orig_r[32];
     uint64_t pc       = state->pc;
     memory_exception_t error;
-    uint32_t inst     = (uint32_t)arch->load(state, pc, 4, &error); // XXX handle illegal fetches
+    uint32_t inst     = (uint32_t)arch->load(state, pc, 44, &error);
 
     if (error != MEMORY_SUCCESS)
         return (error == MEMORY_FATAL);
@@ -70,11 +70,18 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     if (error != MEMORY_SUCCESS)
         return (error == MEMORY_FATAL);
 
+    /// XXX hack for now: we need to know if an exception was fired, just like with loads
+    extern int exception_raised;
+    exception_raised = 0;
+
     isa_result_t res  = arch->inst_exec(dec, op_a, op_b, msr_a);
     res.result = CANONICALIZE(res.result);
 
     if (res.fatal_error)
         return true;
+
+    if (exception_raised)
+        return false;
 
     switch (dec.class) {
     case isa_inst_class_load:

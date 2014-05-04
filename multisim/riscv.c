@@ -125,9 +125,9 @@ static const uint64_t csr_mask[0x1000] = {
 static uint64_t csr[0x1000] = {
     [CSR_EVEC] = 0x2000,
     [CSR_STATUS] =
-    BF_PACK(CSR_STATUS_U64_BF, 1) |
-    BF_PACK(CSR_STATUS_S64_BF, 1) |
-    BF_PACK(CSR_STATUS_S_BF,   1),
+    BF_PACK(1, CSR_STATUS_U64_BF) |
+    BF_PACK(1, CSR_STATUS_S64_BF) |
+    BF_PACK(1, CSR_STATUS_S_BF),
 };
 
 #define HTIF_CMD_READ       (0x00UL)
@@ -242,16 +242,14 @@ int disk_fd;
 static void push_SEI(void)
 {
     /* Save S in PS, and set S */
-    csr[CSR_STATUS] =
-        BF_SET(csr[CSR_STATUS], CSR_STATUS_PS_BF,
-               BF_GET(CSR_STATUS_S_BF, csr[CSR_STATUS]))
-        | BF_PACK(CSR_STATUS_S_BF, 1);
+    BF_SET(csr[CSR_STATUS], CSR_STATUS_PS_BF,
+           BF_GET(csr[CSR_STATUS], CSR_STATUS_S_BF));
+    csr[CSR_STATUS] |= BF_PACK(1, CSR_STATUS_S_BF);
 
     /* Save EI in PEI and clear EI */
-    csr[CSR_STATUS] =
-        BF_SET(csr[CSR_STATUS], CSR_STATUS_PEI_BF,
-               BF_GET(CSR_STATUS_EI_BF, csr[CSR_STATUS]));
-    csr[CSR_STATUS] &= ~BF_PACK(CSR_STATUS_EI_BF, 1);
+    BF_SET(csr[CSR_STATUS], CSR_STATUS_PEI_BF,
+           BF_GET(csr[CSR_STATUS], CSR_STATUS_EI_BF));
+    csr[CSR_STATUS] &= ~BF_PACK(1, CSR_STATUS_EI_BF);
 }
 
 static void
@@ -270,9 +268,17 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
         snprintf(buf, buf_size, "%-11s", i.r.funct3 ? "fence.i" : "fence");
         break;
 
-//  case LOAD_FP:
+    case LOAD_FP: {
+        char *name =
+            i.s.funct3 == FLW ? "lsw" :
+            i.s.funct3 == FLD ? "lsd" :
+            "??? load_fp ???";
+        int imm = i.s.imm4_0 | i.s.imm11_5 << 5;
+        snprintf(buf, buf_size, "%-11sr%d,%d(r%d)", name, i.s.rs2, imm, i.s.rs1);
+        break;
+    }
+
 //  case CUSTOM0:
-//  case MISC_MEM:
     case OP_IMM:
         if (i.i.funct3 == ADDI && i.i.rs1 == 0)
             // li pseudo instruction
@@ -304,7 +310,16 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
         break;
     }
 
-//  case STORE_FP:
+    case STORE_FP: {
+        char *name =
+            i.s.funct3 == FLW ? "fsw" :
+            i.s.funct3 == FLD ? "fsd" :
+            "??? store_fp ???";
+        int imm = i.s.imm4_0 | i.s.imm11_5 << 5;
+        snprintf(buf, buf_size, "%-11sr%d,%d(r%d)", name, i.s.rs2, imm, i.s.rs1);
+        break;
+    }
+
 //  case CUSTOM1:
     case AMO: {
         char inst[16];
@@ -376,7 +391,7 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
     }
 
     case JALR:
-        if (i.i.rd == 0 && i.i.imm11_0 == 0)
+        if (i.i.rd == 0 && i.i.imm11_0 == 0 && i.i.rs1 == 1)
             // ret pseudo instruction
             snprintf(buf, buf_size, "ret");
         else
@@ -481,6 +496,11 @@ decode(uint64_t inst_addr, uint32_t inst)
         dec.dest_reg     = i.i.rd;
         break;
 
+    case LOAD_FP:
+        // XXX Pretend it's a nop
+        dec.class        = isa_inst_class_alu;
+        break;
+
     case MISC_MEM:
         dec.class        = isa_inst_class_branch;
         break;
@@ -499,6 +519,12 @@ decode(uint64_t inst_addr, uint32_t inst)
         dec.loadstore_size = 1 << (i.s.funct3 & 3);
         dec.source_reg_a = i.s.rs1;
         dec.source_reg_b = i.s.rs2;
+        break;
+
+    case STORE_FP:
+//verbosity_override |= VERBOSE_DISASS;
+
+        dec.class        = isa_inst_class_alu; // nop
         break;
 
     case AMO: {
@@ -651,6 +677,9 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
         res.load_addr = ea_load;
         return res;
 
+    case LOAD_FP:
+        return res;
+
     case OP_IMM_32:
         switch (i.i.funct3) {
         case ADDI: // ADDIW
@@ -712,6 +741,9 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
     case STORE:
         res.store_value = op_b;
         res.store_addr = ea_store;
+        return res;
+
+    case STORE_FP:
         return res;
 
     case AMO: {
@@ -946,13 +978,11 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
 
                 /* Pop the S and EI bits from PS and PEI respectively */
 
-                csr[CSR_STATUS] =
-                    BF_SET(csr[CSR_STATUS], CSR_STATUS_S_BF,
-                           BF_GET(CSR_STATUS_PS_BF, csr[CSR_STATUS]));
+                BF_SET(csr[CSR_STATUS], CSR_STATUS_S_BF,
+                       BF_GET(csr[CSR_STATUS], CSR_STATUS_PS_BF));
 
-                csr[CSR_STATUS] =
-                    BF_SET(csr[CSR_STATUS], CSR_STATUS_EI_BF,
-                           BF_GET(CSR_STATUS_PEI_BF, csr[CSR_STATUS]));
+                BF_SET(csr[CSR_STATUS], CSR_STATUS_EI_BF,
+                       BF_GET(csr[CSR_STATUS], CSR_STATUS_PEI_BF));
 
                 DEBUG("  %016"PRIx64":SRET:  status was %08x, now %08x, will vector to %016"PRIx64"\n",
                       dec.inst_addr, orig_status,
@@ -992,24 +1022,31 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
     return res;
 }
 
+int exception_raised; // XXX hack
+
+
 static void raise(cpu_state_t *s, uint64_t cause)
 {
     if (cause & (1ULL << 63)) {
-        int intr_pend = BF_GET(CSR_STATUS_IP_BF, csr[CSR_STATUS]);
-        int intr_mask = BF_GET(CSR_STATUS_IM_BF, csr[CSR_STATUS]);
+        int intr_pend = BF_GET(csr[CSR_STATUS], CSR_STATUS_IP_BF);
+        int intr_mask = BF_GET(csr[CSR_STATUS], CSR_STATUS_IM_BF);
 
         intr_pend |= 1 << (cause & 7);
 
-        csr[CSR_STATUS] =
-            BF_SET(csr[CSR_STATUS], CSR_STATUS_IP_BF, intr_pend);
+        BF_SET(csr[CSR_STATUS], CSR_STATUS_IP_BF, intr_pend);
 
-        if (!BF_GET(CSR_STATUS_EI_BF, csr[CSR_STATUS]) ||
+        if (!BF_GET(csr[CSR_STATUS], CSR_STATUS_EI_BF) ||
             (intr_pend & intr_mask) == 0) {
 
+            /*
             ERROR("  Interrupt %d ignored (for now) as it's disabled\n", (int) cause);
-            ERROR("    (EI = %d IP = 0x%x, IM = 0x%x)\n",
-                   BF_GET(CSR_STATUS_EI_BF, csr[CSR_STATUS]),
-                   intr_pend, intr_mask);
+            ERROR("    (EI = %d IP = 0x%x, IM = 0x%x, pc = %"PRIx64")\n",
+                   BF_GET(csr[CSR_STATUS], CSR_STATUS_EI_BF),
+                  intr_pend, intr_mask, s->pc);
+
+            verbosity_override |= VERBOSE_DISASS;
+            */
+
             return;
         }
     }
@@ -1021,11 +1058,30 @@ static void raise(cpu_state_t *s, uint64_t cause)
     // XXX not correct in case of instruction fetches
     csr[CSR_CAUSE] = cause;
     push_SEI();
+
+    exception_raised = 1;
 }
 
 /* executed every cycle */
 static void tick(cpu_state_t *s)
 {
+    int pending =
+        BF_GET(csr[CSR_STATUS], CSR_STATUS_IP_BF) &
+        BF_GET(csr[CSR_STATUS], CSR_STATUS_IM_BF);
+
+    if (BF_GET(csr[CSR_STATUS], CSR_STATUS_EI_BF) && pending) {
+        if (0)
+            ERROR("\npc=%"PRIx64" status write of EI enables these pending (mask) 0x%x (priority %d)\n",
+              s->pc,
+              pending, __builtin_ctz(pending));
+        raise(s, (1ULL << 63) | __builtin_ctz(pending));
+
+        // XXX this isn't quite right; we should increment counters regardless,
+        // and just let the highest priority exception win.
+        // Possibly this is the only place raise should be issued from!
+        return;
+    }
+
     // XXX for now, an instruction per tick
     csr[CSR_INSTRET] = (uint32_t) (csr[CSR_INSTRET] + 1);
     csr[CSR_CYCLE]   = (uint32_t) (csr[CSR_CYCLE]   + 1);
@@ -1037,11 +1093,11 @@ static void tick(cpu_state_t *s)
 
 static uint64_t read_msr(cpu_state_t *s, unsigned csrno)
 {
-    int top_priv = BF_GET(11:10, csrno);
-    int bot_priv = BF_GET( 9: 8, csrno);
+    int top_priv = BF_GET(csrno, 11:10);
+    int bot_priv = BF_GET(csrno,  9: 8);
     int user_ok  = top_priv == 0 || top_priv == 3 && bot_priv == 0;
 
-    if (!BF_GET(CSR_STATUS_S_BF, csr[CSR_STATUS]) && !user_ok) {
+    if (!BF_GET(csr[CSR_STATUS], CSR_STATUS_S_BF) && !user_ok) {
         ERROR("  Illegal Read of CSR %3x in user mode\n", csrno);
         raise(s, TRAP_INST_PRIVILEGE);
         return 0;
@@ -1150,11 +1206,11 @@ static void handle_tohost(cpu_state_t *s, uint64_t value)
 
 static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value)
 {
-    int top_priv = BF_GET(11:10, csrno);
-    int bot_priv = BF_GET( 9: 8, csrno);
+    int top_priv = BF_GET(csrno, 11:10);
+    int bot_priv = BF_GET(csrno,  9: 8);
     int user_ok  = top_priv == 0 && bot_priv == 0;
 
-    if (!BF_GET(CSR_STATUS_S_BF, csr[CSR_STATUS]) && !user_ok) {
+    if (!BF_GET(csr[CSR_STATUS], CSR_STATUS_S_BF) && !user_ok) {
         ERROR("  Illegal Write of CSR %3x in user mode\n", csrno);
         raise(s, TRAP_INST_PRIVILEGE);
         return;
@@ -1165,8 +1221,6 @@ static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value)
         raise(s, TRAP_INST_PRIVILEGE);
         return;
     }
-
-    uint64_t oldvalue = csr[csrno];
 
     csr[csrno] = value & csr_mask[csrno] | csr[csrno] & ~csr_mask[csrno];
 
@@ -1179,17 +1233,24 @@ static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value)
     default:
         break;
 
-    case CSR_STATUS: {
-        int pending =
-            BF_GET(CSR_STATUS_IP_BF, value) & BF_GET(CSR_STATUS_IM_BF, value);
-
-        if (BF_GET(CSR_STATUS_EI_BF, ~oldvalue & value) && pending)
-            raise(s, (1ULL << 63) | __builtin_clz(pending));
+    case CSR_FFLAGS:
+        /* FCSR[7:0] <---> {FRM[3:0], FFLAGS[4:0]} */
+        BF_SET(csr[CSR_FCSR], 4:0, BF_GET(csr[CSR_FFLAGS], 4:0));
         break;
-    }
+
+    case CSR_FRM:
+        /* FCSR[7:0] <---> {FRM[2:0], FFLAGS[4:0]} */
+        BF_SET(csr[CSR_FCSR], 7:5, BF_GET(csr[CSR_FRM], 2:0));
+        break;
+
+    case CSR_FCSR:
+        /* FCSR[7:0] <---> {FRM[3:0], FFLAGS[4:0]} */
+        BF_SET(csr[CSR_FFLAGS], 4:0, BF_GET(csr[CSR_FCSR], 4:0));
+        BF_SET(csr[CSR_FRM],    2:0, BF_GET(csr[CSR_FCSR], 7:5));
+        break;
 
     case CSR_COMPARE:
-        csr[CSR_STATUS] &= ~BF_PACK(CSR_STATUS_IP_BF, 1 << TRAP_INTR_TIMER);
+        csr[CSR_STATUS] &= ~BF_PACK(1 << TRAP_INTR_TIMER, CSR_STATUS_IP_BF);
         break;
 
     case CSR_TOHOST:
@@ -1206,7 +1267,7 @@ static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value)
 bool debug_vm = false; // to be enabled in the debugger
 
 static uint64_t
-virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *error)
+virt2phys(cpu_state_t *s, uint64_t address, uint32_t access, memory_exception_t *error)
 {
     int vpn[3] = {
         address >> 13 & 1023,
@@ -1284,12 +1345,22 @@ virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exceptio
             else {
                 goto exception;
                 debug_vm = 1;
-                return virt2phys(s, address, mem_access_size, error);
+                return virt2phys(s, address, access, error);
             }
         }
 
         if ((pte >> 1 & 1) == 0) { // T
             uint64_t ppn[3];
+
+            if ((pte & access) == 0) {
+                ERROR("Page present, but access requested (0%02o) "
+                      "wasn't granted (0%02o) (status = %"PRIx64")\n",
+                      BF_GET(access, PTE_PERMISSION),
+                      BF_GET(pte, PTE_PERMISSION)
+                      , csr[CSR_STATUS]
+);
+                goto exception;
+            }
 
             for (int j = 0; j < 3; ++j) {
                 ppn[j] = pte >> (10 * j + 13) & 1023;
@@ -1305,6 +1376,8 @@ virt2phys(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exceptio
 
             if (debug_vm)
             DEBUG("  final physical address = %016"PRIx64"\n", phys);
+
+            // XXXX Need to check the permissions!!!
 
             return phys;
         }
@@ -1326,13 +1399,24 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *
     memory_t *m = s->mem;
     void *p;
     uint32_t iodata;
+    int except = TRAP_LOAD_FAULT;
+    uint32_t access = BF_PACK(1, PTE_UR);
+
+    if (mem_access_size == 44)
+        mem_access_size = 4, except = TRAP_INST_ADDR, access = BF_PACK(1, PTE_UX);
+
+    assert(BF_GET(csr[CSR_STATUS], CSR_STATUS_S_BF) ==
+           (csr[CSR_STATUS] & 1));
+
+    if (BF_GET(csr[CSR_STATUS], CSR_STATUS_S_BF))
+        access <<= 3;
 
     *error = MEMORY_SUCCESS;
 
-    if (BF_GET(CSR_STATUS_VM_BF, csr[CSR_STATUS])) {
-        address = virt2phys(s, address, mem_access_size, error);
+    if (BF_GET(csr[CSR_STATUS], CSR_STATUS_VM_BF)) {
+        address = virt2phys(s, address, access, error);
         if (*error != MEMORY_SUCCESS) {
-            raise(s, TRAP_LOAD_FAULT);
+            raise(s, except);
             csr[CSR_BADVADDR] = address;
 
             return 0;
@@ -1362,7 +1446,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *
                             mem_access_size > 0 ? mem_access_size : -mem_access_size);
 
     if (!p) {
-        raise(s, TRAP_LOAD_FAULT);
+        raise(s, except);
         csr[CSR_BADVADDR] = address;
         ERROR("  load from illegal physical memory %08"PRIx64"\n", address);
         //XXX s->fatal_error = true;
@@ -1387,10 +1471,15 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *
 static void
 store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, memory_exception_t *error)
 {
+    uint32_t access = BF_PACK(1, PTE_UW);
+
     *error = MEMORY_SUCCESS;
 
-    if (BF_GET(CSR_STATUS_VM_BF, csr[CSR_STATUS])) {
-        address = virt2phys(s, address, mem_access_size, error);
+    if (BF_GET(csr[CSR_STATUS], CSR_STATUS_S_BF))
+        access <<= 3;
+
+    if (BF_GET(csr[CSR_STATUS], CSR_STATUS_VM_BF)) {
+        address = virt2phys(s, address, access, error);
         if (*error != MEMORY_SUCCESS) {
             raise(s, TRAP_STORE_FAULT);
             csr[CSR_BADVADDR] = address;
@@ -1460,7 +1549,8 @@ setup(cpu_state_t *state, elf_info_t *info)
 
     // <HACK>
     memory_exception_t dummy;
-    const int memory_size       = 256 * 1024 * 1024; // 256 MiB
+    const uint64_t memory_size       = 256 * 1024 * 1024; // 256 MiB
+//    const uint64_t memory_size       = 4ULL * 1024 * 1024 * 1024;
     const uint32_t memory_start = 0;
     memory_ensure_mapped_range(state->mem, memory_start, memory_size);
     store(state, 0, memory_size >> 20, 4, &dummy);

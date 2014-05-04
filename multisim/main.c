@@ -95,7 +95,6 @@ int main(int argc, char **argv)
 
 	case 'i':
 	    disk_image = optarg;
-	    printf("specified %s\n", disk_image);
 	    break;
 
         case 'd':
