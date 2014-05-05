@@ -47,18 +47,22 @@
 #include <assert.h>
 #include <unistd.h>
 #include <sys/time.h>
+#include <fcntl.h>
+
 #include "bitfields.h"
 #include "sim.h"
 #include "arch.h"
 #include "riscv.h"
 
-static int debug = 0;
-static int info  = 0;
-static int error = 1;
+static int debug   = 0;
+static int info    = 0;
+static int ioinfo  = 0;
+static int error   = 1;
 
-#define DEBUG(...) ({ if (debug) fprintf(stderr, __VA_ARGS__); })
-#define INFO(...)  ({ if (info) fprintf(stderr, __VA_ARGS__); })
-#define ERROR(...) ({ if (error) fprintf(stderr, __VA_ARGS__); })
+#define DEBUG(...)   ({ if (debug)  fprintf(stderr, __VA_ARGS__); })
+#define INFO(...)    ({ if (info)   fprintf(stderr, __VA_ARGS__); })
+#define IOINFO(...)  ({ if (ioinfo) fprintf(stderr, __VA_ARGS__); })
+#define ERROR(...)   ({ if (error)  fprintf(stderr, __VA_ARGS__); })
 
 verbosity_t verbosity_override = 0;
 
@@ -238,6 +242,20 @@ static void print_status(uint32_t status)
 */
 
 int disk_fd;
+
+void set_interrupt(int irq, int val)
+{
+    if (val)
+        csr[CSR_STATUS] |= 1U << (24+irq);
+    else
+        csr[CSR_STATUS] &= ~(1U << (24+irq));
+}
+
+void set_fromhost(uint64_t val)
+{
+    set_interrupt(TRAP_INTR_HOST, val != 0);
+    csr[CSR_FROMHOST] = val;
+}
 
 static void push_SEI(void)
 {
@@ -1062,9 +1080,48 @@ static void raise(cpu_state_t *s, uint64_t cause)
     exception_raised = 1;
 }
 
+static int request_char = 0; // XXX
+#define HTIF_DEV_SHIFT      (56)
+
 /* executed every cycle */
 static void tick(cpu_state_t *s)
 {
+    // XXX for now, an instruction per tick
+    csr[CSR_INSTRET] = (uint32_t) (csr[CSR_INSTRET] + 1);
+    csr[CSR_CYCLE]   = (uint32_t) (csr[CSR_CYCLE]   + 1);
+    csr[CSR_COUNT]   = (uint32_t) (csr[CSR_COUNT]   + 1);
+
+    if (csr[CSR_COUNT] == csr[CSR_COMPARE])
+        set_interrupt(TRAP_INTR_TIMER, 1);
+
+    if (request_char && csr[CSR_FROMHOST] == 0) {
+        unsigned char c;
+/*
+        static int once = 1;
+
+        if (once)
+            once = 0;
+        else
+            request_char = 0;
+*/
+
+        static char *np = "";
+
+        if (*np == 0)
+            np = "ls\n";
+
+        ssize_t r = read(0, &c, sizeof c);
+        //ssize_t r = *np ? (c = *np++, 1) : 0;
+
+        if (r == 1) {
+//verbosity_override |= VERBOSE_DISASS;
+//            ioinfo = 1;
+
+//           ERROR("sending %c to host\n", c);
+            set_fromhost((1LL << 56) | c);
+        }
+    }
+
     int pending =
         BF_GET(csr[CSR_STATUS], CSR_STATUS_IP_BF) &
         BF_GET(csr[CSR_STATUS], CSR_STATUS_IM_BF);
@@ -1075,20 +1132,7 @@ static void tick(cpu_state_t *s)
               s->pc,
               pending, __builtin_ctz(pending));
         raise(s, (1ULL << 63) | __builtin_ctz(pending));
-
-        // XXX this isn't quite right; we should increment counters regardless,
-        // and just let the highest priority exception win.
-        // Possibly this is the only place raise should be issued from!
-        return;
     }
-
-    // XXX for now, an instruction per tick
-    csr[CSR_INSTRET] = (uint32_t) (csr[CSR_INSTRET] + 1);
-    csr[CSR_CYCLE]   = (uint32_t) (csr[CSR_CYCLE]   + 1);
-    csr[CSR_COUNT]   = (uint32_t) (csr[CSR_COUNT]   + 1);
-
-    if (csr[CSR_COUNT] == csr[CSR_COMPARE])
-        raise(s, (1ULL << 63) | TRAP_INTR_TIMER);
 }
 
 static uint64_t read_msr(cpu_state_t *s, unsigned csrno)
@@ -1112,9 +1156,14 @@ static uint64_t read_msr(cpu_state_t *s, unsigned csrno)
      return now;
     }
 
-    case CSR_FROMHOST:
+    case CSR_FROMHOST: {
+        uint64_t v = csr[csrno];
+        IOINFO("  Read  CSR %s -> %016"PRIx64"\n", csr_name[csrno], v);
+        return v;
+    }
+
     case CSR_TOHOST:
-        DEBUG("  Read  CSR %s -> %"PRIx64"\n", csr_name[csrno], csr[csrno]);
+        IOINFO("  Read  CSR %s -> %016"PRIx64"\n", csr_name[csrno], csr[csrno]);
         return csr[csrno];
 
     default:
@@ -1126,7 +1175,6 @@ static uint64_t read_msr(cpu_state_t *s, unsigned csrno)
 static void handle_tohost(cpu_state_t *s, uint64_t value)
 {
     csr[CSR_TOHOST] = 0; // ACK it
-    csr[CSR_FROMHOST] = 1; // ACK it
 
     int dev = value >> 56 & 0xFF;
     int cmd = value >> 48 & 0xFF;
@@ -1137,14 +1185,16 @@ static void handle_tohost(cpu_state_t *s, uint64_t value)
     case 1:
         switch (cmd) {
         case HTIF_CMD_READ:
-            // ignore this request for now
+            request_char = 1;
             return;
         case HTIF_CMD_WRITE:
             fprintf(stderr, "%c", (char)payload);
+            set_fromhost(1); // ACK it
             return;
         case HTIF_CMD_IDENTITY:
             if (p = memory_physical(s->mem, payload >> 8, 4))
                 strcpy(p, "bcd");
+            set_fromhost(1); // ACK it
             return;
         }
         break;
@@ -1181,12 +1231,14 @@ static void handle_tohost(cpu_state_t *s, uint64_t value)
 
             assert(r == req->length);
 
+            set_fromhost(1); // ACK it
             return;
         }
 
         case HTIF_CMD_IDENTITY:
             if (p = memory_physical(s->mem, payload >> 8, 4))
                 strcpy(p, "disk size=67108864");
+            set_fromhost(1); // ACK it
             return;
         }
         break;
@@ -1194,6 +1246,7 @@ static void handle_tohost(cpu_state_t *s, uint64_t value)
         if (cmd == HTIF_CMD_IDENTITY) {
             if (p = memory_physical(s->mem, payload >> 8, 4))
                 strcpy(p, "");
+            set_fromhost(1); // ACK it
             return;
         }
     }
@@ -1254,12 +1307,13 @@ static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value)
         break;
 
     case CSR_TOHOST:
-        INFO("  Write CSR %s <- %"PRIx64"\n", csr_name[csrno], csr[csrno]);
+        IOINFO("  Write CSR %s <- %016"PRIx64"\n", csr_name[csrno], csr[csrno]);
         handle_tohost(s, value);
         break;
 
     case CSR_FROMHOST:
-        DEBUG("  Write CSR %s <- %"PRIx64"\n", csr_name[csrno], csr[csrno]);
+        IOINFO("  Write CSR %s <- %016"PRIx64"\n", csr_name[csrno], csr[csrno]);
+        set_fromhost(csr[csrno]);
         break;
     }
 }
@@ -1353,7 +1407,7 @@ virt2phys(cpu_state_t *s, uint64_t address, uint32_t access, memory_exception_t 
             uint64_t ppn[3];
 
             if ((pte & access) == 0) {
-                ERROR("Page present, but access requested (0%02o) "
+                DEBUG("Page present, but access requested (0%02o) "
                       "wasn't granted (0%02o) (status = %"PRIx64")\n",
                       BF_GET(access, PTE_PERMISSION),
                       BF_GET(pte, PTE_PERMISSION)
@@ -1565,11 +1619,15 @@ setup(cpu_state_t *state, elf_info_t *info)
     // </HACK>
 
     // <HACK> <HACK>
+    if (0) {
     dump(state, "program.txt", 32, 0);
     dump(state, "mem0.txt", 8,  0);
     dump(state, "mem1.txt", 8,  8);
     dump(state, "mem2.txt", 8, 16);
     dump(state, "mem3.txt", 8, 24);
+    }
+
+    fcntl(0, F_SETFL, fcntl(0, F_GETFL, 0) | O_NONBLOCK);
 }
 
 const arch_t arch_riscv32 = {

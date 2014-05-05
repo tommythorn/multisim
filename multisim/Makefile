@@ -18,7 +18,8 @@
 
 WARN=-Wall -Werror -Wno-logical-op-parentheses -Wno-bitwise-op-parentheses \
      -Wno-parentheses
-CFLAGS=-g -std=c99 $(WARN) -MD -O0 -g -I/opt/local/include
+OPT=-O
+CFLAGS=-g -std=c99 $(WARN) -MD $(OPT) -g -I/opt/local/include
 LDFLAGS=-g
 FLAGS=
 OBJS=main.o arch.o \
