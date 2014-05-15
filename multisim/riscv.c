@@ -1216,12 +1216,14 @@ static void handle_tohost(cpu_state_t *s, uint64_t value)
 
             assert(buf);
 
-            if (cmd == HTIF_CMD_READ)
-                r = pread(disk_fd, buf, req->length, req->offset);
-            else
-                r = pwrite(disk_fd, buf, req->length, req->offset);
+	    if (disk_fd >= 0) {
+		if (cmd == HTIF_CMD_READ)
+		    r = pread(disk_fd, buf, req->length, req->offset);
+		else
+		    r = pwrite(disk_fd, buf, req->length, req->offset);
 
-            assert(r == req->length);
+		assert(r == req->length);
+	    }
 
             set_fromhost(1); // ACK it
             return;
@@ -1606,8 +1608,11 @@ setup(cpu_state_t *state, elf_info_t *info)
     store(state, state->r[14], 0, 4, &dummy);
     assert(dummy == MEMORY_SUCCESS);
 
-    disk_fd = open(disk_image /* "/home/tommy/BTSync/RISCV/root-20140226.bin" */, O_RDWR);
-    assert(disk_fd >= 0);
+    if (disk_image) {
+	disk_fd = open(disk_image /* "/home/tommy/BTSync/RISCV/root-20140226.bin" */, O_RDWR);
+	if (disk_fd < 0)
+	    perror(disk_image), exit(1);
+    }
     // </HACK>
 
     // <HACK> <HACK>
