@@ -35,7 +35,7 @@ isa_disass(const arch_t *arch, isa_decoded_t dec, isa_result_t res)
     switch (dec.class) {
     case isa_inst_class_load:
         if (dec.dest_reg != ISA_NO_REG)
-            printf("%-32s r%d <- 0x%016"PRIx64" [0x%016"PRIx64"]\n",
+            printf("%-32s r%-2d <- 0x%016"PRIx64" [0x%016"PRIx64"]\n",
                    dis_buf, dec.dest_reg, res.result, res.load_addr);
         else
             printf("%-32s  <- 0x%016"PRIx64" [0x%016"PRIx64"]\n",
@@ -53,7 +53,7 @@ isa_disass(const arch_t *arch, isa_decoded_t dec, isa_result_t res)
             printf("%s", dis_buf);
 
         if (dec.dest_reg != ISA_NO_REG)
-            printf(" r%d <- 0x%016"PRIx64"", dec.dest_reg, mask & res.result);
+            printf(" r%-2d <- 0x%016"PRIx64"", dec.dest_reg, mask & res.result);
 
         if (dec.dest_msr != ISA_NO_REG)
             printf(" MSR%04x <- 0x%016"PRIx64"", dec.dest_msr, mask & res.msr_result);
