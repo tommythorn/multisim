@@ -21,23 +21,15 @@
 /*
  * Goal is RV64G, booting Linux
  *
- * Question:
- * - how does the timer interrupt work if IE = 0? Does it stay pending
- *   and fire when IE is set, or is it gone forever?
- *
- * Status:
- *
- * I - Implemented all,
- *   SYSTEM (SCALL, SBREAK) and all the CSRs -- Partially done
- *
- * M - Fix the implementation of
- *   MULH, MULHSU, MULHU, REM, REMW -- DONE
- *
- * A - Atomics -- DONE
- *
- * FD - Floating point, Just Do It!
+ * Status: Is booting Linux!
+ * TODO:
+ *   FD - single and double precision floating point
  */
+
+
+#ifndef __APPLE__
 #define _XOPEN_SOURCE 500
+#endif
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -1117,7 +1109,7 @@ static void tick(cpu_state_t *s)
 //verbosity_override |= VERBOSE_DISASS;
 //            ioinfo = 1;
 
-//           ERROR("sending %c to host\n", c);
+//            ERROR("sending %c (%d/0x%02x) to host\n", c, c, c);
             set_fromhost((1LL << 56) | c);
         }
     }
