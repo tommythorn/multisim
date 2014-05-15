@@ -88,12 +88,12 @@ int loadelf(memory_t *m, char *name, elf_info_t *elf_info)
     }
 
     if (fread(&ehdr, sizeof ehdr, 1, f) != 1) {
-        fprintf(stderr, "%s: short header read, file corrupted?\n", name);
+        fprintf(stderr, "multisim: %s: short header read, file corrupted?\n", name);
         return 2;
     }
 
     if (strncmp((char *)ehdr.e_ident, ELFMAG, SELFMAG)) {
-        fprintf(stderr, "%s: Not an ELF file\n", name);
+        fprintf(stderr, "multisim: %s: Not an ELF file\n", name);
         return 3;
     }
 
@@ -111,7 +111,7 @@ int loadelf(memory_t *m, char *name, elf_info_t *elf_info)
         return r;
     }
 
-    fprintf(stderr, "%s: Not an ELF file? (EI_CLASS = %d)\n", name,
+    fprintf(stderr, "multisim: %s: Not an ELF file? (EI_CLASS = %d)\n", name,
             ehdr.e_ident[EI_CLASS]);
 
     return 4;
@@ -120,10 +120,8 @@ int loadelf(memory_t *m, char *name, elf_info_t *elf_info)
 void loadelfs(memory_t *m, int n, char *name[], elf_info_t *last_info)
 {
     for (int i = 0; i < n; ++i)
-        if (loadelf(m, name[i], last_info)) {
-            fprintf(stderr, "error: loading %s failed", name[i]);
+        if (loadelf(m, name[i], last_info))
             exit(1);
-        }
 }
 
 // Local Variables:
