@@ -128,6 +128,10 @@ enum riscv_opcode_op_div_e {
     MUL, MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU,
 };
 
+enum riscv_opcode_op_f_64 {
+    FMV_D_X = 0x39,
+};
+
 enum riscv_opcode_amo_e {
     AMOADD      = 0,
     AMOSWAP     = 1,

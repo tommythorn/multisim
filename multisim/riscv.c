@@ -46,6 +46,11 @@
 #include "arch.h"
 #include "riscv.h"
 
+// 100 MHz -> 1 / 100e6 = 1e-8 s = 1e-2 us
+const double us_per_cycle = 1e-2;
+
+static bool halt = false;
+
 static int debug   = 0;
 static int info    = 0;
 static int ioinfo  = 0;
@@ -57,6 +62,10 @@ static int error   = 1;
 #define ERROR(...)   ({ if (error)  fprintf(stderr, __VA_ARGS__); })
 
 verbosity_t verbosity_override = 0;
+
+int leaf_allocations = 0;
+int previous_stack_delta = 0;
+int max_leaf_allocation = 0;
 
 static const char *csr_name[0x1000] = {
     [CSR_FFLAGS]	= "fflags",
@@ -234,6 +243,8 @@ static void print_status(uint32_t status)
 */
 
 int disk_fd;
+
+static void poll_input(cpu_state_t *s);
 
 void set_interrupt(int irq, int val)
 {
@@ -473,9 +484,19 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
       }
       break;
 
+    case OP_FP:
+        switch (i.r.funct7) {
+        case FMV_D_X:
+            snprintf(buf, buf_size, "%-11sfr%d,fr%d",
+                     "fmv.d.x", i.r.rd, i.r.rs1); break;
+        default: goto unhandled;
+        }
+        break;
+
 //  ...
 
     default:
+unhandled:
         warn("Opcode %s isn't handled, inst 0x%08x\n", opcode_name[i.r.opcode], inst);
         *buf = 0;
         return;
@@ -522,6 +543,22 @@ decode(uint64_t inst_addr, uint32_t inst)
         dec.dest_reg     = i.i.rd;
         dec.source_reg_a = i.i.rs1;
         dec.class        = isa_inst_class_alu;
+
+	if (0) {
+	// XXX HACK
+	if (i.r.opcode == OP_IMM && i.i.rd == 14 && i.i.rs1 == 14) {
+	    // stack adjustment
+	    if (previous_stack_delta < 0 && i.i.imm11_0 == -previous_stack_delta) {
+		++leaf_allocations;
+		if (i.i.imm11_0 > max_leaf_allocation)
+		    max_leaf_allocation = i.i.imm11_0;
+		printf("Leaf allocation insts #%d (of %ld total) of %d bytes (max %d)\n",
+		       2 * leaf_allocations,
+		       (long) csr[CSR_INSTRET], i.i.imm11_0, max_leaf_allocation);
+	    }
+	    previous_stack_delta = i.i.imm11_0;
+	}
+	}
         break;
 
     case STORE:
@@ -648,13 +685,27 @@ decode(uint64_t inst_addr, uint32_t inst)
           dec.dest_msr     = 0xFFF & (unsigned) i.i.imm11_0;
           dec.source_msr_a = 0xFFF & (unsigned) i.i.imm11_0;
           dec.dest_reg     = i.i.rd;
-              break;
+	  break;
       default:
           assert(0);
       }
       break;
 
+    case OP_FP:
+        switch (i.r.funct7) {
+        case FMV_D_X:
+            dec.class        = isa_inst_class_alu; // XXX alu_fp?
+            //dec.source_freg_a = i.r.rs1;
+            //dec.dest_freg     = i.r.rd;
+            break;
+        default: goto unhandled;
+        }
+        break;
+
+
+
     default:
+    unhandled:
         warn("Opcode %s not decoded, inst %016"PRIx64":%08x\n",
              opcode_name[i.r.opcode], inst_addr, i.raw);
         break;
@@ -798,9 +849,15 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
                 res.result = ((unsigned __int128) op_a_u * op_b_u) >> 64;
                 return res;
             case DIV:
-                if (op_b == 0)
+                if (op_b == 0) {
                     res.result = -1LL;
-                else if (op_b == -1 && op_a == (1LL << (xlen - 1)))
+
+		    if (csr[CSR_COMPARE] > csr[CSR_COUNT]) {
+			// XXX Treat this as HALT, which kind of suck.  See
+			// https://github.com/ucb-bar/riscv-linux/commit/68e21e687fb9f587dc7361bab7b8df34c4337625#commitcomment-6353303
+			halt = true;
+		    }
+		} else if (op_b == -1 && op_a == (1LL << (xlen - 1)))
                     res.result = -1LL << (xlen - 1);
                 else
                     res.result = op_a / op_b;
@@ -1075,6 +1132,17 @@ static void raise(cpu_state_t *s, uint64_t cause)
 static int request_char = 0; // XXX
 #define HTIF_DEV_SHIFT      (56)
 
+static void poll_input(cpu_state_t *s)
+{
+    if (request_char && csr[CSR_FROMHOST] == 0) {
+        unsigned char c;
+        ssize_t r = read(0, &c, sizeof c);
+
+        if (r == 1)
+            set_fromhost((1LL << 56) | c);
+    }
+}
+
 /* executed every cycle */
 static void tick(cpu_state_t *s)
 {
@@ -1086,33 +1154,15 @@ static void tick(cpu_state_t *s)
     if (csr[CSR_COUNT] == csr[CSR_COMPARE])
         set_interrupt(TRAP_INTR_TIMER, 1);
 
-    if (request_char && csr[CSR_FROMHOST] == 0) {
-        unsigned char c;
-/*
-        static int once = 1;
-
-        if (once)
-            once = 0;
-        else
-            request_char = 0;
-*/
-
-        static char *np = "";
-
-        if (*np == 0)
-            np = "ls\n";
-
-        ssize_t r = read(0, &c, sizeof c);
-        //ssize_t r = *np ? (c = *np++, 1) : 0;
-
-        if (r == 1) {
-//verbosity_override |= VERBOSE_DISASS;
-//            ioinfo = 1;
-
-//            ERROR("sending %c (%d/0x%02x) to host\n", c, c, c);
-            set_fromhost((1LL << 56) | c);
-        }
-    }
+    if (halt) {
+	printf("Zzzz %lu\n", csr[CSR_COMPARE] - csr[CSR_COUNT]);
+	fflush(stdout);
+	usleep((useconds_t) ((csr[CSR_COMPARE] - 1 - csr[CSR_COUNT]) * us_per_cycle));
+	csr[CSR_COUNT] = csr[CSR_COMPARE] - 1;
+	poll_input(s);
+	halt = false;
+    } else if ((csr[CSR_CYCLE] & 1023) == 0) // Rate-limit the overhead
+	poll_input(s);
 
     int pending =
         BF_GET(csr[CSR_STATUS], CSR_STATUS_IP_BF) &
@@ -1259,14 +1309,14 @@ static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value)
 
     if (!BF_GET(csr[CSR_STATUS], CSR_STATUS_S_BF) && !user_ok) {
         ERROR("  Illegal Write of CSR %3x in user mode\n", csrno);
-        raise(s, TRAP_INST_PRIVILEGE);
-        return;
+        //raise(s, TRAP_INST_PRIVILEGE); XXX
+        //return; XXX
     }
 
     if (top_priv == 3) {
-        ERROR("  Illegal Write of CSR %3x\n", csrno);
-        raise(s, TRAP_INST_PRIVILEGE);
-        return;
+        //ERROR("  Illegal Write of CSR %3x\n", csrno); ???
+        //raise(s, TRAP_INST_PRIVILEGE); XXX
+        //return;
     }
 
     csr[csrno] = value & csr_mask[csrno] | csr[csrno] & ~csr_mask[csrno];
@@ -1616,7 +1666,7 @@ setup(cpu_state_t *state, elf_info_t *info)
     // </HACK>
 
     // <HACK> <HACK>
-    if (0) {
+    if (1) {
     dump(state, "program.txt", 32, 0);
     dump(state, "mem0.txt", 8,  0);
     dump(state, "mem1.txt", 8,  8);
