@@ -98,15 +98,15 @@ static const char *csr_name[0x1000] = {
 
 /* Per CSR bit mask of csrXX settable bits (in addition to other constraints) */
 static const uint64_t csr_mask[0x1000] = {
-    [CSR_FFLAGS]	= 0x1F,  // XXX still needs special handling in write_msr
-    [CSR_FRM]   	= 7,     // - " -
-    [CSR_FCSR]		= 0xFF,  // - " -
+    [CSR_FFLAGS]	= 0x1F,
+    [CSR_FRM]   	= 7,
+    [CSR_FCSR]		= 0xFF,
 
     [CSR_SUP0]		= ~0ULL,
     [CSR_SUP1]		= ~0ULL,
 
     [CSR_EPC]		= -4LL,
-    [CSR_BADVADDR]	= 0, //  ?? writable?
+    [CSR_BADVADDR]	= 0, // Read-only
     [CSR_PTBR]		= -8192LL,
     [CSR_ASID]		= 0,
     [CSR_COUNT]		= 0xFFFFFFFF,
@@ -277,11 +277,12 @@ static void
 disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
 {
     inst_t i = {.raw = inst };
+    const char **N = reg_name;
 
     switch (i.r.opcode) {
     case LOAD:
-        snprintf(buf, buf_size, "%-11sr%d,%d(r%d)",
-                 opcode_load_op_name[i.i.funct3], i.i.rd, i.i.imm11_0, i.i.rs1);
+        snprintf(buf, buf_size, "%-11s%s,%d(%s)",
+                 opcode_load_op_name[i.i.funct3], N[i.i.rd], i.i.imm11_0, N[i.i.rs1]);
         break;
 
 
@@ -295,39 +296,39 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
             i.s.funct3 == FLD ? "lsd" :
             "??? load_fp ???";
         int imm = i.s.imm4_0 | i.s.imm11_5 << 5;
-        snprintf(buf, buf_size, "%-11sr%d,%d(r%d)", name, i.s.rs2, imm, i.s.rs1);
+        snprintf(buf, buf_size, "%-11s%s,%d(%s)", name, N[i.s.rs2], imm, N[i.s.rs1]);
         break;
     }
 
 //  case CUSTOM0:
     case OP_IMM:
-        if (i.i.funct3 == ADDI && i.i.rs1 == 0)
+        if (i.i.funct3 == ADDI && N[i.i.rs1] == 0)
             // li pseudo instruction
-            snprintf(buf, buf_size, "%-11sr%d,%d",
-                     "li", i.i.rd, i.i.imm11_0);
+            snprintf(buf, buf_size, "%-11s%s,%d",
+                     "li", N[i.i.rd], i.i.imm11_0);
         else
-            snprintf(buf, buf_size, "%-11sr%d,r%d,%d",
-                     opcode_imm_name[i.i.funct3], i.i.rd, i.i.rs1, i.i.imm11_0);
+            snprintf(buf, buf_size, "%-11s%s,%s,%d",
+                     opcode_imm_name[i.i.funct3], N[i.i.rd], N[i.i.rs1], i.i.imm11_0);
         break;
 
     case AUIPC:
-        snprintf(buf, buf_size, "%-11sr%d,0x%x",
-                 "auipc", i.u.rd, i.u.imm31_12);
+        snprintf(buf, buf_size, "%-11s%s,0x%x",
+                 "auipc", N[i.u.rd], i.u.imm31_12);
         break;
 
     case OP_IMM_32: {
         char op[16];
         snprintf(op, sizeof op, "%sw",opcode_imm_name[i.r.funct3]);
 
-        snprintf(buf, buf_size, "%-11sr%d,r%d,%d", op, i.r.rd, i.r.rs1, i.i.imm11_0);
+        snprintf(buf, buf_size, "%-11s%s,%s,%d", op, N[i.r.rd], N[i.r.rs1], i.i.imm11_0);
         break;
     }
 
 //  case EXT0:
     case STORE: {
         int imm = i.s.imm4_0 | i.s.imm11_5 << 5;
-        snprintf(buf, buf_size, "s%-10sr%d,%d(r%d)",
-                 1 + opcode_load_op_name[i.s.funct3], i.s.rs2, imm, i.s.rs1);
+        snprintf(buf, buf_size, "s%-10s%s,%d(%s)",
+                 1 + opcode_load_op_name[i.s.funct3], N[i.s.rs2], imm, N[i.s.rs1]);
         break;
     }
 
@@ -337,7 +338,7 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
             i.s.funct3 == FLD ? "fsd" :
             "??? store_fp ???";
         int imm = i.s.imm4_0 | i.s.imm11_5 << 5;
-        snprintf(buf, buf_size, "%-11sr%d,%d(r%d)", name, i.s.rs2, imm, i.s.rs1);
+        snprintf(buf, buf_size, "%-11s%s,%d(%s)", name, N[i.s.rs2], imm, N[i.s.rs1]);
         break;
     }
 
@@ -351,8 +352,8 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
         switch (i.r.funct7 >> 2) {
         case LR:
             snprintf(inst, sizeof inst, "lr%s%s%s", suffix, aq, rl);
-            snprintf(buf, buf_size, "%-11sr%d,(r%d)", inst,
-                     i.r.rd, i.r.rs1);
+            snprintf(buf, buf_size, "%-11s%s,(%s)", inst,
+                     N[i.r.rd], N[i.r.rs1]);
             break;
         case SC:
         case AMOSWAP:
@@ -366,8 +367,8 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
         case AMOMAXU:
             snprintf(inst, sizeof inst, "%s%s%s%s",
                      opcode_amo_name[i.r.funct7 >> 2], suffix, aq, rl);
-            snprintf(buf, buf_size, "%-11sr%d,r%d,(r%d)", inst,
-                     i.r.rd, i.r.rs2, i.r.rs1);
+            snprintf(buf, buf_size, "%-11s%s,%s,(%s)", inst,
+                     N[i.r.rd], N[i.r.rs2], N[i.r.rs1]);
             break;
         }
         }
@@ -375,17 +376,17 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
 
     case OP:
         if (i.r.funct7 == 1)
-            snprintf(buf, buf_size, "%-11sr%d,r%d,r%d",
+            snprintf(buf, buf_size, "%-11s%s,%s,%s",
                      opcode_op_div_name[i.r.funct3],
-                     i.r.rd, i.r.rs1, i.r.rs2);
+                     N[i.r.rd], N[i.r.rs1], N[i.r.rs2]);
         else
-            snprintf(buf, buf_size, "%-11sr%d,r%d,r%d",
+            snprintf(buf, buf_size, "%-11s%s,%s,%s",
                      opcode_op_op_name[i.r.funct3 + 8 * (i.i.imm11_0 >> 10 & 1)],
-                     i.r.rd, i.r.rs1, i.r.rs2);
+                     N[i.r.rd], N[i.r.rs1], N[i.r.rs2]);
         break;
     case LUI:
-        snprintf(buf, buf_size, "%-11sr%d,0x%x",
-                 "lui", i.u.rd, i.u.imm31_12);
+        snprintf(buf, buf_size, "%-11s%s,0x%x",
+                 "lui", N[i.u.rd], i.u.imm31_12);
         break;
 
   case OP_32: {
@@ -395,7 +396,7 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
                  ? opcode_op_div_name[i.r.funct3]
                  : opcode_op_op_name[i.r.funct3 + 8 * (i.i.imm11_0 >> 10 & 1)]);
 
-        snprintf(buf, buf_size, "%-11sr%d,r%d,r%d", op, i.r.rd, i.r.rs1, i.r.rs2);
+        snprintf(buf, buf_size, "%-11s%s,%s,%s", op, N[i.r.rd], N[i.r.rs1], N[i.r.rs2]);
         break;
     }
 
@@ -405,9 +406,9 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
             i.sb.imm12 << 12 | i.sb.imm11 << 11 |
             i.sb.imm10_5 << 5 | i.sb.imm4_1 << 1;
 
-        snprintf(buf, buf_size, "%-11sr%d,r%d,0x%08"PRIx64,
+        snprintf(buf, buf_size, "%-11s%s,%s,0x%08"PRIx64,
                  opcode_op_branch_name[i.r.funct3],
-                 i.r.rs1, i.r.rs2, pc + imm);
+                 N[i.r.rs1], N[i.r.rs2], pc + imm);
         break;
     }
 
@@ -416,8 +417,8 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
             // ret pseudo instruction
             snprintf(buf, buf_size, "ret");
         else
-            snprintf(buf, buf_size, "%-11sr%d,r%d,%d",
-                     "jalr", i.i.rd, i.i.rs1, i.i.imm11_0);
+            snprintf(buf, buf_size, "%-11s%s,%s,%d",
+                     "jalr", N[i.i.rd], N[i.i.rs1], i.i.imm11_0);
         break;
 
 //  case RES0:
@@ -444,8 +445,8 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
             snprintf(buf, buf_size, "%-11s0x%08"PRIx64,
                      "jal", addr);
         else
-            snprintf(buf, buf_size, "%-11sr%d,0x%08"PRIx64,
-                     "jal", i.uj.rd, addr);
+            snprintf(buf, buf_size, "%-11s%s,0x%08"PRIx64,
+                     "jal", N[i.uj.rd], addr);
 
         break;
     }
@@ -464,20 +465,20 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
       case CSRRS:
           if (i.i.rs1 == 0) {
               switch ((unsigned)i.i.imm11_0) {
-              case 0xC00: snprintf(buf, buf_size, "%-11sr%d", "rdcycle",   i.i.rd); return;
-              case 0xC01: snprintf(buf, buf_size, "%-11sr%d", "rdtime",    i.i.rd); return;
-              case 0xC02: snprintf(buf, buf_size, "%-11sr%d", "rdinstret", i.i.rd); return;
-              default:    snprintf(buf, buf_size, "%-11sr%d,%s", "csrr",  i.i.rd, csr_name[i.i.imm11_0 & 0xFFFU]); return;
+              case 0xC00: snprintf(buf, buf_size, "%-11s%s", "rdcycle",   N[i.i.rd]); return;
+              case 0xC01: snprintf(buf, buf_size, "%-11s%s", "rdtime",    N[i.i.rd]); return;
+              case 0xC02: snprintf(buf, buf_size, "%-11s%s", "rdinstret", N[i.i.rd]); return;
+              default:    snprintf(buf, buf_size, "%-11s%s,%s", "csrr",  N[i.i.rd], csr_name[i.i.imm11_0 & 0xFFFU]); return;
               }
           } else
-              snprintf(buf, buf_size, "%-11sr%d,%s,r%d",  "csrrs", i.i.rd, csr_name[i.i.imm11_0 & 0xFFFU], i.i.rs1); return;
+              snprintf(buf, buf_size, "%-11s%s,%s,%s",  "csrrs", N[i.i.rd], csr_name[i.i.imm11_0 & 0xFFFU], N[i.i.rs1]); return;
           break;
 
-      case CSRRSI: snprintf(buf, buf_size, "%-11sr%d,%s,%d",  "csrrsi", i.i.rd, csr_name[i.i.imm11_0 & 0xFFFU], i.i.rs1); return;
-      case CSRRC:  snprintf(buf, buf_size, "%-11sr%d,%s,r%d", "csrrc",  i.i.rd, csr_name[i.i.imm11_0 & 0xFFFU], i.i.rs1); return;
-      case CSRRCI: snprintf(buf, buf_size, "%-11sr%d,%s,%d",  "csrrci", i.i.rd, csr_name[i.i.imm11_0 & 0xFFFU], i.i.rs1); return;
-      case CSRRW:  snprintf(buf, buf_size, "%-11sr%d,%s,r%d", "csrrw",  i.i.rd, csr_name[i.i.imm11_0 & 0xFFFU], i.i.rs1); return;
-      case CSRRWI: snprintf(buf, buf_size, "%-11sr%d,%s,%d",  "csrrwi", i.i.rd, csr_name[i.i.imm11_0 & 0xFFFU], i.i.rs1); return;
+      case CSRRSI: snprintf(buf, buf_size, "%-11s%s,%s,%d",  "csrrsi", N[i.i.rd], csr_name[i.i.imm11_0 & 0xFFFU], i.i.rs1); return;
+      case CSRRC:  snprintf(buf, buf_size, "%-11s%s,%s,%s", "csrrc",  N[i.i.rd], csr_name[i.i.imm11_0 & 0xFFFU], N[i.i.rs1]); return;
+      case CSRRCI: snprintf(buf, buf_size, "%-11s%s,%s,%d",  "csrrci", N[i.i.rd], csr_name[i.i.imm11_0 & 0xFFFU], i.i.rs1); return;
+      case CSRRW:  snprintf(buf, buf_size, "%-11s%s,%s,%s", "csrrw",  N[i.i.rd], csr_name[i.i.imm11_0 & 0xFFFU], N[i.i.rs1]); return;
+      case CSRRWI: snprintf(buf, buf_size, "%-11s%s,%s,%d",  "csrrwi", N[i.i.rd], csr_name[i.i.imm11_0 & 0xFFFU], i.i.rs1); return;
 
       default:
           assert(0); // XXX more to implement
@@ -487,8 +488,8 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
     case OP_FP:
         switch (i.r.funct7) {
         case FMV_D_X:
-            snprintf(buf, buf_size, "%-11sfr%d,fr%d",
-                     "fmv.d.x", i.r.rd, i.r.rs1); break;
+            snprintf(buf, buf_size, "%-11sf%s,f%s",
+                     "fmv.d.x", N[i.r.rd], N[i.r.rs1]); break;
         default: goto unhandled;
         }
         break;
@@ -675,17 +676,27 @@ decode(uint64_t inst_addr, uint32_t inst)
               dec.dest_reg     = i.i.rd;
               break;
           }
+          /* Fall-through */
 
       case CSRRC:
-      case CSRRW:
           dec.source_reg_a = i.i.rs1;
       case CSRRSI:
       case CSRRCI:
-      case CSRRWI:
-          dec.dest_msr     = 0xFFF & (unsigned) i.i.imm11_0;
           dec.source_msr_a = 0xFFF & (unsigned) i.i.imm11_0;
+          dec.dest_msr     = 0xFFF & (unsigned) i.i.imm11_0;
           dec.dest_reg     = i.i.rd;
 	  break;
+
+      case CSRRW:
+          dec.source_reg_a = i.i.rs1;
+      case CSRRWI:
+          dec.dest_msr     = 0xFFF & (unsigned) i.i.imm11_0;
+          dec.dest_reg     = i.i.rd;
+
+          if (i.i.rd)
+              dec.source_msr_a = 0xFFF & (unsigned) i.i.imm11_0;
+	  break;
+
       default:
           assert(0);
       }
@@ -1155,9 +1166,21 @@ static void tick(cpu_state_t *s)
         set_interrupt(TRAP_INTR_TIMER, 1);
 
     if (halt) {
-	printf("Zzzz %lu\n", csr[CSR_COMPARE] - csr[CSR_COUNT]);
-	fflush(stdout);
-	usleep((useconds_t) ((csr[CSR_COMPARE] - 1 - csr[CSR_COUNT]) * us_per_cycle));
+        static uint32_t previous_compare;
+        uint32_t next_intr_delta = (uint32_t) (csr[CSR_COMPARE] - csr[CSR_COUNT]);
+
+	fprintf(stderr,
+                "Zzzz %8u = %g us (%08"PRIx64", %08"PRIx64")  [%u8]\n",
+                next_intr_delta,
+                next_intr_delta * us_per_cycle,
+                csr[CSR_COUNT],
+                csr[CSR_COMPARE],
+                (uint32_t)(csr[CSR_COMPARE] - previous_compare)
+            );
+	fflush(stderr);
+        previous_compare = csr[CSR_COMPARE];
+
+	usleep((useconds_t) (next_intr_delta * us_per_cycle));
 	csr[CSR_COUNT] = csr[CSR_COMPARE] - 1;
 	poll_input(s);
 	halt = false;
@@ -1194,9 +1217,15 @@ static uint64_t read_msr(cpu_state_t *s, unsigned csrno)
      struct timeval tv;
      gettimeofday(&tv, NULL);
      uint64_t now = tv.tv_sec * 1000000LL + tv.tv_usec;
-     DEBUG("  Read  CSR %s -> %"PRIx64"\n", csr_name[csrno], now);
+     INFO("  Read  CSR %s -> %"PRIx64"\n", csr_name[csrno], now);
      return now;
     }
+
+    case CSR_CYCLE:
+    case CSR_COUNT:
+    case CSR_COMPARE:
+        INFO("  Read  CSR %s -> %"PRIx64"\n", csr_name[csrno], csr[csrno]);
+        return csr[csrno];
 
     case CSR_FROMHOST: {
         uint64_t v = csr[csrno];
@@ -1211,6 +1240,14 @@ static uint64_t read_msr(cpu_state_t *s, unsigned csrno)
     default:
         DEBUG("  Read  CSR %s -> %"PRIx64"\n", csr_name[csrno], csr[csrno]);
         return csr[csrno];
+
+    case CSR_FATC:
+    case CSR_SEND_IPI:
+    case CSR_CLEAR_IPI:
+        ERROR("  Read of write-only CSR %s\n", csr_name[csrno]);
+        // These are write-only regs.  We should trap, but I'd like to
+        // know if this ever happens.
+        assert(0);
     }
 }
 
@@ -1323,6 +1360,9 @@ static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value)
 
     DEBUG("  Write CSR %s <- %"PRIx64"\n", csr_name[csrno], csr[csrno]);
 
+    if (csrno == CSR_COMPARE || csrno == CSR_CYCLE)
+        ERROR("  Write CSR %s <- %"PRIx64"\n", csr_name[csrno], csr[csrno]);
+
     if (value & ~csr[csrno])
         DEBUG("    NB: bits %"PRIx64" are masked off\n", value & ~csr[csrno]);
 
@@ -1359,6 +1399,13 @@ static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value)
         IOINFO("  Write CSR %s <- %016"PRIx64"\n", csr_name[csrno], csr[csrno]);
         set_fromhost(csr[csrno]);
         break;
+
+    case CSR_BADVADDR:
+    case CSR_CAUSE:
+    case CSR_HARTID:
+    case CSR_IMPL:
+        INFO("  Write of read-only CSR %s\n", csr_name[csrno]);
+        // These are read-only regs.  Writes are ignored
     }
 }
 
@@ -1615,7 +1662,9 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, mem
 }
 
 static void
-dump(cpu_state_t *s, const char *filename, unsigned width, unsigned shift)
+dump(cpu_state_t *s, const char *filename,
+     uint64_t start, uint64_t size,
+     unsigned width, unsigned shift)
 {
     FILE *f = fopen(filename, "w");
 
@@ -1627,8 +1676,8 @@ dump(cpu_state_t *s, const char *filename, unsigned width, unsigned shift)
     }
 
     memory_t *m = s->mem;
-    for (int i = 0; i < 128 * 1024; i += 4) {
-        uint32_t *p = memory_physical(m, memory_start + i, 4);
+    for (int i = 0; i < size; i += 4) {
+        uint32_t *p = memory_physical(m, start + i, 4);
         if (!p)
             break;
         fprintf(f, "%0*x\n", width / 4, (*p >> shift) & mask);
@@ -1667,11 +1716,13 @@ setup(cpu_state_t *state, elf_info_t *info)
 
     // <HACK> <HACK>
     if (1) {
-    dump(state, "program.txt", 32, 0);
-    dump(state, "mem0.txt", 8,  0);
-    dump(state, "mem1.txt", 8,  8);
-    dump(state, "mem2.txt", 8, 16);
-    dump(state, "mem3.txt", 8, 24);
+        uint64_t data_start = info->text_start;
+        uint64_t data_size  = info->text_size;  // XXX not general
+        dump(state, "program.txt", info->text_start, info->text_size, 32, 0);
+        dump(state, "mem0.txt", data_start, data_size, 8,  0);
+        dump(state, "mem1.txt", data_start, data_size, 8,  8);
+        dump(state, "mem2.txt", data_start, data_size, 8, 16);
+        dump(state, "mem3.txt", data_start, data_size, 8, 24);
     }
 
     fcntl(0, F_SETFL, fcntl(0, F_GETFL, 0) | O_NONBLOCK);
@@ -1679,7 +1730,8 @@ setup(cpu_state_t *state, elf_info_t *info)
 
 const arch_t arch_riscv32 = {
     .zero_reg = 0,
-    .is_64bit = true,
+    .reg_name = reg_name,
+    .is_64bit = false,
     .setup = setup,
     .decode = decode,
     .inst_exec = inst_exec,
@@ -1693,6 +1745,7 @@ const arch_t arch_riscv32 = {
 
 const arch_t arch_riscv64 = {
     .zero_reg = 0,
+    .reg_name = reg_name,
     .is_64bit = true,
     .setup = setup,
     .decode = decode,

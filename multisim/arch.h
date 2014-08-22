@@ -150,6 +150,8 @@ typedef struct isa_st {
      */
     const isa_reg_t zero_reg;
 
+    const char **reg_name;
+
     const bool is_64bit;
 
     void (*setup)(cpu_state_t *, elf_info_t *);

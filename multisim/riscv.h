@@ -150,9 +150,9 @@ enum riscv_opcode_amo_e {
 /* CSRs */
 
 enum riscv_csr_e {
-    CSR_FFLAGS		= 0x001,
-    CSR_FRM,
-    CSR_FCSR,			// alias for the frm + fflags
+    CSR_FFLAGS		= 0x001,// fcsr[4:0] alias
+    CSR_FRM,			// fcsr[7:5] alias
+    CSR_FCSR,
 
     CSR_SUP0		= 0x500,
     CSR_SUP1		= 0x501,
@@ -176,6 +176,10 @@ enum riscv_csr_e {
     CSR_CYCLE		= 0xC00,
     CSR_TIME,
     CSR_INSTRET,
+
+    CSR_CYCLEH		= 0xC80,  // only valid in 32-bit mode
+    CSR_TIMEH,
+    CSR_INSTRETH,
 };
 
 #define CSR_STATUS_S_BF    0:0
