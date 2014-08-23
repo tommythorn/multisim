@@ -1260,6 +1260,19 @@ static void handle_tohost(cpu_state_t *s, uint64_t value)
     uint64_t payload = value << 16 >> 16;
     char *p;
 
+    if (payload == 1) {
+        // test suite uses this
+        printf("  Program terminated with SUCCESS\n");
+        exit(EXIT_SUCCESS);
+    }
+
+    if (payload & 1) {
+        // test suite uses this
+        printf("  Program terminated with FAILURE 0x%llx / %lld\n",
+               payload >> 1, payload >> 1);
+        exit(EXIT_FAILURE);
+    }
+
     switch (dev) {
     case 1:
         switch (cmd) {
