@@ -168,7 +168,7 @@ const char *opcode_load_op_name[8] = {
 
 const char *opcode_op_op_name[16] = {
     "add", "sll", "slt", "sltu", "xor", "srl", "or", "and",
-    "sub", "?",   "?",   "?",    "?",   "sra", "?", "?",
+    "sub", "?",   "?",   "?",    "?",   "sra", "?",  "?",
 };
 
 const char *opcode_op_div_name[8] = {
@@ -271,6 +271,41 @@ static void push_SEI(void)
     BF_SET(csr[CSR_STATUS], CSR_STATUS_PEI_BF,
            BF_GET(csr[CSR_STATUS], CSR_STATUS_EI_BF));
     csr[CSR_STATUS] &= ~BF_PACK(1, CSR_STATUS_EI_BF);
+}
+
+static uint64_t popcount(uint64_t v)
+{
+    uint64_t res = 0;
+
+    while (v)
+        ++res, v &= v - 1;
+
+    return res;
+}
+
+static uint64_t byteswap(uint64_t v)
+{
+    v = v <<  8 & 0xFF00FF00FF00FF00ULL | v >>  8 & 0x00FF00FF00FF00FFULL;
+    v = v << 16 & 0xFFFF0000FFFF0000ULL | v >> 16 & 0x0000FFFF0000FFFFULL;
+    return v << 32 | v >> 32;
+}
+
+// From http://www.hackersdelight.org/hdcodetxt/reverse.c.txt
+static uint64_t bitreverse(uint64_t x)
+{
+    uint64_t t;
+
+    x = x << 32 | x >> 32;   // Swap register halves.
+    x = (x & 0x0001FFFF0001FFFFLL) << 15 | // Rotate left
+        (x & 0xFFFE0000FFFE0000LL) >> 17;  // 15.
+    t = (x ^ (x >> 10)) & 0x003F801F003F801FLL;
+    x = (t | (t << 10)) ^ x;
+    t = (x ^ (x >> 4)) & 0x0E0384210E038421LL;
+    x = (t | (t << 4)) ^ x;
+    t = (x ^ (x >> 2)) & 0x2248884222488842LL;
+    x = (t | (t << 2)) ^ x;
+
+    return x;
 }
 
 static void
@@ -379,9 +414,18 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
             snprintf(buf, buf_size, "%-11s%s,%s,%s",
                      opcode_op_div_name[i.r.funct3],
                      N[i.r.rd], N[i.r.rs1], N[i.r.rs2]);
+        else if (i.r.funct3 == 0 && i.r.funct7 == 2)
+            snprintf(buf, buf_size, "%-11s%s,%s,%s", "popc",
+                     N[i.r.rd], N[i.r.rs1], N[i.r.rs2]);
+        else if (i.r.funct3 == 1 && i.r.funct7 == 2)
+            snprintf(buf, buf_size, "%-11s%s,%s,%s", "brev",
+                     N[i.r.rd], N[i.r.rs1], N[i.r.rs2]);
+        else if (i.r.funct3 == 1 && i.r.funct7 == 4)
+            snprintf(buf, buf_size, "%-11s%s,%s,%s", "bswap",
+                     N[i.r.rd], N[i.r.rs1], N[i.r.rs2]);
         else
             snprintf(buf, buf_size, "%-11s%s,%s,%s",
-                     opcode_op_op_name[i.r.funct3 + 8 * (i.i.imm11_0 >> 10 & 1)],
+                     opcode_op_op_name[i.r.funct3 + 8 * (i.r.funct7 >> 5 & 1)],
                      N[i.r.rd], N[i.r.rs1], N[i.r.rs2]);
         break;
     case LUI:
@@ -614,9 +658,9 @@ decode(uint64_t inst_addr, uint32_t inst)
     case OP:
     case OP_32:
         /* RV32M */
-        if (i.r.funct7 != 1)
+        /*if (i.r.funct7 != 1)
             assert((i.r.funct3 == ADDSUB || i.r.funct3 == SR_) && i.r.funct7 == 0x20 ||
-                   i.r.funct7 == 0x00);
+                   i.r.funct7 == 0x00);*/
         dec.dest_reg     = i.r.rd;
         dec.source_reg_a = i.r.rs1;
         dec.source_reg_b = i.r.rs2;
@@ -897,10 +941,18 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
         else
             switch (i.r.funct3) {
             case ADDSUB:
-                res.result = i.i.imm11_0 >> 10 & 1 ? op_a - op_b : op_a + op_b;
+                if (i.r.funct7 = 2)
+                    res.result = popcount(op_a & ~op_b);
+                else
+                    res.result = i.r.funct7 >> 5 & 1 ? op_a - op_b : op_a + op_b;
                 break;
             case SLL:
-                res.result = op_a << (op_b & (xlen - 1));
+                if (i.r.funct7 = 2)
+                    res.result = bitreverse(op_a);
+                else if (i.r.funct7 = 4)
+                    res.result = byteswap(op_a);
+                else
+                    res.result = op_a << (op_b & (xlen - 1));
                 break;
             case SLT:
                 res.result = op_a < op_b;
