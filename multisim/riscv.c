@@ -1267,9 +1267,9 @@ static void handle_tohost(cpu_state_t *s, uint64_t value)
     }
 
     if (payload & 1) {
+        uintmax_t res = payload >> 1;
         // test suite uses this
-        printf("  Program terminated with FAILURE 0x%llx / %lld\n",
-               payload >> 1, payload >> 1);
+        printf("  Program terminated with FAILURE 0x%jx / %jd\n", res, res);
         exit(EXIT_FAILURE);
     }
 
