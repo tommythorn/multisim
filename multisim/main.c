@@ -60,7 +60,10 @@ void usage(char *program)
             "Usage: %s [options] <elf-files ...>\n"
             "\n"
             "  where options can be one or more of\n"
-            "\n",
+            "\n"
+            "  -i<diskimage>\n"
+            "  -d   disassemble executed instructions\n"
+            "  -t   trace executed instructions\n",
             program);
 
     for (i = 0; long_options[i].name; ++i) {
