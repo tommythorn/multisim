@@ -110,7 +110,8 @@ static void test(memory_t *m);
 
 /*
  * There is little doubt that this could be implemented more elegantly
- * and more efficiently.
+ * and more efficiently.  Note, parts of the code assumes a minimal of
+ * 32-bit alignment.  We'll use 64-bit for safety.
  */
 void
 memory_ensure_mapped_range(memory_t *m, uint64_t start, uint64_t end)
@@ -121,6 +122,9 @@ memory_ensure_mapped_range(memory_t *m, uint64_t start, uint64_t end)
         test_it = 0;
         test(m);
     }
+
+    start = start & ~7ULL;
+    end   = (end + 7ULL) & ~7ULL;
 
     if (end <= start)
         return;
