@@ -1,3 +1,33 @@
+Update to 1.7
+
+- readelf vmlinux says
+
+  Program Headers:
+    Type           Offset             VirtAddr           PhysAddr
+                   FileSiz            MemSiz              Flags  Align
+    LOAD           0x0000000000002000 0xffffffff80000000 0x0000000000000000
+                   0x0000000000218568 0x0000000000219000  RWE    2000
+    LOAD           0x000000000021b000 0xffffffff80219000 0x0000000000219000
+                   0x000000000001e988 0x0000000000053588  RW     2000
+    LOAD           0x000000000023a5a0 0xffffffff8026c5a0 0x000000000026c5a0
+                   0x0000000000001414 0x0000000000001414  R      2000
+    NOTE           0x000000000023b990 0xffffffff8026d990 0x000000000026d990
+                   0x0000000000000024 0x0000000000000024  R      4
+ ....
+  Entry point address:               0xffffffff80000000
+
+  I think there were something about the fffXXX addresses ...
+
+  Note, http://users.rescomp.berkeley.edu/~aou/research/aspire-linux-poster.pdf
+  states:
+
+    "The vmlinux image is loaded at physical address 0x2000.
+      start [arch/riscv/kernel/head 64.S]
+      ... "
+
+      
+
+
 oooe:
   - be careful about load/store reordering
 

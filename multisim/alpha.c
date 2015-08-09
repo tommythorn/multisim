@@ -20,6 +20,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <err.h>
 #include "sim.h"
 #include "arch.h"
 #include "alpha.h"
@@ -325,7 +326,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *
     case  4: return memory_endian_fix32(m, *(uint32_t *)p);
     case -8:
     case  8: return memory_endian_fix64(m, *(uint64_t *)p);
-    default: assert(mem_access_size == mem_access_size + 1);
+    default: errx(1, "load() size %d is unsupported\n", mem_access_size);
     }
 
     return 0;

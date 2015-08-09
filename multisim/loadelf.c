@@ -27,8 +27,8 @@
 #include <inttypes.h>
 #include <alloca.h>
 
-static const bool enable_verb_prog_sec = false;
-static const bool enable_verb_elf      = false;
+static const bool enable_verb_prog_sec = true;
+static const bool enable_verb_elf      = true;
 
 static void
 loadsection(FILE *f, unsigned f_offset, unsigned f_len,
@@ -48,7 +48,8 @@ loadsection(FILE *f, unsigned f_offset, unsigned f_len,
     void *buf = memory_physical(m, m_addr, m_len);
     fseek(f, f_offset, SEEK_SET);
     memset(buf, 0, m_len);
-    fread(buf, f_len, 1, f);
+    ssize_t got = fread(buf, 1, f_len, f);
+    assert(got == f_len);
 }
 
 #ifdef _BIG_ENDIAN

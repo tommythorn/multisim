@@ -279,6 +279,10 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
     inst_t i = {.raw = inst };
     const char **N = reg_name;
 
+    snprintf(buf, buf_size, "%08x ", inst);
+    buf += 9;
+    buf_size -= 9;
+
     switch (i.r.opcode) {
     case LOAD:
         snprintf(buf, buf_size, "%-11s%s,%d(%s)",
@@ -471,7 +475,8 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
               default:    snprintf(buf, buf_size, "%-11s%s,%s", "csrr",  N[i.i.rd], csr_name[i.i.imm11_0 & 0xFFFU]); return;
               }
           } else
-              snprintf(buf, buf_size, "%-11s%s,%s,%s",  "csrrs", N[i.i.rd], csr_name[i.i.imm11_0 & 0xFFFU], N[i.i.rs1]); return;
+              snprintf(buf, buf_size, "%-11s%s,%s,%s",  "csrrs", N[i.i.rd], csr_name[i.i.imm11_0 & 0xFFFU], N[i.i.rs1]);
+          return;
           break;
 
       case CSRRSI: snprintf(buf, buf_size, "%-11s%s,%s,%d",  "csrrsi", N[i.i.rd], csr_name[i.i.imm11_0 & 0xFFFU], i.i.rs1); return;
@@ -938,7 +943,7 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
                 if (op_b_32 == 0)
                     res.result = -1LL;
                 else if (op_b_32 == -1 && op_a_32 == (1 << 31))
-                    res.result = -1LL << 31;
+                    res.result = 0xffffffff80000000ULL; // -1LL << 31 is undefined, sigh
                 else
                     res.result = op_a_32 / op_b_32;
                 return res;
@@ -1675,67 +1680,15 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, mem
 }
 
 static void
-dump(cpu_state_t *s, const char *filename,
-     uint64_t start, uint64_t size,
-     unsigned width, unsigned shift)
-{
-    FILE *f = fopen(filename, "w");
-
-    uint32_t mask = (1ULL << width) - 1;
-
-    if (!f) {
-        perror(filename);
-        return;
-    }
-
-    memory_t *m = s->mem;
-    for (int i = 0; i < size; i += 4) {
-        uint32_t *p = memory_physical(m, start + i, 4);
-        if (!p)
-            break;
-        fprintf(f, "%0*x\n", width / 4, (*p >> shift) & mask);
-    }
-
-    fclose(f);
-}
-
-static void
 setup(cpu_state_t *state, elf_info_t *info)
 {
     memset(state->r, 0, sizeof state->r);
-    state->pc = info->program_entry;
-
-
-
-    // <HACK>
-    memory_exception_t dummy;
-    const uint64_t memory_size       = 256 * 1024 * 1024; // 256 MiB
-//    const uint64_t memory_size       = 4ULL * 1024 * 1024 * 1024;
-    const uint32_t memory_start = 0;
-    memory_ensure_mapped_range(state->mem, memory_start, memory_size);
-    store(state, 0, memory_size >> 20, 4, &dummy);
-    assert(dummy == MEMORY_SUCCESS);
-    state->r[31] = memory_start + memory_size / 2; // GP
-    state->r[14] = memory_start + memory_size - 4; // SP
-    store(state, state->r[14], 0, 4, &dummy);
-    assert(dummy == MEMORY_SUCCESS);
+    state->pc = 1 ? info->program_entry : 0x2000;
 
     if (disk_image) {
-	disk_fd = open(disk_image /* "/home/tommy/BTSync/RISCV/root-20140226.bin" */, O_RDWR);
+	disk_fd = open(disk_image, O_RDWR);
 	if (disk_fd < 0)
 	    perror(disk_image), exit(1);
-    }
-    // </HACK>
-
-    // <HACK> <HACK>
-    if (1) {
-        uint64_t data_start = info->text_start;
-        uint64_t data_size  = info->text_size;  // XXX not general
-        dump(state, "program.txt", info->text_start, info->text_size, 32, 0);
-        dump(state, "mem0.txt", data_start, data_size, 8,  0);
-        dump(state, "mem1.txt", data_start, data_size, 8,  8);
-        dump(state, "mem2.txt", data_start, data_size, 8, 16);
-        dump(state, "mem3.txt", data_start, data_size, 8, 24);
     }
 
     fcntl(0, F_SETFL, fcntl(0, F_GETFL, 0) | O_NONBLOCK);

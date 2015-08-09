@@ -38,7 +38,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     uint64_t orig_r[32];
     uint64_t pc       = state->pc;
     memory_exception_t error;
-    uint32_t inst     = (uint32_t)arch->load(state, pc, 44, &error);
+    uint32_t inst     = (uint32_t)arch->load(state, pc, 4, &error);
 
     if (error != MEMORY_SUCCESS)
         return (error == MEMORY_FATAL);

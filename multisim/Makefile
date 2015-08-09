@@ -16,8 +16,7 @@
 # Free Software Foundation, Inc., 59 Temple Place - Suite 330,
 # Boston, MA 02111-1307, USA.
 
-WARN=-Wall -Werror -Wno-logical-op-parentheses -Wno-bitwise-op-parentheses \
-     -Wno-parentheses
+WARN=-Wall -Werror -Wno-parentheses
 OPT=-O
 CFLAGS=-g -std=c99 $(WARN) -MD $(OPT) -g -I/opt/local/include
 LDFLAGS=-g
