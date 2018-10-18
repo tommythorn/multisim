@@ -20,6 +20,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <err.h>
 #include "arch.h"
 
 void
@@ -28,22 +29,24 @@ isa_disass(const arch_t *arch, isa_decoded_t dec, isa_result_t res)
     char dis_buf[99];
     uint64_t mask = arch->is_64bit ? ~0ULL : ~0U;
 
-    printf("%016"PRIx64" ", dec.inst_addr);
+    printf("%016"PRIx64" <", dec.inst_addr);
 
     arch->disass_inst(dec.inst_addr, dec.inst, dis_buf, sizeof dis_buf);
 
+    putchar('>');
+
     switch (dec.class) {
     case isa_inst_class_load:
-        if (dec.dest_reg != ISA_NO_REG)
-            printf("%-32s %s <- 0x%016"PRIx64" [0x%016"PRIx64"]\n",
-                   dis_buf, arch->reg_name[dec.dest_reg], res.result, res.load_addr);
-        else
-            printf("%-32s  <- 0x%016"PRIx64" [0x%016"PRIx64"]\n",
-                   dis_buf, res.result, res.load_addr);
+//        if (dec.dest_reg != ISA_NO_REG)
+//            printf("%-32s %s <~ 0x%016"PRIx64" [0x%016"PRIx64"]",
+//                   dis_buf, arch->reg_name[dec.dest_reg], res.result, res.load_addr);
+//        else
+//            printf("%-32s  <~ 0x%016"PRIx64" [0x%016"PRIx64"]",
+//                   dis_buf, res.result, res.load_addr);
         break;
 
     case isa_inst_class_store:
-        printf("%-32s [0x%016"PRIx64"] <- 0x%016"PRIx64"\n", dis_buf, res.store_addr, res.store_value);
+        printf("%-32s [0x%016"PRIx64"] <- 0x%016"PRIx64, dis_buf, res.store_addr, res.store_value);
         break;
 
     default:
@@ -57,11 +60,11 @@ isa_disass(const arch_t *arch, isa_decoded_t dec, isa_result_t res)
 
         if (dec.dest_msr != ISA_NO_REG)
             printf(" MSR%04x <- 0x%016"PRIx64"", dec.dest_msr, mask & res.msr_result);
-
-        printf("\n");
+        break;
     }
 
     // XXX
+    printf("\n");
     fflush(stdout);
 }
 
@@ -72,14 +75,18 @@ get_arch(uint16_t machine, bool is_64bit)
 {
     if (machine == EM_ALPHA)
         return &arch_alpha;
+
     if (machine == EM_LM32 || machine == EM_LM32_ALT)
         return &arch_lm32;
-    if (machine == EM_RISCV)
-        return is_64bit ? &arch_riscv64 : &arch_riscv32;
 
-    fprintf(stderr, "error: unsupported architecture %d", machine);
+    if (machine == EM_RISCV && is_64bit)
+        return &arch_riscv64;
 
-    exit(1);
+    if (machine == EM_RISCV && !is_64bit)
+        return &arch_riscv32;
+        // err(1, "32-bit RISC-V unsupported");
+
+    err(1, "unsupported architecture %d", machine);
 }
 
 // Local Variables:

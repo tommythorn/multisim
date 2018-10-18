@@ -1669,9 +1669,9 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, mem
     }
 
     switch (mem_access_size) {
-    case 1: case -1: *(uint8_t  *)p = value; return;
-    case 2: case -2: *(uint16_t *)p = value; return;
-    case 4: case -4: *(uint32_t *)p = value; return;
+    case 1: *(uint8_t  *)p = value; return;
+    case 2: *(uint16_t *)p = value; return;
+    case 4: *(uint32_t *)p = value; return;
     case 8: *(uint64_t *)p = value; return;
     default:
         assert(mem_access_size > 0);
@@ -1683,6 +1683,8 @@ static void
 setup(cpu_state_t *state, elf_info_t *info)
 {
     memset(state->r, 0, sizeof state->r);
+    state->r[14] = 0x8400;
+    memory_ensure_mapped_range(state->mem, 0x8000, 0x83FF); // XXX hack
     state->pc = 1 ? info->program_entry : 0x2000;
 
     if (disk_image) {
@@ -1694,6 +1696,7 @@ setup(cpu_state_t *state, elf_info_t *info)
     fcntl(0, F_SETFL, fcntl(0, F_GETFL, 0) | O_NONBLOCK);
 }
 
+#if 1
 const arch_t arch_riscv32 = {
     .zero_reg = 0,
     .reg_name = reg_name,
@@ -1705,9 +1708,10 @@ const arch_t arch_riscv32 = {
     .tick = tick,
     .read_msr = read_msr,
     .write_msr = write_msr,
-    .load = 0 /*load*/,
-    .store = 0 /*store*/,
+    .load = load,
+    .store = store,
 };
+#endif
 
 const arch_t arch_riscv64 = {
     .zero_reg = 0,

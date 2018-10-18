@@ -27,8 +27,8 @@
 #include <inttypes.h>
 #include <alloca.h>
 
-static const bool enable_verb_prog_sec = true;
-static const bool enable_verb_elf      = true;
+static const bool enable_verb_prog_sec = false;
+static const bool enable_verb_elf      = false;
 
 static void
 loadsection(FILE *f, unsigned f_offset, unsigned f_len,
