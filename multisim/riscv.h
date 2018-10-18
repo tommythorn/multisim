@@ -1,6 +1,6 @@
 /*
  * Multisim: a microprocessor architecture exploration framework
- * Copyright (C) 2014 Tommy Thorn
+ * Copyright (C) 2014,2018 Tommy Thorn
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,7 +20,7 @@
 
 /*
  *
- * Riscv opcode map, really just the RV32I part
+ * RISC-V opcode map, really just the RV32IMA 2.0 part
  *
  */
 
@@ -121,7 +121,7 @@ enum riscv_opcode_op_branch_e {
 };
 
 enum riscv_opcode_op_system_e {
-    SCALLSBREAK, CSRRW, CSRRS, CSRRC, TBD, CSRRWI, CSRRSI, CSRRCI,
+    ECALLEBREAK, CSRRW, CSRRS, CSRRC, TBD, CSRRWI, CSRRSI, CSRRCI,
 };
 
 enum riscv_opcode_op_div_e {
@@ -150,85 +150,136 @@ enum riscv_opcode_amo_e {
 /* CSRs */
 
 enum riscv_csr_e {
-    CSR_FFLAGS		= 0x001,// fcsr[4:0] alias
-    CSR_FRM,			// fcsr[7:5] alias
+// Table 2.2 User-level CSRs
+    CSR_USTATUS         = 0x000,
+    CSR_UIE             = 0x004,
+    CSR_UTVEC           = 0x005,
+
+    CSR_USCRATCH        = 0x040,
+    CSR_UEPC            = 0x041,
+    CSR_UCAUSE          = 0x042,
+    CSR_UTVAL           = 0x043,
+    CSR_UIP             = 0x044,
+
+    CSR_FFLAGS          = 0x001,// fcsr[4:0] alias
+    CSR_FRM,                    // fcsr[7:5] alias
     CSR_FCSR,
 
-    CSR_SUP0		= 0x500,
-    CSR_SUP1		= 0x501,
-    CSR_EPC		= 0x502,
-    CSR_BADVADDR	= 0x503,
-    CSR_PTBR		= 0x504,
-    CSR_ASID		= 0x505,
-    CSR_COUNT		= 0x506,
-    CSR_COMPARE		= 0x507,
-    CSR_EVEC		= 0x508,
-    CSR_CAUSE		= 0x509,
-    CSR_STATUS		= 0x50a,
-    CSR_HARTID		= 0x50b,
-    CSR_IMPL		= 0x50c,
-    CSR_FATC		= 0x50d,
-    CSR_SEND_IPI	= 0x50e,
-    CSR_CLEAR_IPI	= 0x50f,
-    CSR_TOHOST		= 0x51e,
-    CSR_FROMHOST	= 0x51f,
-
-    CSR_CYCLE		= 0xC00,
+    CSR_CYCLE           = 0xC00,
     CSR_TIME,
     CSR_INSTRET,
 
-    CSR_CYCLEH		= 0xC80,  // only valid in 32-bit mode
+    CSR_CYCLEH          = 0xC80,  // only valid in 32-bit mode
     CSR_TIMEH,
     CSR_INSTRETH,
+
+// Table 2.3 Supervisor-level CSRs
+    CSR_SSTATUS         = 0x100,
+    CSR_SEDELEG         = 0x102,
+    CSR_SIDELEG         = 0x103,
+    CSR_SIE             = 0x104,
+    CSR_STVEC           = 0x105,
+    CSR_SCOUNTEREN      = 0x106,
+
+    CSR_SSCRATCH        = 0x140,
+    CSR_SEPC            = 0x141,
+    CSR_SCAUSE          = 0x142,
+    CSR_STVAL           = 0x143,
+    CSR_SIP             = 0x144,
+
+    CSR_SATP            = 0x180,
+
+// Table 2.4 Machine-level CSRs
+    CSR_MVENDORID       = 0xF11,
+    CSR_MARCHID         = 0xF12,
+    CSR_MIMPID          = 0xF13,
+    CSR_MHARTID         = 0xF14,
+
+    CSR_MSTATUS         = 0x300,
+    CSR_MEDELEG         = 0x302,
+    CSR_MIDELEG         = 0x303,
+    CSR_MIE             = 0x304,
+    CSR_MTVEC           = 0x305,
+    CSR_MCOUNTEREN      = 0x306,
+
+    CSR_MSCRATCH        = 0x340,
+    CSR_MEPC            = 0x341,
+    CSR_MCAUSE          = 0x342,
+    CSR_MTVAL           = 0x343,
+    CSR_MIP             = 0x344,
+
+    // Omitting the Machine Protection and Translation
+
+// Table 2.5
+    CSR_MCYCLE          = 0xB00,
+    CSR_MINSTRET        = 0xB02,
+
+    CSR_MCYCLEH         = 0xB80,  // only valid in 32-bit mode
+    CSR_MINSTRETH       = 0xB82,
 };
 
-#define CSR_STATUS_S_BF    0:0
-#define CSR_STATUS_PS_BF   1:1
-#define CSR_STATUS_EI_BF   2:2
-#define CSR_STATUS_PEI_BF  3:3
-#define CSR_STATUS_EF_BF   4:4
-#define CSR_STATUS_U64_BF  5:5
-#define CSR_STATUS_S64_BF  6:6
-#define CSR_STATUS_VM_BF   7:7
-#define CSR_STATUS_IM_BF  23:16
-#define CSR_STATUS_IP_BF  31:24
+// XXX 32-bit version!
+#define CSR_STATUS_UIE_BF       0:0
+#define CSR_STATUS_SIE_BF       1:1
 
+#define CSR_STATUS_MIE_BF       3:3
+#define CSR_STATUS_UPIE_BF      4:4
+#define CSR_STATUS_SPIE_BF      5:5
+
+#define CSR_STATUS_MPIE_BF      7:7
+#define CSR_STATUS_SPP_BF       8:8
+
+#define CSR_STATUS_MPP_BF     12:11
+#define CSR_STATUS_FF_BF      14:13
+#define CSR_STATUS_XS_BF      16:15
+#define CSR_STATUS_MPRV_BF    17:17
+#define CSR_STATUS_SUM_BF     18:18
+#define CSR_STATUS_MXR_BF     19:19
+#define CSR_STATUS_TVM_BF     20:20
+#define CSR_STATUS_TW_BF      21:21
+#define CSR_STATUS_TSR_BF     22:22
+#define CSR_STATUS_SD_BF      31:31
 
 /* Interrupts */
 enum {
-    TRAP_INTR_IPI	= 5,
-    TRAP_INTR_HOST	= 6,
-    TRAP_INTR_TIMER	= 7,
+    TRAP_INTR_IPI       = 5,
+    TRAP_INTR_HOST      = 6,
+    TRAP_INTR_TIMER     = 7,
 };
 
 /* Exceptions */
 enum {
-    TRAP_INST_MISALIGN	= 0,
-    TRAP_INST_ADDR	= 1,
-    TRAP_INST_ILLEGAL	= 2,
-    TRAP_INST_PRIVILEGE = 3,
-    TRAP_FP_DISABLED	= 4,
-    TRAP_SYSTEM_CALL	= 6,
-    TRAP_BREAKPOINT	= 7,
-    TRAP_LOAD_MISALIGN	= 8,
-    TRAP_STORE_MISALIGN	= 9,
-    TRAP_LOAD_FAULT	= 10,
-    TRAP_STORE_FAULT	= 11,
+    EXCP_INST_MISALIGN          = 0,
+    EXCP_INST_ACCESS_FAULT,
+    EXCP_INST_ILLEGAL,
+    EXCP_BREAKPOINT,
+
+    EXCP_LOAD_MISALIGN,
+    EXCP_LOAD_ACCESS_FAULT,
+    EXCP_STORE_MISALIGN,
+    EXCP_STORE_ACCESS_FAULT,
+
+    EXCP_UMODE_CALL,
+    EXCP_SMODE_CALL,
+    EXCP_RESERVED_10,
+    EXCP_MODE_CALL,
+
+    EXCP_INST_PAGE_FAULT,
+    EXCP_LOAD_PAGE_FAULT,
+    EXCP_RESERVED_14,
+    EXCP_STORE_PAGE_FAULT,
 };
 
 /* Virtual memory, page table entries */
 
-#define PTE_V		0:0
-#define PTE_T		1:1
-#define PTE_G		2:2
-#define PTE_UR		3:3
-#define PTE_UW		4:4
-#define PTE_UX		5:5
-#define PTE_SR		6:6
-#define PTE_SW		7:7
-#define PTE_SX		8:8
-
-#define PTE_PERMISSION  8:3
+#define PTE_V           0:0
+#define PTE_R           1:1
+#define PTE_W           2:2
+#define PTE_X           3:3
+#define PTE_U           4:4
+#define PTE_G           5:5
+#define PTE_A           6:6
+#define PTE_D           7:7
 
 #endif
 

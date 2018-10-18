@@ -1,6 +1,6 @@
 /*
  * Multisim: a microprocessor architecture exploration framework
- * Copyright (C) 2014 Tommy Thorn
+ * Copyright (C) 2014,2018 Tommy Thorn
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -29,11 +29,9 @@ isa_disass(const arch_t *arch, isa_decoded_t dec, isa_result_t res)
     char dis_buf[99];
     uint64_t mask = arch->is_64bit ? ~0ULL : ~0U;
 
-    printf("%016"PRIx64" <", dec.inst_addr);
+    printf("%016"PRIx64" ", dec.inst_addr);
 
     arch->disass_inst(dec.inst_addr, dec.inst, dis_buf, sizeof dis_buf);
-
-    putchar('>');
 
     switch (dec.class) {
     case isa_inst_class_load:

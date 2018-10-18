@@ -1,6 +1,6 @@
 /*
  * Multisim: a microprocessor architecture exploration framework
- * Copyright (C) 2012 Tommy Thorn
+ * Copyright (C) 2012,2018 Tommy Thorn
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -78,10 +78,6 @@ state_destroy(cpu_state_t *state)
     memory_destroy(state->mem);
     free(state);
 }
-
-/* Enforce that 32-bit architectures keep the register file in a
-   canonical form, that is int32_t sign extended to int64_t/uint64_t */
-#define CANONICALIZE(v) (arch->is_64bit ? (v) : (int32_t)  (v))
 
 // XXX hackish
 char *disk_image;

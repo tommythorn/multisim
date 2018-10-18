@@ -1,6 +1,6 @@
 /*
  * Multisim: a microprocessor architecture exploration framework
- * Copyright (C) 2012 Tommy Thorn
+ * Copyright (C) 2012,2018 Tommy Thorn
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -166,7 +166,6 @@ step_sscalar_oooe(
         }
 
         state->pc += 4;
-        state->pc = CANONICALIZE(state->pc);
     }
 
     assert(fetch_number != issue_number);
@@ -214,7 +213,6 @@ step_sscalar_oooe(
         rs->issued  = true;
 
         isa_result_t res = arch->inst_exec(rs->dec, op_a, op_b, 0);
-        res.result = CANONICALIZE(res.result);
 
         if (res.fatal_error)
             return true;
@@ -228,8 +226,6 @@ step_sscalar_oooe(
 
         case isa_inst_class_load:
             res.result = arch->load(state, res.result, rs->dec.loadstore_size, &error);
-            res.result = CANONICALIZE(res.result);
-
             if (error != MEMORY_SUCCESS)
                 return (error == MEMORY_FATAL);
 
