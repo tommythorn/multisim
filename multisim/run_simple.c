@@ -75,6 +75,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     exception_raised = 0;
 
     isa_result_t res = arch->inst_exec(dec, op_a, op_b, msr_a);
+    res.result = CANONICALIZE(res.result);
 
     if (res.fatal_error)
         return true;
@@ -85,6 +86,8 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     switch (dec.class) {
     case isa_inst_class_load:
         res.result = arch->load(state, res.load_addr, dec.loadstore_size, &error);
+        res.result = CANONICALIZE(res.result);
+
         if (error != MEMORY_SUCCESS)
             return (error == MEMORY_FATAL);
 
@@ -125,6 +128,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
 
     default:
         state->pc += 4;
+        state->pc = CANONICALIZE(state->pc);
         break;
     }
 

@@ -113,6 +113,7 @@ step_sscalar_in_order(
         ++fetch_number;
 
         state->pc += 4;
+        state->pc = CANONICALIZE(state->pc);
 
         if (dec.dest_reg != ISA_NO_REG)
             scoreboard[dec.dest_reg] = false;
@@ -136,6 +137,7 @@ step_sscalar_in_order(
     while (fetch_number % WINDOW_SIZE != issue_number % WINDOW_SIZE) {
         reservation_station_t *rs = reservation_stations + issue_number++ % WINDOW_SIZE;
         isa_result_t res = arch->inst_exec(rs->dec, rs->op_a, rs->op_b, 0);
+        res.result = CANONICALIZE(res.result);
 
         if (res.fatal_error)
             return true;
@@ -149,6 +151,8 @@ step_sscalar_in_order(
 
         case isa_inst_class_load:
             res.result = arch->load(state, res.result, rs->dec.loadstore_size, &error);
+            res.result = CANONICALIZE(res.result);
+
             if (error != MEMORY_SUCCESS)
                 return (error == MEMORY_FATAL);
 

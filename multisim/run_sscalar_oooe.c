@@ -166,6 +166,7 @@ step_sscalar_oooe(
         }
 
         state->pc += 4;
+        state->pc = CANONICALIZE(state->pc);
     }
 
     assert(fetch_number != issue_number);
@@ -213,6 +214,7 @@ step_sscalar_oooe(
         rs->issued  = true;
 
         isa_result_t res = arch->inst_exec(rs->dec, op_a, op_b, 0);
+        res.result = CANONICALIZE(res.result);
 
         if (res.fatal_error)
             return true;
@@ -226,6 +228,8 @@ step_sscalar_oooe(
 
         case isa_inst_class_load:
             res.result = arch->load(state, res.result, rs->dec.loadstore_size, &error);
+            res.result = CANONICALIZE(res.result);
+
             if (error != MEMORY_SUCCESS)
                 return (error == MEMORY_FATAL);
 
