@@ -73,6 +73,7 @@ typedef int isa_msr_t;
  * - for computed jumps, actual target is register source_reg_a.
  */
 typedef enum isa_inst_class_e {
+    isa_inst_class_illegal,
     isa_inst_class_alu,
     isa_inst_class_load,
     isa_inst_class_store,

@@ -17,7 +17,7 @@
 # Boston, MA 02111-1307, USA.
 
 WARN=-Wall -Werror -Wno-parentheses
-OPT=-O
+OPT=
 CFLAGS=-g -std=c99 $(WARN) -MD $(OPT) -g -I/opt/local/include
 LDFLAGS=-g
 FLAGS=

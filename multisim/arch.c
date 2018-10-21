@@ -27,43 +27,42 @@ void
 isa_disass(const arch_t *arch, isa_decoded_t dec, isa_result_t res)
 {
     char dis_buf[99];
-    uint64_t mask = arch->is_64bit ? ~0ULL : ~0U;
 
-    printf("%016"PRIx64" ", dec.inst_addr);
+    fprintf(stderr, "%016"PRIx64" ", dec.inst_addr);
 
     arch->disass_inst(dec.inst_addr, dec.inst, dis_buf, sizeof dis_buf);
 
     switch (dec.class) {
     case isa_inst_class_load:
-//        if (dec.dest_reg != ISA_NO_REG)
-//            printf("%-32s %s <~ 0x%016"PRIx64" [0x%016"PRIx64"]",
-//                   dis_buf, arch->reg_name[dec.dest_reg], res.result, res.load_addr);
-//        else
-//            printf("%-32s  <~ 0x%016"PRIx64" [0x%016"PRIx64"]",
-//                   dis_buf, res.result, res.load_addr);
+        if (dec.dest_reg != ISA_NO_REG)
+            fprintf(stderr, "%-32s %s <~ 0x%016"PRIx64" [0x%016"PRIx64"]",
+		    dis_buf, arch->reg_name[dec.dest_reg], res.result, res.load_addr);
+        else
+            fprintf(stderr, "%-32s  <~ 0x%016"PRIx64" [0x%016"PRIx64"]",
+		    dis_buf, res.result, res.load_addr);
         break;
 
     case isa_inst_class_store:
-        printf("%-32s [0x%016"PRIx64"] <- 0x%016"PRIx64, dis_buf, res.store_addr, res.store_value);
+        fprintf(stderr, "%-32s [0x%016"PRIx64"] <- 0x%016"PRIx64, dis_buf, res.store_addr, res.store_value);
         break;
 
     default:
         if (dec.dest_reg != ISA_NO_REG || dec.dest_msr != ISA_NO_REG)
-            printf("%-32s", dis_buf);
+            fprintf(stderr, "%-32s", dis_buf);
         else
-            printf("%s", dis_buf);
+            fprintf(stderr, "%s", dis_buf);
 
         if (dec.dest_reg != ISA_NO_REG)
-            printf(" %s <- 0x%016"PRIx64"", arch->reg_name[dec.dest_reg], mask & res.result);
+            fprintf(stderr, " %s <- 0x%016"PRIx64"", arch->reg_name[dec.dest_reg], res.result);
 
         if (dec.dest_msr != ISA_NO_REG)
-            printf(" MSR%04x <- 0x%016"PRIx64"", dec.dest_msr, mask & res.msr_result);
+            fprintf(stderr, " MSR%04x <- 0x%016"PRIx64"", dec.dest_msr, res.msr_result);
         break;
     }
 
     // XXX
-    printf("\n");
-    fflush(stdout);
+    fprintf(stderr, "\n");
+    fflush(stderr);
 }
 
 extern const arch_t arch_alpha, arch_lm32, arch_riscv32, arch_riscv64;

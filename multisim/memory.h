@@ -39,6 +39,7 @@ void *memory_physical(memory_t *m, uint64_t addr, uint64_t size);
 void memory_destroy(memory_t *);
 
 void memory_set_endian(memory_t *m, bool bigendian);
+void memory_set_32bit_mode(memory_t *m);
 uint64_t memory_endian_fix64(memory_t *m, uint64_t v);
 uint32_t memory_endian_fix32(memory_t *m, uint32_t v);
 uint16_t memory_endian_fix16(memory_t *m, uint16_t v);

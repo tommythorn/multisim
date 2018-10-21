@@ -220,6 +220,7 @@ step_sscalar_oooe(
             return true;
 
         switch (rs->dec.class) {
+        case isa_inst_class_illegal:
         case isa_inst_class_atomic:
             assert(0); // This would require a bit more thought
 

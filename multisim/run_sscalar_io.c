@@ -144,6 +144,7 @@ step_sscalar_in_order(
 
         switch (rs->dec.class) {
         case isa_inst_class_atomic:
+        case isa_inst_class_illegal:
             assert(0); // This would require a bit more thought
 
         case isa_inst_class_alu:

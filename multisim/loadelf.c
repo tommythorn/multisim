@@ -101,6 +101,7 @@ int loadelf(memory_t *m, char *name, elf_info_t *elf_info)
     rewind(f);
 
     if (ehdr.e_ident[EI_CLASS] == ELFCLASS32) {
+        memory_set_32bit_mode(m);
         int r = loadelf32(m, name, f, elf_info);
         elf_info->is_64bit = false;
         return r;

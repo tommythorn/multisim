@@ -121,10 +121,14 @@ static const uint64_t csr_mask[0x1000] = {
     [CSR_FRM]           = 7,
     [CSR_FCSR]          = 0xFF,
 
-    [CSR_MTVEC]         = 0xFFFFFFFC,
-    [CSR_STVEC]         = 0xFFFFFFFC,
+    [CSR_MTVEC]         = -4LL,
+    [CSR_STVEC]         = -4LL,
 
     [CSR_MIE]           = 0xFFFFFFFF,
+    [CSR_MSTATUS]       = (BF_PACK(~0, CSR_STATUS_MPP_BF)  |
+			   BF_PACK(~0, CSR_STATUS_MPIE_BF) |
+                           BF_PACK(~0, CSR_STATUS_MIE_BF)),
+    [CSR_MEPC]          = -4LL,
 };
 
 static uint64_t csr[0x1000];
@@ -248,30 +252,6 @@ void set_interrupt(int irq, int val)
         csr[CSR_MIP] &= ~(1U << (24+irq));
 }
 
-static void push_priv(void)
-{
-    /* xPIE holds the value of the interrupt-enable bit active prior to
-     * the trap, and xPP holds the previous privilege mode.  The xPP
-     * fields can only hold privilege modes up to x, so MPP is two bits
-     * wide, SPP is one bit wide, and UPP is implicitly zero.  When a trap
-     * is taken from privilege mode y into privilege mode x, xPIE is set
-     * to the value of xIE; xIE is set to 0; and xPP is set to y. */
-
-#if 0 // TBD
-    /* Save S in PS, and set S */
-    BF_SET(csr[CSR_STATUS], CSR_STATUS_PS_BF,
-           BF_GET(csr[CSR_STATUS], CSR_STATUS_S_BF));
-    csr[CSR_STATUS] |= BF_PACK(1, CSR_STATUS_S_BF);
-
-    /* Save EI in PEI and clear EI */
-    BF_SET(csr[CSR_STATUS], CSR_STATUS_PEI_BF,
-           BF_GET(csr[CSR_STATUS], CSR_STATUS_EI_BF));
-    csr[CSR_STATUS] &= ~BF_PACK(1, CSR_STATUS_EI_BF);
-#endif
-
-    priv = 3;
-}
-
 static const char *
 csr_fmt(unsigned csrno)
 {
@@ -320,7 +300,11 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
             // li pseudo instruction
             snprintf(buf, buf_size, "%-11s%s,%d",
                      "li", N[i.i.rd], i.i.imm11_0);
-        else
+        else if (i.i.funct3 == SR_I) {
+	    const char *opcode = i.i.imm11_0 & 1 << 10 ? "srai" : "srli";
+	    snprintf(buf, buf_size, "%-11s%s,%s,%d",
+		     opcode, N[i.i.rd], N[i.i.rs1], i.i.imm11_0);
+	} else
             snprintf(buf, buf_size, "%-11s%s,%s,%d",
                      opcode_imm_name[i.i.funct3], N[i.i.rd], N[i.i.rs1], i.i.imm11_0);
         break;
@@ -469,9 +453,11 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
       switch (i.r.funct3) {
       case ECALLEBREAK:
           switch (i.i.imm11_0) {
-          case 0: snprintf(buf, buf_size, "%-11s", "ecall"); return;
-          case 1: snprintf(buf, buf_size, "%-11s", "ebreak"); return;
-          case -0x800: snprintf(buf, buf_size, "%-11s", "eret"); return;
+          case ECALL:  snprintf(buf, buf_size, "%-11s", "ecall"); return;
+          case EBREAK: snprintf(buf, buf_size, "%-11s", "ebreak"); return;
+          case URET:   snprintf(buf, buf_size, "%-11s", "uret"); return;
+          case SRET:   snprintf(buf, buf_size, "%-11s", "sret"); return;
+          case MRET:   snprintf(buf, buf_size, "%-11s", "mret"); return;
           default: assert(0);
           }
           break;
@@ -530,7 +516,7 @@ decode(uint64_t inst_addr, uint32_t inst)
     dec.source_reg_b = 0;
     dec.dest_msr     = ISA_NO_REG;
     dec.source_msr_a = ISA_NO_REG;
-    dec.class        = isa_inst_class_alu;
+    dec.class        = isa_inst_class_illegal;
 
     switch (i.r.opcode) {
     case LOAD:
@@ -559,22 +545,6 @@ decode(uint64_t inst_addr, uint32_t inst)
         dec.dest_reg     = i.i.rd;
         dec.source_reg_a = i.i.rs1;
         dec.class        = isa_inst_class_alu;
-
-        if (0) {
-        // XXX HACK
-        if (i.r.opcode == OP_IMM && i.i.rd == 14 && i.i.rs1 == 14) {
-            // stack adjustment
-            if (previous_stack_delta < 0 && i.i.imm11_0 == -previous_stack_delta) {
-                ++leaf_allocations;
-                if (i.i.imm11_0 > max_leaf_allocation)
-                    max_leaf_allocation = i.i.imm11_0;
-                printf("Leaf allocation insts #%d (of %ld total) of %d bytes (max %d)\n",
-                       2 * leaf_allocations,
-                       (long) csr[CSR_INSTRET], i.i.imm11_0, max_leaf_allocation);
-            }
-            previous_stack_delta = i.i.imm11_0;
-        }
-        }
         break;
 
     case STORE:
@@ -585,8 +555,6 @@ decode(uint64_t inst_addr, uint32_t inst)
         break;
 
     case STORE_FP:
-//verbosity_override |= VERBOSE_DISASS;
-
         dec.class        = isa_inst_class_alu; // nop
         break;
 
@@ -674,14 +642,13 @@ decode(uint64_t inst_addr, uint32_t inst)
       switch (i.r.funct3) {
       case ECALLEBREAK:
           switch (i.i.imm11_0) {
-          case 0: // SCALL
-          case 1: // SBREAK
-          case -0x800: // SRET
+          case ECALL:
+          case EBREAK:
+          case SRET:
+          case MRET:
               // XXX but it has a speculation barrier not accounted for
               dec.class = isa_inst_class_compjump;
               break;
-          default:
-              assert(0);
           }
           break;
 
@@ -728,8 +695,6 @@ decode(uint64_t inst_addr, uint32_t inst)
         }
         break;
 
-
-
     default:
     unhandled:
         warn("Opcode %s not decoded, inst %016"PRIx64":%08x\n",
@@ -744,7 +709,7 @@ decode(uint64_t inst_addr, uint32_t inst)
 }
 
 static isa_result_t
-inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
+inst_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
 {
     int64_t op_a      = (int64_t) op_a_u;
     int64_t op_b      = (int64_t) op_b_u;
@@ -757,7 +722,6 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
     uint64_t ea_load  = op_a + i.i.imm11_0;
     uint64_t ea_store = op_a + (i.s.imm11_5 << 5 | i.s.imm4_0);
     res.fatal_error   = false;
-    int xlen          = 64; // XXX need a way to support both 32- and 64-bit here
 
     switch (i.r.opcode) {
     case LOAD:
@@ -808,7 +772,7 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
             if (i.i.imm11_0 & 1 << 10)
                 res.result = op_a >> (i.i.imm11_0 & (xlen - 1));
             else
-                res.result = op_a_u >> (i.i.imm11_0 & (xlen - 1));
+                res.result = (uint32_t) op_a_u >> (i.i.imm11_0 & (xlen - 1)); // XXX RV32
             break;
         case ORI:
             res.result = op_a | i.i.imm11_0;
@@ -866,13 +830,13 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
                 res.result = op_a * op_b;
                 return res;
             case MULH:
-                res.result = ((__int128) op_a * op_b) >> 64;
+                res.result = (op_a * op_b) >> 32; // XXX RV32
                 return res;
             case MULHSU:
-                res.result = ((__int128) op_a * op_b_u) >> 64;
+                res.result = (op_a * op_b_u) >> 32;
                 return res;
             case MULHU:
-                res.result = ((unsigned __int128) op_a_u * op_b_u) >> 64;
+                res.result = (op_a_u * op_b_u) >> 32;
                 return res;
             case DIV:
                 if (op_b == 0)
@@ -880,13 +844,13 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
                 else if (op_b == -1 && op_a == (1LL << (xlen - 1)))
                     res.result = -1LL << (xlen - 1);
                 else
-                    res.result = op_a / op_b;
+                    res.result = op_a / (int32_t) op_b;
                 return res;
             case DIVU:
                 if (op_b == 0)
                     res.result = -1LL;
                 else
-                    res.result = op_a_u / op_b_u;
+                    res.result = op_a_u / (uint32_t) op_b_u;
                 return res;
             case REM:
                 if (op_b == 0)
@@ -894,13 +858,13 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
                 else if (op_b == -1 && op_a == (1LL << (xlen - 1)))
                     res.result = 0;
                 else
-                    res.result = op_a % op_b;
+                    res.result = op_a % (int32_t) op_b;
                 return res;
             case REMU:
                 if (op_b == 0)
                     res.result = op_a;
                 else
-                    res.result = op_a_u % op_b_u;
+                    res.result = op_a_u % (uint32_t) op_b_u;
                 return res;
             }
         else
@@ -924,7 +888,7 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
                 if (i.i.imm11_0 & 1 << 10)
                     res.result = op_a >> (op_b & (xlen - 1));
                 else
-                    res.result = op_a_u >> (op_b & (xlen - 1));
+                    res.result = (uint32_t) op_a_u >> (op_b & (xlen - 1)); // XXX RV32
                 break;
             case OR:
                 res.result = op_a | op_b;
@@ -1033,59 +997,53 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
         switch (i.r.funct3) {
         case ECALLEBREAK:
             switch (i.i.imm11_0) {
-            case 0: {
-                res.compjump_target = csr[priv * 0x100 + CSR_UTVEC];
-                csr[priv * 0x100 + CSR_UEPC] = dec.inst_addr;
-                csr[priv * 0x100 + CSR_UCAUSE] = EXCP_UMODE_CALL + priv;
-                push_priv();
-#if 0
-                uint32_t orig_status = csr[CSR_STATUS];
-                // XXX because sharing raise() cause problems
-                                DEBUG("  %016"PRIx64":ECALL: status was %08x, now %08x, will vector to %016"PRIx64"\n",
-                      dec.inst_addr, orig_status,
-                      (uint32_t) csr[CSR_STATUS],
-                      csr[CSR_EVEC]);
+            case ECALL: {
+                csr[CSR_MCAUSE] = EXCP_UMODE_CALL + priv;
+                csr[CSR_MEPC] = dec.inst_addr;
+                csr[CSR_MTVAL] = 0;
 
-//verbosity_override |= VERBOSE_DISASS;
-#endif
+                /* When a trap is taken from privilege mode y into privilege
+                   mode x, xPIE is set to the value of xIE; xIE is set to 0;
+                   and xPP is set to y.
+
+                   Here x = M, thus MPIE = MIE; MIE = 0; MPP = priv
+                */
+
+                BF_SET(csr[CSR_MSTATUS], CSR_STATUS_MPIE_BF,
+                       BF_GET(csr[CSR_MSTATUS], CSR_STATUS_MIE_BF));
+                BF_SET(csr[CSR_MSTATUS], CSR_STATUS_MIE_BF, 0);
+                BF_SET(csr[CSR_MSTATUS], CSR_STATUS_MPP_BF, priv);
+                res.compjump_target = csr[CSR_MTVEC];
+                priv = 3;
                 return res;
             }
 
-            case 1: assert(0); printf("  SBREAK");
-                res.compjump_target = csr[priv * 0x100 + CSR_UTVEC];
-                csr[priv * 0x100 + CSR_UEPC] = dec.inst_addr;
-                csr[priv * 0x100 + CSR_UCAUSE] = EXCP_BREAKPOINT;
-                push_priv();
+            case MRET:
+                /* Copy down MPIE to MIE and set MPIE */
+                BF_SET(csr[CSR_MSTATUS], CSR_STATUS_MIE_BF,
+                       BF_GET(csr[CSR_MSTATUS], CSR_STATUS_MPIE_BF));
+                BF_SET(csr[CSR_MSTATUS], CSR_STATUS_MPIE_BF, ~0);
+
+                priv = BF_GET(csr[CSR_MSTATUS], CSR_STATUS_MPP_BF);
+                BF_SET(csr[CSR_MSTATUS], CSR_STATUS_MPP_BF, 0);
+                res.compjump_target = csr[CSR_MEPC];
                 return res;
 
-            case -0x800: // SRET
-            {
-#if 0
-                uint32_t orig_status = csr[CSR_STATUS];
+            case SRET:
+                /* Copy down SPIE to SIE and set SPIE */
+                BF_SET(csr[CSR_MSTATUS], CSR_STATUS_SPIE_BF,
+                       BF_GET(csr[CSR_MSTATUS], CSR_STATUS_SPIE_BF));
+                BF_SET(csr[CSR_MSTATUS], CSR_STATUS_SPIE_BF, ~0);
 
-                res.compjump_target = csr[priv * 0x100 + CSR_UEPC];
-
-
-                priv = BF_GET(csr[priv * 0x100 + CSR_USTATUS], ;
-
-                /* Pop the S and EI bits from PS and PEI respectively */
-
-                BF_SET(csr[CSR_STATUS], CSR_STATUS_S_BF,
-                       BF_GET(csr[CSR_STATUS], CSR_STATUS_PS_BF));
-
-                BF_SET(csr[CSR_STATUS], CSR_STATUS_EI_BF,
-                       BF_GET(csr[CSR_STATUS], CSR_STATUS_PEI_BF));
-
-                DEBUG("  %016"PRIx64":SRET:  status was %08x, now %08x, will vector to %016"PRIx64"\n",
-                      dec.inst_addr, orig_status,
-                      (uint32_t) csr[CSR_STATUS],
-                      csr[CSR_EPC]);
-#endif
-                              }
+                priv = BF_GET(csr[CSR_MSTATUS], CSR_STATUS_SPP_BF);
+                BF_SET(csr[CSR_MSTATUS], CSR_STATUS_SPP_BF, 0);
+                res.compjump_target = csr[CSR_SEPC];
                 return res;
+
+            default:
+                assert(0);
             }
             assert(0);
-            return res;
 
         case CSRRS:  res.msr_result = msr_a |  op_a;    return res;
         case CSRRC:  res.msr_result = msr_a &~ op_a;    return res;
@@ -1113,6 +1071,18 @@ inst_exec(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
 
     res.result = -1;
     return res;
+}
+
+static isa_result_t
+inst_exec32(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
+{
+    return inst_exec(32, dec, op_a_u, op_b_u, msr_a);
+}
+
+static isa_result_t
+inst_exec64(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
+{
+    return inst_exec(64, dec, op_a_u, op_b_u, msr_a);
 }
 
 int exception_raised; // XXX hack
@@ -1307,7 +1277,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *
 
     if (!p) {
         raise(s, except);
-        csr[CSR_STVAL] = address;
+        csr[CSR_STVAL] = address; /// XXX pass it into raise()
         ERROR("  load from illegal physical memory %08"PRIx64"\n", address);
         //XXX s->fatal_error = true;
         return 0;
@@ -1332,6 +1302,12 @@ static void
 store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, memory_exception_t *error)
 {
     *error = MEMORY_SUCCESS;
+
+    // XXX Hack for Dhrystone
+    if (address == 0x0000000010000000) {
+	putchar(value & 255);
+	return;
+    }
 
 #if 0
     if (BF_GET(csr[CSR_STATUS], CSR_STATUS_S_BF))
@@ -1380,9 +1356,13 @@ static void
 setup(cpu_state_t *state, elf_info_t *info)
 {
     memset(state->r, 0, sizeof state->r);
-    state->r[14] = 0x8400;
-    memory_ensure_mapped_range(state->mem, 0x8000, 0x83FF); // XXX hack
-    state->pc = 1 ? info->program_entry : 0x2000;
+    state->pc = info->program_entry;
+    if (!info->is_64bit)
+        state->pc = (int32_t)state->pc;
+
+    // XXX Hack for Dhrystone
+    memory_ensure_mapped_range(state->mem, 0x0, 256*1024-1);
+    state->r[2] = 0x10000;
 
     if (disk_image) {
         disk_fd = open(disk_image, O_RDWR);
@@ -1400,7 +1380,7 @@ const arch_t arch_riscv32 = {
     .is_64bit = false,
     .setup = setup,
     .decode = decode,
-    .inst_exec = inst_exec,
+    .inst_exec = inst_exec32,
     .disass_inst = disass_inst,
     .tick = tick,
     .read_msr = read_msr,
@@ -1416,7 +1396,7 @@ const arch_t arch_riscv64 = {
     .is_64bit = true,
     .setup = setup,
     .decode = decode,
-    .inst_exec = inst_exec,
+    .inst_exec = inst_exec64,
     .disass_inst = disass_inst,
     .tick = tick,
     .read_msr = read_msr,

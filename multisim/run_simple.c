@@ -85,6 +85,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
 
     switch (dec.class) {
     case isa_inst_class_load:
+	res.load_addr = CANONICALIZE(res.load_addr);
         res.result = arch->load(state, res.load_addr, dec.loadstore_size, &error);
         res.result = CANONICALIZE(res.result);
 
@@ -95,6 +96,8 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
         break;
 
     case isa_inst_class_store:
+	res.store_addr = CANONICALIZE(res.store_addr);
+	res.store_value = CANONICALIZE(res.store_value);
         arch->store(state, res.store_addr, res.store_value, dec.loadstore_size, &error);
 
         if (error != MEMORY_SUCCESS)
@@ -104,6 +107,8 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
         break;
 
     case isa_inst_class_atomic:
+	// XXX ??
+	res.load_addr = CANONICALIZE(res.load_addr);
         arch->store(state, atomic_load_addr, res.result, dec.loadstore_size, &error);
 
         if (error != MEMORY_SUCCESS)
@@ -115,14 +120,17 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
 
 
     case isa_inst_class_branch:
+	dec.jumpbranch_target = CANONICALIZE(dec.jumpbranch_target);
         state->pc = res.branch_taken ? dec.jumpbranch_target : state->pc + 4;
         break;
 
     case isa_inst_class_jump:
+	dec.jumpbranch_target = CANONICALIZE(dec.jumpbranch_target);
         state->pc = dec.jumpbranch_target;
         break;
 
     case isa_inst_class_compjump:
+	res.compjump_target = CANONICALIZE(res.compjump_target);
         state->pc = res.compjump_target;
         break;
 
@@ -146,8 +154,10 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
         ++cycle;
     }
 
-    if ((verbosity | verbosity_override) & VERBOSE_DISASS)
+    if ((verbosity | verbosity_override) & VERBOSE_DISASS) {
         isa_disass(arch, dec, res);
+        fflush(stderr);
+    }
 
     arch->tick(state);
 

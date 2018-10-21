@@ -45,9 +45,10 @@ struct memory_st {
     struct entry segment[MEMORY_NSEGMENT];
     int segments;
     bool endian_is_big;
+    uint64_t addr_mask; // Clamp canonical 32-bit addresses
 };
 
-struct entry *memory_lookup(memory_t *m, uint64_t addr)
+static struct entry *memory_lookup(memory_t *m, uint64_t addr)
 {
     for (int i = 0; i < m->segments; ++i)
         if (m->segment[i].start <= addr && addr < m->segment[i].end)
@@ -58,6 +59,7 @@ struct entry *memory_lookup(memory_t *m, uint64_t addr)
 
 void *memory_physical(memory_t *m, uint64_t addr, uint64_t size)
 {
+    addr &= m->addr_mask;
     struct entry *e = memory_lookup(m, addr);
 
     assert(e == memory_lookup(m, addr + size - 1));
@@ -70,7 +72,9 @@ void *memory_physical(memory_t *m, uint64_t addr, uint64_t size)
 
 memory_t *memory_create(void)
 {
-    return calloc(sizeof (memory_t), 1);
+    memory_t *m = calloc(sizeof (memory_t), 1);
+    m->addr_mask = ~0ULL;
+    return m;
 }
 
 void memory_destroy(memory_t *m)
@@ -82,6 +86,12 @@ void memory_set_endian(memory_t *m, bool bigendian)
 {
     m->endian_is_big = bigendian;
 }
+
+void memory_set_32bit_mode(memory_t *m)
+{
+    m->addr_mask = 0xFFFFFFFF;
+}
+
 
 uint64_t memory_endian_fix64(memory_t *m, uint64_t v)
 {
