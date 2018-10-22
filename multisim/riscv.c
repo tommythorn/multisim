@@ -46,6 +46,8 @@
 #include "arch.h"
 #include "riscv.h"
 
+static const bool debug_cache = false;
+
 // 100 MHz -> 1 / 100e6 = 1e-8 s = 1e-2 us
 const double us_per_cycle = 1e-2;
 
@@ -243,6 +245,8 @@ static void print_status(uint32_t status)
 */
 
 int disk_fd;
+
+static void dump_cache_stats(void);
 
 void set_interrupt(int irq, int val)
 {
@@ -522,8 +526,8 @@ decode(uint64_t inst_addr, uint32_t inst)
     case LOAD:
         dec.class        = isa_inst_class_load;
         dec.loadstore_size = 1 << (i.i.funct3 & 3);
-        // LB, LH, LW needs sign-extension.
-        if (i.i.funct3 <= LW)
+        // LB, LH, [LW in 64-bit] needs sign-extension.
+        if (i.i.funct3 < LW)
             dec.loadstore_size = -dec.loadstore_size;
         dec.source_reg_a = i.i.rs1;
         dec.dest_reg     = i.i.rd;
@@ -1041,8 +1045,9 @@ inst_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_
                 return res;
 
             default:
-                assert(0);
+                break;
             }
+	    dump_cache_stats();
             assert(0);
 
         case CSRRS:  res.msr_result = msr_a |  op_a;    return res;
@@ -1132,6 +1137,7 @@ static void raise(cpu_state_t *s, uint64_t cause)
 /* executed every cycle */
 static void tick(cpu_state_t *s)
 {
+    s->counter += 1;
     // XXX for now, an instruction per tick
     csr[CSR_INSTRET] = (uint32_t) (csr[CSR_INSTRET] + 1);
     csr[CSR_CYCLE]   = (uint32_t) (csr[CSR_CYCLE]   + 1);
@@ -1220,6 +1226,188 @@ static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value)
 
 bool debug_vm = false; // to be enabled in the debugger
 
+#define MAX_WAYS 4
+#define MAX_SETS 4096
+#define MAX_CACHE_CONFIGS 0 // (4*3*3*5*10)
+
+enum policy_e { LRU, RANDOM, MRULRU };
+static const char * const policy_s[] = {"LRU", "random", "MRULRU"};
+
+enum dirties_e { PR_LINE, PR_BYTE };
+static const char * const dirties_s[] = {"prline", "prbyte"};
+
+static struct cache_st {
+    struct line_st {
+	uint32_t tag;
+	unsigned last_access; // cycle of access, for eviction decisions
+	uint64_t valid_bytes; // Can actually be summarized with a single bit
+	uint64_t dirty_bytes;
+    } line[MAX_WAYS][MAX_SETS];
+    unsigned nways, nsetslg2, linesizelg2;
+    uint64_t nhits, nmiss, nfetches, ndirty_evicts, ndirty_evict_bytes;
+    enum policy_e policy;
+    enum dirties_e dirties;
+    uint64_t alllinebytes;
+} cache[MAX_CACHE_CONFIGS];
+
+static int num_caches = 0;
+
+static uint64_t load_count[8+9];
+
+static void make_cache(unsigned nways, unsigned nsetslg2, unsigned linesizelg2,
+		       enum policy_e policy, enum dirties_e dirties)
+{
+    if (num_caches >= MAX_CACHE_CONFIGS)
+	return;
+
+    struct cache_st *c = cache + num_caches;
+    c->nways = nways;
+    c->nsetslg2 = nsetslg2;
+    c->linesizelg2 = linesizelg2;
+    c->policy = policy;
+    c->dirties = dirties;
+    unsigned size = c->nways << (c->nsetslg2 + c->linesizelg2);
+    c->alllinebytes = (1LL << (1LL << c->linesizelg2)) - 1;
+    if (c->alllinebytes == 0) // Sigh, 1 << 64 doesn't make 0
+	c->alllinebytes = ~0ULL;
+
+    if (8192 <= size && size <= 16384) {
+	if (0)
+	    fprintf(stderr, "Cache Creation: config #%d: <%d,%d,%d>, %d KiB %6s %s\n",
+		    num_caches,
+		    nways, 1 << nsetslg2, 1 << linesizelg2,
+		    (c->nways << (c->nsetslg2 + c->linesizelg2)) / 1024,
+		    policy_s[policy], dirties_s[dirties]);
+	++num_caches;
+    }
+}
+
+static void dump_cache_stats(void)
+{
+    const int fetchoverhead = 24; // XXX Guess
+
+    for (int i = 0; i < num_caches; ++i) {
+	struct cache_st *c = cache + i;
+
+	fprintf(stderr, "Cache %3d %5d KiB %d ways %4d sets %3d Bline %6s %s %8ld hits, %8ld misses, %8ld Bfetches, %8ld (%8ld B) WB\n",
+	       i, c->nways << (c->nsetslg2 + c->linesizelg2), c->nways, 1 << c->nsetslg2, 1 << c->linesizelg2,
+		policy_s[c->policy], dirties_s[c->dirties],
+		c->nhits, c->nmiss, c->nfetches * (fetchoverhead + (1 << c->linesizelg2)), c->ndirty_evicts, c->ndirty_evict_bytes);
+    }
+
+    for (int i = 0; i < 8+9; ++i)
+	if (load_count[i])
+	    fprintf(stderr, "L%2d %8ld\n", i-8, load_count[i]);
+
+    fflush(stderr);
+}
+
+static void cache_sim(cpu_state_t *s, uint64_t address, bool isStore, int mem_access_size)
+{
+    if (debug_cache)
+    fprintf(stderr, "%s ACCESS address %08lx..%08lx\n", isStore ? "ST" : "LD",
+	   address, address + mem_access_size - 1);
+
+    for (int i = 0; i < num_caches; ++i) {
+	struct cache_st *c = cache + i;
+
+	unsigned cache_index = address                >> c->linesizelg2;
+	unsigned line_offset = address - (cache_index << c->linesizelg2);
+	unsigned cache_tag   = cache_index              >> c->nsetslg2;
+	unsigned cache_set   = cache_index - (cache_tag << c->nsetslg2);
+	uint64_t bytes_mask = ((1LL << mem_access_size) - 1) << line_offset;
+	int w;
+
+	if (debug_cache)
+	    fprintf(stderr, " Cache #%3d <%6x,%3x,%2x> ", i, cache_tag, cache_set, line_offset);
+
+	for (w = 0; w < c->nways; ++w)
+	    if (c->line[w][cache_set].tag == cache_tag)
+		break;
+
+	if (w < c->nways) {
+	    if (isStore && c->dirties == PR_BYTE ||
+		(c->line[w][cache_set].valid_bytes & bytes_mask) == bytes_mask) {
+
+		if (debug_cache)
+		    fprintf(stderr, "HIT way %d  (line V %lx, D %lx)\n",
+			    w,
+			    c->line[w][cache_set].valid_bytes,
+			    c->line[w][cache_set].dirty_bytes);
+
+		c->nhits += 1;
+		c->line[w][cache_set].last_access = s->counter;
+
+		if (isStore)
+		    switch (c->dirties) {
+		    case PR_LINE:
+			c->line[w][cache_set].dirty_bytes = c->alllinebytes;
+			break;
+		    case PR_BYTE:
+			c->line[w][cache_set].valid_bytes |= bytes_mask;
+			c->line[w][cache_set].dirty_bytes |= bytes_mask;
+			break;
+		    }
+
+		continue;
+	    }
+	}
+
+	/* We have a miss, so evict something (assume cache is full) */
+	c->nmiss += 1;
+	if (c->policy == RANDOM)
+	    w = random() % c->nways;
+	else {
+	    w = 0;
+	    for (int j = 1; j < c->nways; ++j)
+		if (c->line[j][cache_set].last_access < c->line[w][cache_set].last_access)
+		    w = j;
+	}
+
+	if (debug_cache)
+	    fprintf(stderr, "MISS evict way %d  (line V %lx, D %lx)\n",
+		    w,
+		    c->line[w][cache_set].valid_bytes,
+		    c->line[w][cache_set].dirty_bytes);
+
+	if (c->line[w][cache_set].dirty_bytes) {
+	    c->ndirty_evicts += 1;
+	    c->ndirty_evict_bytes += __builtin_popcount(c->line[w][cache_set].dirty_bytes);
+	    c->line[w][cache_set].dirty_bytes = 0;
+	}
+
+	c->line[w][cache_set].tag = cache_tag;
+	switch (c->policy) {
+	case MRULRU: 
+	    c->line[w][cache_set].last_access = 0; 
+	    break;
+	case LRU:
+	case RANDOM:
+	    c->line[w][cache_set].last_access = s->counter;
+	    break;
+	}
+
+	switch (c->dirties) {
+	case PR_BYTE:
+	    if (isStore) {
+		c->line[w][cache_set].valid_bytes = bytes_mask;
+		c->line[w][cache_set].dirty_bytes = bytes_mask;
+	    } else {
+		c->nfetches += 1;
+		c->line[w][cache_set].valid_bytes = c->alllinebytes;
+		c->line[w][cache_set].dirty_bytes = 0;
+	    }
+	    break;
+	case PR_LINE:
+	    c->nfetches += 1;
+	    c->line[w][cache_set].valid_bytes = c->alllinebytes;
+	    if (isStore)
+		c->line[w][cache_set].dirty_bytes = c->alllinebytes;
+	    break;
+	}
+    }
+}
+
 static uint64_t
 load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *error)
 {
@@ -1227,6 +1415,10 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *
     void *p;
     uint32_t iodata;
     int except = EXCP_LOAD_ACCESS_FAULT;
+    bool ifetch = false;
+
+    if (mem_access_size == 0)
+	mem_access_size = 4, ifetch = true;
 
     *error = MEMORY_SUCCESS;
 
@@ -1282,6 +1474,12 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *
         //XXX s->fatal_error = true;
         return 0;
     }
+
+    if (ifetch)
+	cache_sim(s, address, 0, abs(mem_access_size));
+
+    if (!ifetch)
+	load_count[mem_access_size + 8] += 1;
 
     switch (mem_access_size) {
     case -1: return *( int8_t  *)p;
@@ -1341,6 +1539,8 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, mem
         return;
     }
 
+    //cache_sim(s, address, 1, mem_access_size);
+
     switch (mem_access_size) {
     case 1: *(uint8_t  *)p = value; return;
     case 2: *(uint16_t *)p = value; return;
@@ -1371,6 +1571,27 @@ setup(cpu_state_t *state, elf_info_t *info)
     }
 
     fcntl(0, F_SETFL, fcntl(0, F_GETFL, 0) | O_NONBLOCK);
+
+
+    if (0)
+    for (unsigned setslg2 = 5; setslg2 <= 12; setslg2 += 1) 
+	for (unsigned ways = 1; ways <= 4; ++ways)
+	    for (unsigned linesizelg2 = 4; linesizelg2 <= 6; ++linesizelg2)
+		for (enum dirties_e d = PR_LINE; d <= PR_BYTE; ++d)
+		{
+		    make_cache(ways, setslg2, linesizelg2, LRU, d);
+		    make_cache(ways, setslg2, linesizelg2, RANDOM, d);
+		    make_cache(ways, setslg2, linesizelg2, MRULRU, d);
+		}
+
+    for (unsigned setslg2 = 5; setslg2 <= 18; setslg2 += 1) 
+	for (unsigned ways = 1; ways <= 1; ++ways)
+	    for (unsigned linesizelg2 = 4; linesizelg2 <= 6; ++linesizelg2)
+		for (enum dirties_e d = PR_LINE; d <= PR_LINE; ++d)
+		    make_cache(ways, setslg2, linesizelg2, RANDOM, d);
+
+
+    atexit(dump_cache_stats);
 }
 
 #if 1
