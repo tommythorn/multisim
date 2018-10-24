@@ -28,172 +28,140 @@
 #include "run_simple.h"
 #include "loadelf.h"
 
-/* Reservation station - a window over instructions are in program order
- * Life of an entry: invalid -> valid & not issued -> valid & issued -> invalid
- */
-typedef struct {
-    bool          valid;
-    bool          issued;
-    unsigned      number;
-    isa_decoded_t dec;
-    uint64_t      op_a, op_b;
-} reservation_station_t;
-
-#define WINDOW_SIZE 128
-
-/* Counting instructions in program order */
-unsigned fetch_number;
-unsigned issue_number;
-
-// XXX probably all state should be in "state" but I'm prototyping here...
-reservation_station_t reservation_stations[WINDOW_SIZE];
-// XXX hack to make -1 (ISA_NO_REG) a legal reference.
-bool scoreboard0[ISA_REGISTERS], *scoreboard = scoreboard0 + 1;
-
 bool
 step_sscalar_in_order(
     const arch_t *arch, cpu_state_t *state, cpu_state_t *costate,
     verbosity_t verbosity)
 {
+    static int cycle = 0;
+    uint64_t orig_r[32];
+    uint64_t pc       = state->pc;
     memory_exception_t error;
-    uint64_t *r = state->r;
-    int n_load = 0;
-    int n_store = 0;
+    uint32_t inst     = (uint32_t)arch->load(state, pc, 0 /* = ifetch */, &error);
 
-    /*
-     * Issue instructions as long as they can get their arguments.
-     * Issue at most one control flow instruction as we don't
-     * speculate yet.
-     */
+    if (error != MEMORY_SUCCESS)
+        return error == MEMORY_FATAL;
 
-    while ((fetch_number + 1) % WINDOW_SIZE != issue_number % WINDOW_SIZE) {
-        memory_exception_t error;
-        uint32_t i = arch->load(state, state->pc, 4, &error);
+    /* Co-simulate */
+    assert(pc == costate->pc);
+    step_simple(arch, costate, 0);
 
-        if (error == MEMORY_FATAL)
-            return true;
+    isa_decoded_t dec = arch->decode(pc, inst);
 
-        if (error != MEMORY_SUCCESS)
-            break;
+    if (verbosity & VERBOSE_TRACE)
+        memcpy(orig_r, state->r, sizeof orig_r);
 
-        isa_decoded_t dec = arch->decode(state->pc, i);
+    assert(dec.source_reg_a == ISA_NO_REG || dec.source_reg_a < ISA_REGISTERS);
+    assert(dec.source_reg_b == ISA_NO_REG || dec.source_reg_b < ISA_REGISTERS);
+    assert(dec.dest_reg     == ISA_NO_REG || dec.dest_reg     < ISA_REGISTERS);
+    assert(dec.dest_msr     == ISA_NO_REG || dec.dest_msr     < ISA_MSRS);
+    assert(dec.source_msr_a == ISA_NO_REG || dec.source_msr_a < ISA_MSRS);
 
-        n_load += dec.class == isa_inst_class_load;
-        n_store += dec.class == isa_inst_class_store;
+    uint64_t op_a     = state->r[dec.source_reg_a];
+    uint64_t op_b     = state->r[dec.source_reg_b];
+    uint64_t msr_a    = dec.source_msr_a != ISA_NO_REG ?
+        arch->read_msr(state, dec.source_msr_a) : 0;
 
-        /*
-         * Only fetch instructions that can safely be reordered.  It's
-         * safe to reorder arbitrary (non-IO) loads in the absence of
-         * stores, but two stores can't be reordered (without knowning
-         * if they can alias).
-         */
-        if (1 < n_store || 0 < n_store && 0 < n_load) {
-            if (verbosity)
-                printf(
-                    "Notice: bailing issue before we got "
-                    "%d loads and %d stores simultaneously\n",
-                    n_load, n_store);
-            break;
-        }
+    uint64_t atomic_load_addr = op_a;
 
-        if (!scoreboard[dec.dest_reg] ||
-            !scoreboard[dec.source_reg_a] ||
-            !scoreboard[dec.source_reg_b])
-            break;
+    if (dec.class == isa_inst_class_atomic)
+        op_a = arch->load(state, atomic_load_addr, dec.loadstore_size, &error);
 
-        int p = fetch_number % WINDOW_SIZE;
-        reservation_station_t *rs = reservation_stations + p;
-        rs->valid = true;
-        rs->issued = false;
-        rs->number = fetch_number;
-        rs->dec = dec;
-        rs->op_a = dec.source_reg_a == ISA_NO_REG ? 0 : r[dec.source_reg_a];
-        rs->op_b = dec.source_reg_b == ISA_NO_REG ? 0 : r[dec.source_reg_b];
+    if (error != MEMORY_SUCCESS)
+        return (error == MEMORY_FATAL);
 
-        ++fetch_number;
+    /// XXX hack for now: we need to know if an exception was fired, just like with loads
+    extern int exception_raised;
+    exception_raised = 0;
 
-        state->pc += 4;
-        state->pc = CANONICALIZE(state->pc);
+    isa_result_t res;
+    if (!dec.system)
+	res = arch->inst_exec(dec, op_a, op_b, msr_a);
+    else
+	res = arch->inst_exec_system(state, dec, op_a, op_b, msr_a);
+    res.result = CANONICALIZE(res.result);
 
-        if (dec.dest_reg != ISA_NO_REG)
-            scoreboard[dec.dest_reg] = false;
+    if (res.fatal_error)
+        return true;
 
-        ++state->n_issue;
+    if (exception_raised)
+        return false;
 
-        if (rs->dec.class == isa_inst_class_jump ||
-            rs->dec.class == isa_inst_class_branch ||
-            rs->dec.class == isa_inst_class_compjump)
-            // XXX continue fetching across unconditional branches
-            break;
-    }
-
-    assert(fetch_number != issue_number);
-
-    /*
-     * Execute all issued instructions. This assume everything can
-     * retire in a single cycle.
-     */
-
-    while (fetch_number % WINDOW_SIZE != issue_number % WINDOW_SIZE) {
-        reservation_station_t *rs = reservation_stations + issue_number++ % WINDOW_SIZE;
-        isa_result_t res = arch->inst_exec(rs->dec, rs->op_a, rs->op_b, 0);
+    switch (dec.class) {
+    case isa_inst_class_load:
+	res.load_addr = CANONICALIZE(res.load_addr);
+        res.result = arch->load(state, res.load_addr, dec.loadstore_size, &error);
         res.result = CANONICALIZE(res.result);
 
-        if (res.fatal_error)
-            return true;
+        if (error != MEMORY_SUCCESS)
+            return (error == MEMORY_FATAL);
 
-        switch (rs->dec.class) {
-        case isa_inst_class_atomic:
-        case isa_inst_class_illegal:
-            assert(0); // This would require a bit more thought
+        state->pc += 4;
+        break;
 
-        case isa_inst_class_alu:
-            break;
+    case isa_inst_class_store:
+	res.store_addr = CANONICALIZE(res.store_addr);
+	res.store_value = CANONICALIZE(res.store_value);
+        arch->store(state, res.store_addr, res.store_value, dec.loadstore_size, &error);
 
-        case isa_inst_class_load:
-            res.result = arch->load(state, res.result, rs->dec.loadstore_size, &error);
-            res.result = CANONICALIZE(res.result);
+        if (error != MEMORY_SUCCESS)
+            return (error == MEMORY_FATAL);
 
-            if (error != MEMORY_SUCCESS)
-                return (error == MEMORY_FATAL);
+        state->pc += 4;
+        break;
 
-            break;
+    case isa_inst_class_atomic:
+	// XXX ??
+	res.load_addr = CANONICALIZE(res.load_addr);
+        arch->store(state, atomic_load_addr, res.result, dec.loadstore_size, &error);
 
-        case isa_inst_class_store:
-            arch->store(state, res.result, res.store_value, rs->dec.loadstore_size, &error);
+        if (error != MEMORY_SUCCESS)
+            return (error == MEMORY_FATAL);
 
-            if (error != MEMORY_SUCCESS)
-                return (error == MEMORY_FATAL);
+        res.result = op_a;
+        state->pc += 4;
+        break;
 
-            break;
 
-        case isa_inst_class_branch:
-            if (res.branch_taken)
-                state->pc = rs->dec.jumpbranch_target;
-            break;
+    case isa_inst_class_branch:
+	dec.jumpbranch_target = CANONICALIZE(dec.jumpbranch_target);
+        state->pc = res.branch_taken ? dec.jumpbranch_target : state->pc + 4;
+        break;
 
-        case isa_inst_class_jump:
-            state->pc = rs->dec.jumpbranch_target;
-            break;
+    case isa_inst_class_jump:
+	dec.jumpbranch_target = CANONICALIZE(dec.jumpbranch_target);
+        state->pc = dec.jumpbranch_target;
+        break;
 
-        case isa_inst_class_compjump:
-            state->pc = rs->op_a;
-            break;
-        }
+    case isa_inst_class_compjump:
+	res.compjump_target = CANONICALIZE(res.compjump_target);
+        state->pc = res.compjump_target;
+        break;
 
-        if (rs->dec.dest_reg != ISA_NO_REG) {
-            r[rs->dec.dest_reg] = res.result;
-            scoreboard[rs->dec.dest_reg] = true;
-        }
-
-        isa_disass(arch, rs->dec, res);
-
-        /* Co-simulate */
-        assert(rs->dec.inst_addr == costate->pc);
-        step_simple(arch, costate, 0);
-        if (rs->dec.dest_reg != ISA_NO_REG)
-            assert(state->r[rs->dec.dest_reg] == costate->r[rs->dec.dest_reg]);
+    default:
+        state->pc += 4;
+        state->pc = CANONICALIZE(state->pc);
+        break;
     }
+
+    if (dec.dest_reg != ISA_NO_REG)
+        state->r[dec.dest_reg] = res.result;
+
+    if (dec.dest_msr != ISA_NO_REG)
+        arch->write_msr(state, dec.dest_msr, res.msr_result);
+
+    if (verbosity & VERBOSE_TRACE) {
+        if (dec.dest_reg != ISA_NO_REG && orig_r[dec.dest_reg] != res.result)
+            fprintf(stderr,"%d:r%d=0x%08"PRIx64"\n", cycle, dec.dest_reg,
+                    res.result);
+        fflush(stderr);
+        ++cycle;
+    }
+
+    if (dec.dest_reg != ISA_NO_REG)
+	assert(state->r[dec.dest_reg] == costate->r[dec.dest_reg]);
+
+    arch->tick(state);
 
     return false;
 }
@@ -205,8 +173,6 @@ void run_sscalar_io(int num_images, char *images[], verbosity_t verbosity)
     const arch_t *arch;
     elf_info_t info;
 
-    memset(scoreboard0, 1, sizeof scoreboard0);
-
     loadelfs(state->mem, num_images, images, &info);
     loadelfs(costate->mem, num_images, images, &info);
 
@@ -216,8 +182,6 @@ void run_sscalar_io(int num_images, char *images[], verbosity_t verbosity)
 
     int cycle;
     for (cycle = 0;; ++cycle) {
-        if (verbosity && (verbosity & VERBOSE_TRACE) == 0)
-            printf("Cycle #%d:\n", cycle);
         if (step_sscalar_in_order(arch, state, costate, verbosity))
             break;
     }

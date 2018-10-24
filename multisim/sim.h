@@ -29,7 +29,7 @@
 #include "memory.h"
 #include "arch.h"
 
-/* All the architectual state */
+/* All the common architectual state */
 struct cpu_state_st {
     memory_t       *mem;
 
@@ -48,6 +48,8 @@ struct cpu_state_st {
     uint64_t        n_issue;
 
     bool            fatal_error;
+    int             priv;   // Priviledge level
+    void           *arch_specific; // XXX Ok, C++ would have made this cleaner
 };
 
 typedef enum verbosity_e {

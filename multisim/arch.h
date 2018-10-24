@@ -101,6 +101,7 @@ typedef struct isa_decoded_st {
     isa_reg_t           dest_reg, source_reg_a, source_reg_b;
     isa_msr_t           dest_msr, source_msr_a;
     isa_inst_class_t    class;
+    bool                system; // system instruction are handled differently
     union {
         int                 loadstore_size;
         uint64_t            jumpbranch_target;
@@ -161,6 +162,12 @@ typedef struct isa_st {
 
     isa_result_t (*inst_exec)(isa_decoded_t dec, uint64_t op_a, uint64_t op_b,
                               uint64_t msr_a);
+
+    /* System instructions are serializing and must be executed by
+     * this, however they can affect system state.  */
+    isa_result_t (*inst_exec_system)(cpu_state_t *state, 
+				     isa_decoded_t dec, uint64_t op_a, uint64_t op_b,
+				     uint64_t msr_a);
 
     void (*disass_inst)(uint64_t pc, uint32_t inst, char *buf, size_t buf_size);
 

@@ -48,23 +48,14 @@
 
 static const bool debug_cache = false;
 
-// 100 MHz -> 1 / 100e6 = 1e-8 s = 1e-2 us
-const double us_per_cycle = 1e-2;
-
-static int debug   = 0;
-static int info    = 0;
-static int error   = 1;
+static const int debug   = 0;
+static const int info    = 0;
+static const int error   = 1;
 
 #define DEBUG(...)   ({ if (debug)  fprintf(stderr, __VA_ARGS__); })
 #define INFO(...)    ({ if (info)   fprintf(stderr, __VA_ARGS__); })
 #define IOINFO(...)  ({ if (ioinfo) fprintf(stderr, __VA_ARGS__); })
 #define ERROR(...)   ({ if (error)  fprintf(stderr, __VA_ARGS__); })
-
-verbosity_t verbosity_override = 0;
-
-int leaf_allocations = 0;
-int previous_stack_delta = 0;
-int max_leaf_allocation = 0;
 
 static const char *csr_name[0x1000] = {
     [CSR_USTATUS] = "ustatus",
@@ -133,18 +124,7 @@ static const uint64_t csr_mask[0x1000] = {
     [CSR_MEPC]          = -4LL,
 };
 
-static uint64_t csr[0x1000];
-
-static unsigned priv = 3; // Current priviledge level M=3, S=1, U=0
-
-#define HTIF_CMD_READ       (0x00UL)
-#define HTIF_CMD_WRITE      (0x01UL)
-#define HTIF_CMD_IDENTITY   (0xFFUL)
-
-const uint64_t memory_start = 0x00000000;
-const uint64_t memory_size  = 128 * 1024;
-
-const char *reg_name[32] = {
+static const char *reg_name[32] = {
     //  0     1     2     3     4     5     6     7     8     9    10    11
     "zero", "ra", "sp", "gp", "tp", "t0", "t1", "t2", "s0", "s1", "a0", "a1",
     // 12    13    14    15    16    17    18    19    20    21    22    23
@@ -153,7 +133,7 @@ const char *reg_name[32] = {
     "s8",   "s9","s10","s11", "t3", "t4", "t5", "t6"
 };
 
-const char *opcode_name[32] = {
+static const char *opcode_name[32] = {
     "LOAD", "LOAD_FP", "CUSTOM0", "MISC_MEM", "OP_IMM", "AUIPC", "OP_IMM_32", "EXT0",
     "STORE", "STORE_FP", "CUSTOM1", "AMO", "OP", "LUI", "OP_32", "EXT1",
     "MADD", "MSUB", "NMSUB", "NMADD", "OP_FP", "RES1", "CUSTOM2", "EXT2",
@@ -195,66 +175,33 @@ const char *opcode_amo_name[32] = {
     [SC]        = "sc",
 };
 
-/*
-static const char *status_field_name[] = {
-    "S",
-    "PS",
-    "EI",
-    "PEI",
-    "EF",
-    "U64",
-    "S64",
-    "VM",
-    "",
-    "IM",
-    "IP",
-};
+#define MAX_WAYS 4
+#define MAX_SETS 4096
+#define MAX_CACHE_CONFIGS 0 // (4*3*3*5*10)
+enum policy_e { LRU, RANDOM, MRULRU };
+static const char * const policy_s[] = {"LRU", "random", "MRULRU"};
+enum dirties_e { PR_LINE, PR_BYTE };
+static const char * const dirties_s[] = {"prline", "prbyte"};
 
-static int status_field_size[] = {
-    1,
-    1,
-    1,
-    1,
-    1,
-    1,
-    1,
-    1,
-    8,
-    8,
-    8,
-    0,
-};
+typedef struct riscv_state_st {
+    struct cache_st {
+	struct line_st {
+	    uint32_t tag;
+	    unsigned last_access; // cycle of access, for eviction decisions
+	    uint64_t valid_bytes; // Can actually be summarized with a single bit
+	    uint64_t dirty_bytes;
+	} line[MAX_WAYS][MAX_SETS];
+	unsigned nways, nsetslg2, linesizelg2;
+	uint64_t nhits, nmiss, nfetches, ndirty_evicts, ndirty_evict_bytes;
+	enum policy_e policy;
+	enum dirties_e dirties;
+	uint64_t alllinebytes;
+    } cache[MAX_CACHE_CONFIGS];
+    int num_caches;
+    uint64_t load_count[8+9];
+} riscv_state_t;
 
-static void print_status(uint32_t status)
-{
-    for (int i = 0; status_field_size[i];
-         ++i, status >>= status_field_size[i]) {
-
-        if (!status_field_name[i][0])
-            continue;
-
-        int v = status & ((1 << status_field_size[i]) - 1);
-
-        if (status_field_size[i] == 1) {
-            if (v)
-                printf(" %s", status_field_name[i]);
-        } else
-            printf(" %s=0x%x", status_field_name[i], v);
-    }
-}
-*/
-
-int disk_fd;
-
-static void dump_cache_stats(void);
-
-void set_interrupt(int irq, int val)
-{
-    if (val)
-        csr[CSR_MIP] |= 1U << (24+irq);
-    else
-        csr[CSR_MIP] &= ~(1U << (24+irq));
-}
+static void dump_cache_stats(riscv_state_t *);
 
 static const char *
 csr_fmt(unsigned csrno)
@@ -434,8 +381,6 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
         // Sign-extend:
         imm = (imm << 11) >> 11;
 
-        assert(-i.uj.imm20 == (imm < 0));
-
         uint64_t addr = pc + imm;
 
         if (i.uj.rd == 0)
@@ -462,7 +407,8 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
           case URET:   snprintf(buf, buf_size, "%-11s", "uret"); return;
           case SRET:   snprintf(buf, buf_size, "%-11s", "sret"); return;
           case MRET:   snprintf(buf, buf_size, "%-11s", "mret"); return;
-          default: assert(0);
+          default:     
+	      goto unhandled;
           }
           break;
 
@@ -477,7 +423,6 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
           } else
               snprintf(buf, buf_size, "%-11s%s,%s,%s",  "csrrs", N[i.i.rd], csr_name[i.i.imm11_0 & 0xFFFU], N[i.i.rs1]);
           return;
-          break;
 
       case CSRRSI: snprintf(buf, buf_size, "%-11s%s,%s,%d", "csrrsi", N[i.i.rd], csr_fmt(i.i.imm11_0 & 0xFFFU), i.i.rs1); return;
       case CSRRC:  snprintf(buf, buf_size, "%-11s%s,%s,%s", "csrrc",  N[i.i.rd], csr_fmt(i.i.imm11_0 & 0xFFFU), N[i.i.rs1]); return;
@@ -486,7 +431,7 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
       case CSRRWI: snprintf(buf, buf_size, "%-11s%s,%s,%d", "csrrwi", N[i.i.rd], csr_fmt(i.i.imm11_0 & 0xFFFU), i.i.rs1); return;
 
       default:
-          assert(0); // XXX more to implement
+          goto unhandled;
       }
       break;
 
@@ -521,6 +466,7 @@ decode(uint64_t inst_addr, uint32_t inst)
     dec.dest_msr     = ISA_NO_REG;
     dec.source_msr_a = ISA_NO_REG;
     dec.class        = isa_inst_class_illegal;
+    dec.system       = false;
 
     switch (i.r.opcode) {
     case LOAD:
@@ -602,8 +548,9 @@ decode(uint64_t inst_addr, uint32_t inst)
     case OP_32:
         /* RV32M */
         if (i.r.funct7 != 1)
-            assert((i.r.funct3 == ADDSUB || i.r.funct3 == SR_) && i.r.funct7 == 0x20 ||
-                   i.r.funct7 == 0x00);
+            if (!((i.r.funct3 == ADDSUB || i.r.funct3 == SR_) && i.r.funct7 == 0x20 ||
+		  i.r.funct7 == 0x00))
+		goto unhandled;
         dec.dest_reg     = i.r.rd;
         dec.source_reg_a = i.r.rs1;
         dec.source_reg_b = i.r.rs2;
@@ -641,8 +588,8 @@ decode(uint64_t inst_addr, uint32_t inst)
         break;
     }
 
-
-  case SYSTEM:
+    case SYSTEM:
+      dec.system = true;;
       switch (i.r.funct3) {
       case ECALLEBREAK:
           switch (i.i.imm11_0) {
@@ -660,6 +607,7 @@ decode(uint64_t inst_addr, uint32_t inst)
           if (i.i.rs1 == 0) {
               dec.source_msr_a = 0xFFF & (unsigned) i.i.imm11_0;
               dec.dest_reg     = i.i.rd;
+	      dec.class        = isa_inst_class_alu;
               break;
           }
           /* Fall-through */
@@ -671,6 +619,7 @@ decode(uint64_t inst_addr, uint32_t inst)
           dec.source_msr_a = 0xFFF & (unsigned) i.i.imm11_0;
           dec.dest_msr     = 0xFFF & (unsigned) i.i.imm11_0;
           dec.dest_reg     = i.i.rd;
+	  dec.class        = isa_inst_class_alu;
           break;
 
       case CSRRW:
@@ -678,13 +627,14 @@ decode(uint64_t inst_addr, uint32_t inst)
       case CSRRWI:
           dec.dest_msr     = 0xFFF & (unsigned) i.i.imm11_0;
           dec.dest_reg     = i.i.rd;
+	  dec.class        = isa_inst_class_alu;
 
           if (i.i.rd)
               dec.source_msr_a = 0xFFF & (unsigned) i.i.imm11_0;
           break;
 
       default:
-          assert(0);
+          goto unhandled;
       }
       break;
 
@@ -995,6 +945,31 @@ inst_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_
         res.result = dec.inst_addr + 4;
         return res;
 
+    default:
+        warn("Opcode %s exec not implemented, inst %016"PRIx64":%08x "
+             "i{%x,%s,%x,%s,%s,%x}\n",
+             opcode_name[i.r.opcode], dec.inst_addr, i.raw,
+             i.i.imm11_0, reg_name[i.r.rs1], i.r.funct3,
+             reg_name[i.r.rd],
+             opcode_name[i.r.opcode], i.r.opext);
+        res.fatal_error = true;
+        res.result = 0;
+        return res;
+    }
+
+    res.result = -1;
+    return res;
+}
+
+static isa_result_t
+inst_exec_system(cpu_state_t *s, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
+{
+    int64_t op_a      = (int64_t) op_a_u;
+    inst_t i          = { .raw = dec.inst };
+    isa_result_t res  = { 0 };
+    res.fatal_error   = false;
+
+    switch (i.r.opcode) {
     case SYSTEM:
         res.result = msr_a; // XXX is this needed?
 
@@ -1002,9 +977,9 @@ inst_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_
         case ECALLEBREAK:
             switch (i.i.imm11_0) {
             case ECALL: {
-                csr[CSR_MCAUSE] = EXCP_UMODE_CALL + priv;
-                csr[CSR_MEPC] = dec.inst_addr;
-                csr[CSR_MTVAL] = 0;
+                s->msr[CSR_MCAUSE] = EXCP_UMODE_CALL + s->priv;
+                s->msr[CSR_MEPC] = dec.inst_addr;
+                s->msr[CSR_MTVAL] = 0;
 
                 /* When a trap is taken from privilege mode y into privilege
                    mode x, xPIE is set to the value of xIE; xIE is set to 0;
@@ -1013,41 +988,41 @@ inst_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_
                    Here x = M, thus MPIE = MIE; MIE = 0; MPP = priv
                 */
 
-                BF_SET(csr[CSR_MSTATUS], CSR_STATUS_MPIE_BF,
-                       BF_GET(csr[CSR_MSTATUS], CSR_STATUS_MIE_BF));
-                BF_SET(csr[CSR_MSTATUS], CSR_STATUS_MIE_BF, 0);
-                BF_SET(csr[CSR_MSTATUS], CSR_STATUS_MPP_BF, priv);
-                res.compjump_target = csr[CSR_MTVEC];
-                priv = 3;
+                BF_SET(s->msr[CSR_MSTATUS], CSR_STATUS_MPIE_BF,
+                       BF_GET(s->msr[CSR_MSTATUS], CSR_STATUS_MIE_BF));
+                BF_SET(s->msr[CSR_MSTATUS], CSR_STATUS_MIE_BF, 0);
+                BF_SET(s->msr[CSR_MSTATUS], CSR_STATUS_MPP_BF, s->priv);
+                res.compjump_target = s->msr[CSR_MTVEC];
+                s->priv = 3;
                 return res;
             }
 
             case MRET:
                 /* Copy down MPIE to MIE and set MPIE */
-                BF_SET(csr[CSR_MSTATUS], CSR_STATUS_MIE_BF,
-                       BF_GET(csr[CSR_MSTATUS], CSR_STATUS_MPIE_BF));
-                BF_SET(csr[CSR_MSTATUS], CSR_STATUS_MPIE_BF, ~0);
+                BF_SET(s->msr[CSR_MSTATUS], CSR_STATUS_MIE_BF,
+                       BF_GET(s->msr[CSR_MSTATUS], CSR_STATUS_MPIE_BF));
+                BF_SET(s->msr[CSR_MSTATUS], CSR_STATUS_MPIE_BF, ~0);
 
-                priv = BF_GET(csr[CSR_MSTATUS], CSR_STATUS_MPP_BF);
-                BF_SET(csr[CSR_MSTATUS], CSR_STATUS_MPP_BF, 0);
-                res.compjump_target = csr[CSR_MEPC];
+                s->priv = BF_GET(s->msr[CSR_MSTATUS], CSR_STATUS_MPP_BF);
+                BF_SET(s->msr[CSR_MSTATUS], CSR_STATUS_MPP_BF, 0);
+                res.compjump_target = s->msr[CSR_MEPC];
                 return res;
 
             case SRET:
                 /* Copy down SPIE to SIE and set SPIE */
-                BF_SET(csr[CSR_MSTATUS], CSR_STATUS_SPIE_BF,
-                       BF_GET(csr[CSR_MSTATUS], CSR_STATUS_SPIE_BF));
-                BF_SET(csr[CSR_MSTATUS], CSR_STATUS_SPIE_BF, ~0);
+                BF_SET(s->msr[CSR_MSTATUS], CSR_STATUS_SPIE_BF,
+                       BF_GET(s->msr[CSR_MSTATUS], CSR_STATUS_SPIE_BF));
+                BF_SET(s->msr[CSR_MSTATUS], CSR_STATUS_SPIE_BF, ~0);
 
-                priv = BF_GET(csr[CSR_MSTATUS], CSR_STATUS_SPP_BF);
-                BF_SET(csr[CSR_MSTATUS], CSR_STATUS_SPP_BF, 0);
-                res.compjump_target = csr[CSR_SEPC];
+                s->priv = BF_GET(s->msr[CSR_MSTATUS], CSR_STATUS_SPP_BF);
+                BF_SET(s->msr[CSR_MSTATUS], CSR_STATUS_SPP_BF, 0);
+                res.compjump_target = s->msr[CSR_SEPC];
                 return res;
 
             default:
                 break;
             }
-	    dump_cache_stats();
+	    dump_cache_stats((riscv_state_t *)s->arch_specific);
             assert(0);
 
         case CSRRS:  res.msr_result = msr_a |  op_a;    return res;
@@ -1078,6 +1053,7 @@ inst_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_
     return res;
 }
 
+
 static isa_result_t
 inst_exec32(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
 {
@@ -1097,20 +1073,20 @@ static void raise(cpu_state_t *s, uint64_t cause)
 {
 #if 0
     if (cause & (1ULL << 63)) {
-        int intr_pend = BF_GET(csr[CSR_STATUS], CSR_STATUS_IP_BF);
-        int intr_mask = BF_GET(csr[CSR_STATUS], CSR_STATUS_IM_BF);
+        int intr_pend = BF_GET(s->msr[CSR_STATUS], CSR_STATUS_IP_BF);
+        int intr_mask = BF_GET(s->msr[CSR_STATUS], CSR_STATUS_IM_BF);
 
         intr_pend |= 1 << (cause & 7);
 
-        BF_SET(csr[CSR_STATUS], CSR_STATUS_IP_BF, intr_pend);
+        BF_SET(s->msr[CSR_STATUS], CSR_STATUS_IP_BF, intr_pend);
 
-        if (!BF_GET(csr[CSR_STATUS], CSR_STATUS_EI_BF) ||
+        if (!BF_GET(s->msr[CSR_STATUS], CSR_STATUS_EI_BF) ||
             (intr_pend & intr_mask) == 0) {
 
             /*
             ERROR("  Interrupt %d ignored (for now) as it's disabled\n", (int) cause);
             ERROR("    (EI = %d IP = 0x%x, IM = 0x%x, pc = %"PRIx64")\n",
-                   BF_GET(csr[CSR_STATUS], CSR_STATUS_EI_BF),
+                   BF_GET(s->msr[CSR_STATUS], CSR_STATUS_EI_BF),
                   intr_pend, intr_mask, s->pc);
 
             verbosity_override |= VERBOSE_DISASS;
@@ -1122,10 +1098,10 @@ static void raise(cpu_state_t *s, uint64_t cause)
 
     INFO("  Raised 0x%"PRIx64"\n", cause);
 
-    csr[CSR_EPC] = s->pc;
-    s->pc = csr[CSR_EVEC];
+    s->msr[CSR_EPC] = s->pc;
+    s->pc = s->msr[CSR_EVEC];
     // XXX not correct in case of instruction fetches
-    csr[CSR_CAUSE] = cause;
+    s->msr[CSR_CAUSE] = cause;
     push_priv();
 
     exception_raised = 1;
@@ -1139,15 +1115,15 @@ static void tick(cpu_state_t *s)
 {
     s->counter += 1;
     // XXX for now, an instruction per tick
-    csr[CSR_INSTRET] = (uint32_t) (csr[CSR_INSTRET] + 1);
-    csr[CSR_CYCLE]   = (uint32_t) (csr[CSR_CYCLE]   + 1);
+    s->msr[CSR_INSTRET] = (uint32_t) (s->msr[CSR_INSTRET] + 1);
+    s->msr[CSR_CYCLE]   = (uint32_t) (s->msr[CSR_CYCLE]   + 1);
 
 #if 0
     int pending =
-        BF_GET(csr[CSR_STATUS], CSR_STATUS_IP_BF) &
-        BF_GET(csr[CSR_STATUS], CSR_STATUS_IM_BF);
+        BF_GET(s->msr[CSR_STATUS], CSR_STATUS_IP_BF) &
+        BF_GET(s->msr[CSR_STATUS], CSR_STATUS_IM_BF);
 
-    if (BF_GET(csr[CSR_STATUS], CSR_STATUS_EI_BF) && pending) {
+    if (BF_GET(s->msr[CSR_STATUS], CSR_STATUS_EI_BF) && pending) {
         if (0)
             ERROR("\npc=%"PRIx64" status write of EI enables these pending (mask) 0x%x (priority %d)\n",
               s->pc,
@@ -1159,7 +1135,7 @@ static void tick(cpu_state_t *s)
 
 static uint64_t read_msr(cpu_state_t *s, unsigned csrno)
 {
-    if (priv < ((csrno >> 8) & 3)) {
+    if (s->priv < ((csrno >> 8) & 3)) {
         ERROR("  Illegal Read of CSR %3x\n", csrno);
         raise(s, EXCP_INST_ILLEGAL);
         return 0;
@@ -1175,92 +1151,63 @@ static uint64_t read_msr(cpu_state_t *s, unsigned csrno)
     }
 
     case CSR_CYCLE:
-        INFO("  Read  CSR %s -> %"PRIx64"\n", csr_name[csrno], csr[csrno]);
-        return csr[csrno];
+        INFO("  Read  CSR %s -> %"PRIx64"\n", csr_name[csrno], s->msr[csrno]);
+        return s->msr[csrno];
 
     default:
-        DEBUG("  Read  CSR %s -> %"PRIx64"\n", csr_name[csrno], csr[csrno]);
-        return csr[csrno];
+        DEBUG("  Read  CSR %s -> %"PRIx64"\n", csr_name[csrno], s->msr[csrno]);
+        return s->msr[csrno];
     }
 }
 
 static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value)
 {
-    if (priv < ((csrno >> 8) & 3) || (csrno & 0xc00) == 0xc00) {
+    if (s->priv < ((csrno >> 8) & 3) || (csrno & 0xc00) == 0xc00) {
         ERROR("  Illegal Write of CSR %3x\n", csrno);
         raise(s, EXCP_INST_ILLEGAL);
         return;
     }
 
-    csr[csrno] = value & csr_mask[csrno] | csr[csrno] & ~csr_mask[csrno];
+    s->msr[csrno] = value & csr_mask[csrno] | s->msr[csrno] & ~csr_mask[csrno];
 
-    DEBUG("  Write CSR %s <- %"PRIx64"\n", csr_name[csrno], csr[csrno]);
+    DEBUG("  Write CSR %s <- %"PRIx64"\n", csr_name[csrno], s->msr[csrno]);
 
     if (csrno == CSR_CYCLE)
-        ERROR("  Write CSR %s <- %"PRIx64"\n", csr_name[csrno], csr[csrno]);
+        ERROR("  Write CSR %s <- %"PRIx64"\n", csr_name[csrno], s->msr[csrno]);
 
-    if (value & ~csr[csrno])
-        DEBUG("    NB: bits %"PRIx64" are masked off\n", value & ~csr[csrno]);
+    if (value & ~s->msr[csrno])
+        DEBUG("    NB: bits %"PRIx64" are masked off\n", value & ~s->msr[csrno]);
 
     switch (csrno) {
     default:
         break;
 
     case CSR_FFLAGS:
-        /* FCSR[7:0] <---> {FRM[3:0], FFLAGS[4:0]} */
-        BF_SET(csr[CSR_FCSR], 4:0, BF_GET(csr[CSR_FFLAGS], 4:0));
+        /* FS->MSR[7:0] <---> {FRM[3:0], FFLAGS[4:0]} */
+        BF_SET(s->msr[CSR_FCSR], 4:0, BF_GET(s->msr[CSR_FFLAGS], 4:0));
         break;
 
     case CSR_FRM:
-        /* FCSR[7:0] <---> {FRM[2:0], FFLAGS[4:0]} */
-        BF_SET(csr[CSR_FCSR], 7:5, BF_GET(csr[CSR_FRM], 2:0));
+        /* FS->MSR[7:0] <---> {FRM[2:0], FFLAGS[4:0]} */
+        BF_SET(s->msr[CSR_FCSR], 7:5, BF_GET(s->msr[CSR_FRM], 2:0));
         break;
 
     case CSR_FCSR:
-        /* FCSR[7:0] <---> {FRM[3:0], FFLAGS[4:0]} */
-        BF_SET(csr[CSR_FFLAGS], 4:0, BF_GET(csr[CSR_FCSR], 4:0));
-        BF_SET(csr[CSR_FRM],    2:0, BF_GET(csr[CSR_FCSR], 7:5));
+        /* FS->MSR[7:0] <---> {FRM[3:0], FFLAGS[4:0]} */
+        BF_SET(s->msr[CSR_FFLAGS], 4:0, BF_GET(s->msr[CSR_FCSR], 4:0));
+        BF_SET(s->msr[CSR_FRM],    2:0, BF_GET(s->msr[CSR_FCSR], 7:5));
         break;
     }
 }
 
-bool debug_vm = false; // to be enabled in the debugger
-
-#define MAX_WAYS 4
-#define MAX_SETS 4096
-#define MAX_CACHE_CONFIGS 0 // (4*3*3*5*10)
-
-enum policy_e { LRU, RANDOM, MRULRU };
-static const char * const policy_s[] = {"LRU", "random", "MRULRU"};
-
-enum dirties_e { PR_LINE, PR_BYTE };
-static const char * const dirties_s[] = {"prline", "prbyte"};
-
-static struct cache_st {
-    struct line_st {
-	uint32_t tag;
-	unsigned last_access; // cycle of access, for eviction decisions
-	uint64_t valid_bytes; // Can actually be summarized with a single bit
-	uint64_t dirty_bytes;
-    } line[MAX_WAYS][MAX_SETS];
-    unsigned nways, nsetslg2, linesizelg2;
-    uint64_t nhits, nmiss, nfetches, ndirty_evicts, ndirty_evict_bytes;
-    enum policy_e policy;
-    enum dirties_e dirties;
-    uint64_t alllinebytes;
-} cache[MAX_CACHE_CONFIGS];
-
-static int num_caches = 0;
-
-static uint64_t load_count[8+9];
-
-static void make_cache(unsigned nways, unsigned nsetslg2, unsigned linesizelg2,
+static void make_cache(riscv_state_t *s,
+		       unsigned nways, unsigned nsetslg2, unsigned linesizelg2,
 		       enum policy_e policy, enum dirties_e dirties)
 {
-    if (num_caches >= MAX_CACHE_CONFIGS)
+    if (s->num_caches >= MAX_CACHE_CONFIGS)
 	return;
 
-    struct cache_st *c = cache + num_caches;
+    struct cache_st *c = s->cache + s->num_caches;
     c->nways = nways;
     c->nsetslg2 = nsetslg2;
     c->linesizelg2 = linesizelg2;
@@ -1274,42 +1221,46 @@ static void make_cache(unsigned nways, unsigned nsetslg2, unsigned linesizelg2,
     if (8192 <= size && size <= 16384) {
 	if (0)
 	    fprintf(stderr, "Cache Creation: config #%d: <%d,%d,%d>, %d KiB %6s %s\n",
-		    num_caches,
+		    s->num_caches,
 		    nways, 1 << nsetslg2, 1 << linesizelg2,
 		    (c->nways << (c->nsetslg2 + c->linesizelg2)) / 1024,
 		    policy_s[policy], dirties_s[dirties]);
-	++num_caches;
+	++s->num_caches;
     }
 }
 
-static void dump_cache_stats(void)
+static void dump_cache_stats(riscv_state_t *s)
 {
     const int fetchoverhead = 24; // XXX Guess
 
-    for (int i = 0; i < num_caches; ++i) {
-	struct cache_st *c = cache + i;
+    for (int i = 0; i < s->num_caches; ++i) {
+	struct cache_st *c = s->cache + i;
 
-	fprintf(stderr, "Cache %3d %5d KiB %d ways %4d sets %3d Bline %6s %s %8ld hits, %8ld misses, %8ld Bfetches, %8ld (%8ld B) WB\n",
-	       i, c->nways << (c->nsetslg2 + c->linesizelg2), c->nways, 1 << c->nsetslg2, 1 << c->linesizelg2,
+	fprintf(stderr, 
+		"Cache %3d %5d KiB %d ways %4d sets %3d Bline %6s %s %8ld hits, %8ld misses, %8ld Bfetches, %8ld (%8ld B) WB\n",
+		i, c->nways << (c->nsetslg2 + c->linesizelg2), c->nways, 1 << c->nsetslg2, 1 << c->linesizelg2,
 		policy_s[c->policy], dirties_s[c->dirties],
 		c->nhits, c->nmiss, c->nfetches * (fetchoverhead + (1 << c->linesizelg2)), c->ndirty_evicts, c->ndirty_evict_bytes);
     }
 
+    if (0)
     for (int i = 0; i < 8+9; ++i)
-	if (load_count[i])
-	    fprintf(stderr, "L%2d %8ld\n", i-8, load_count[i]);
+	if (s->load_count[i])
+	    fprintf(stderr, "L%2d %8ld\n", i-8, s->load_count[i]);
 
     fflush(stderr);
 }
 
-static void cache_sim(cpu_state_t *s, uint64_t address, bool isStore, int mem_access_size)
+static void cache_sim(cpu_state_t *cpu, uint64_t address, bool isStore, int mem_access_size)
 {
+    riscv_state_t *s = cpu->arch_specific;
+
     if (debug_cache)
     fprintf(stderr, "%s ACCESS address %08lx..%08lx\n", isStore ? "ST" : "LD",
 	   address, address + mem_access_size - 1);
 
-    for (int i = 0; i < num_caches; ++i) {
-	struct cache_st *c = cache + i;
+    for (int i = 0; i < s->num_caches; ++i) {
+	struct cache_st *c = s->cache + i;
 
 	unsigned cache_index = address                >> c->linesizelg2;
 	unsigned line_offset = address - (cache_index << c->linesizelg2);
@@ -1336,7 +1287,7 @@ static void cache_sim(cpu_state_t *s, uint64_t address, bool isStore, int mem_ac
 			    c->line[w][cache_set].dirty_bytes);
 
 		c->nhits += 1;
-		c->line[w][cache_set].last_access = s->counter;
+		c->line[w][cache_set].last_access = cpu->counter;
 
 		if (isStore)
 		    switch (c->dirties) {
@@ -1383,7 +1334,7 @@ static void cache_sim(cpu_state_t *s, uint64_t address, bool isStore, int mem_ac
 	    break;
 	case LRU:
 	case RANDOM:
-	    c->line[w][cache_set].last_access = s->counter;
+	    c->line[w][cache_set].last_access = cpu->counter;
 	    break;
 	}
 
@@ -1429,16 +1380,16 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *
     if (mem_access_size == 44)
         mem_access_size = 4, except = EXCP_INST_ADDR, access = BF_PACK(1, PTE_UX);
 
-    if (BF_GET(csr[CSR_STATUS], CSR_STATUS_S_BF))
+    if (BF_GET(s->msr[CSR_STATUS], CSR_STATUS_S_BF))
         access <<= 3;
 
     *error = MEMORY_SUCCESS;
 
-    if (BF_GET(csr[CSR_STATUS], CSR_STATUS_VM_BF)) {
+    if (BF_GET(s->msr[CSR_STATUS], CSR_STATUS_VM_BF)) {
         address = virt2phys(s, address, access, error);
         if (*error != MEMORY_SUCCESS) {
             raise(s, except);
-            csr[CSR_BADVADDR] = address;
+            s->msr[CSR_BADVADDR] = address;
 
             return 0;
         }
@@ -1469,7 +1420,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *
 
     if (!p) {
         raise(s, except);
-        csr[CSR_STVAL] = address; /// XXX pass it into raise()
+        s->msr[CSR_STVAL] = address; /// XXX pass it into raise()
         ERROR("  load from illegal physical memory %08"PRIx64"\n", address);
         //XXX s->fatal_error = true;
         return 0;
@@ -1479,7 +1430,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *
 	cache_sim(s, address, 0, abs(mem_access_size));
 
     if (!ifetch)
-	load_count[mem_access_size + 8] += 1;
+	((riscv_state_t *)s->arch_specific)->load_count[mem_access_size + 8] += 1;
 
     switch (mem_access_size) {
     case -1: return *( int8_t  *)p;
@@ -1508,14 +1459,14 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, mem
     }
 
 #if 0
-    if (BF_GET(csr[CSR_STATUS], CSR_STATUS_S_BF))
+    if (BF_GET(s->msr[CSR_STATUS], CSR_STATUS_S_BF))
         access <<= 3;
 
-    if (BF_GET(csr[CSR_STATUS], CSR_STATUS_VM_BF)) {
+    if (BF_GET(s->msr[CSR_STATUS], CSR_STATUS_VM_BF)) {
         address = virt2phys(s, address, access, error);
         if (*error != MEMORY_SUCCESS) {
             raise(s, EXCP_STORE_FAULT);
-            csr[CSR_BADVADDR] = address;
+            s->msr[CSR_BADVADDR] = address;
             return;
         }
     }
@@ -1534,7 +1485,7 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, mem
 
     if (!p) {
         raise(s, EXCP_STORE_ACCESS_FAULT);
-        csr[CSR_STVAL] = address; // XXX shouldn't that depend on priv?
+        s->msr[CSR_STVAL] = address; // XXX shouldn't that depend on priv?
         ERROR("  store to illegal physical memory %08"PRIx64"\n", address);
         return;
     }
@@ -1555,20 +1506,26 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, mem
 static void
 setup(cpu_state_t *state, elf_info_t *info)
 {
+    riscv_state_t *s = calloc(1, sizeof (riscv_state_t));
+    state->arch_specific = s;
     memset(state->r, 0, sizeof state->r);
     state->pc = info->program_entry;
     if (!info->is_64bit)
         state->pc = (int32_t)state->pc;
 
+    state->priv = 3; // M
+
     // XXX Hack for Dhrystone
     memory_ensure_mapped_range(state->mem, 0x0, 256*1024-1);
     state->r[2] = 0x10000;
 
+#if 0
     if (disk_image) {
         disk_fd = open(disk_image, O_RDWR);
         if (disk_fd < 0)
             perror(disk_image), exit(1);
     }
+#endif
 
     fcntl(0, F_SETFL, fcntl(0, F_GETFL, 0) | O_NONBLOCK);
 
@@ -1579,19 +1536,16 @@ setup(cpu_state_t *state, elf_info_t *info)
 	    for (unsigned linesizelg2 = 4; linesizelg2 <= 6; ++linesizelg2)
 		for (enum dirties_e d = PR_LINE; d <= PR_BYTE; ++d)
 		{
-		    make_cache(ways, setslg2, linesizelg2, LRU, d);
-		    make_cache(ways, setslg2, linesizelg2, RANDOM, d);
-		    make_cache(ways, setslg2, linesizelg2, MRULRU, d);
+		    make_cache(s, ways, setslg2, linesizelg2, LRU, d);
+		    make_cache(s, ways, setslg2, linesizelg2, RANDOM, d);
+		    make_cache(s, ways, setslg2, linesizelg2, MRULRU, d);
 		}
 
     for (unsigned setslg2 = 5; setslg2 <= 18; setslg2 += 1) 
 	for (unsigned ways = 1; ways <= 1; ++ways)
 	    for (unsigned linesizelg2 = 4; linesizelg2 <= 6; ++linesizelg2)
 		for (enum dirties_e d = PR_LINE; d <= PR_LINE; ++d)
-		    make_cache(ways, setslg2, linesizelg2, RANDOM, d);
-
-
-    atexit(dump_cache_stats);
+		    make_cache(s, ways, setslg2, linesizelg2, RANDOM, d);
 }
 
 #if 1
@@ -1602,6 +1556,7 @@ const arch_t arch_riscv32 = {
     .setup = setup,
     .decode = decode,
     .inst_exec = inst_exec32,
+    .inst_exec_system = inst_exec_system,
     .disass_inst = disass_inst,
     .tick = tick,
     .read_msr = read_msr,
@@ -1618,6 +1573,7 @@ const arch_t arch_riscv64 = {
     .setup = setup,
     .decode = decode,
     .inst_exec = inst_exec64,
+    .inst_exec_system = inst_exec_system,
     .disass_inst = disass_inst,
     .tick = tick,
     .read_msr = read_msr,

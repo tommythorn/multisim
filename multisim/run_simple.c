@@ -41,7 +41,9 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     uint32_t inst     = (uint32_t)arch->load(state, pc, 0 /* = ifetch */, &error);
 
     if (error != MEMORY_SUCCESS)
-        return (error == MEMORY_FATAL);
+	/* arch->raise_exception(...);
+           return;  */
+        return error == MEMORY_FATAL;
 
     if (verbosity & VERBOSE_TRACE)
         fprintf(stderr, "%5d:%08"PRIx64" %08x\n", cycle, pc, inst);
@@ -67,6 +69,8 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     if (dec.class == isa_inst_class_atomic)
         op_a = arch->load(state, atomic_load_addr, dec.loadstore_size, &error);
 
+    // XXX If (raised exception) return;
+
     if (error != MEMORY_SUCCESS)
         return (error == MEMORY_FATAL);
 
@@ -74,10 +78,15 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     extern int exception_raised;
     exception_raised = 0;
 
-    isa_result_t res = arch->inst_exec(dec, op_a, op_b, msr_a);
+    isa_result_t res;
+
+    if (!dec.system)
+	res = arch->inst_exec(dec, op_a, op_b, msr_a);
+    else
+	res = arch->inst_exec_system(state, dec, op_a, op_b, msr_a);
     res.result = CANONICALIZE(res.result);
 
-    if (res.fatal_error)
+    if (res.fatal_error) // XXX If (raised exception) return;
         return true;
 
     if (exception_raised)
@@ -154,10 +163,8 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
         ++cycle;
     }
 
-    if ((verbosity | verbosity_override) & VERBOSE_DISASS) {
+    if (verbosity & VERBOSE_DISASS)
         isa_disass(arch, dec, res);
-        fflush(stderr);
-    }
 
     arch->tick(state);
 
