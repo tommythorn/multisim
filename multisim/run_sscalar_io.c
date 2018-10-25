@@ -28,6 +28,177 @@
 #include "run_simple.h"
 #include "loadelf.h"
 
+/*
+ * Let's first model a simple five stage pipeline with a 16 KiB
+ * directly mapped I$ and a 8 KiB directly mapped D$.  We'll use 32 B
+ * lines, which bring us to 512 lines for the I$ and 256 for the D$.
+ *
+ * We'll also fix the address space at 128 MiB (for now), which means
+ * 27 VA/PA bits and thus 13-14 bits wide tags, plus a valid bit.
+ * Access to the arrays are 32-bit wide (possibly wider or banked in
+ * future for wider fetch).  Note, that bit 31 must be valid, so we
+ * have "holes" in the address bits and describe this with a mask.
+ * 
+ * NB: normally we'd keep all this state in the `cpu_state`, but we'll
+ * only ever run one instance of this.
+ */
+
+#define LINESIZELG2 5
+#define DC_NSETLG2  8
+#define IC_NSETLG2  9
+#define MAX_NSETLG2  9
+
+#define LINE_VALID  (1 << 31)
+
+/* Cache State Machine */
+typedef enum {
+    CSM_READY,
+
+    CSM_WANT_TO_READ,
+    CSM_FILLING,
+    CSM_UPDATE_TAG,
+
+    CSM_WANT_TO_WRITE,
+    CSM_WRITING,
+} cache_state_t;
+
+typedef struct cache_st {
+    int nsetlg2;
+    uint32_t tag[1 << MAX_NSETLG2];
+    uint32_t data[1 << (MAX_NSETLG2 + LINESIZELG2 - 2)];
+    cache_state_t state;
+
+    int fill_counter;
+    uint32_t fill_address;
+    uint32_t tag_bits;
+    uint32_t set_index;
+    uint32_t data_index;
+} cache_t;
+
+/*
+ * We don't know much about the memory, so I'll make persimistic
+ * assumptions that we can only have a single transaction outstanding
+ * of a certain latency.  However, I do assume we can transfer bursts
+ * at the rate of 32-bit per cycle.
+ */
+
+#define MEMORY_CAS 6
+
+
+
+static struct {
+    int busy_cycles;
+    cache_t *busy_with;
+} memory;
+
+static void cache_read(cache_t *c,
+		       uint32_t address, bool readenable,
+		       bool *ready,
+		       uint32_t *rdata, bool *rdata_valid)
+{
+    memory_exception_t error;
+    uint32_t word_address = address >> 2; // address[:2]
+    uint32_t data_index   = word_address & ((1 << (c->nsetlg2 + LINESIZELG2 - 2)) - 1); // address[I:2]
+
+    uint32_t line_index   = address >> LINESIZELG2;
+    uint32_t line_offset  = address - (line_index << LINESIZELG2);
+    uint32_t tag_bits     = line_index >> c->nsetlg2;
+    uint32_t set_index    = line_index - (tag_bits << c->nsetlg2);
+
+    switch (c->state) {
+    case CSM_READY:
+	*rdata = c->data[data_index];
+	*rdata_valid = c->tag[set_index] == (tag_bits | LINE_VALID);
+
+	if (!*rdata_valid) {
+	    c->fill_counter = 1 << (LINESIZELG2 - 2);
+	    c->fill_address = address & (-1 << LINESIZELG2);
+	    c->tag_bits = tag_bits;
+	    c->set_index = set_index;
+	    c->data_index = data_index;
+	    c->state = CSM_WANT_TO_READ; // XXX we could skip this if memory is ready
+	}
+	break;
+
+    case CSM_WANT_TO_READ:
+	if (memory.busy_with == 0) {
+	    memory.busy_with = c;
+	    memory.busy_cycles = MEMORY_CAS;
+	    c->state = CSM_FILLING;
+	}
+	break;
+
+    case CSM_FILLING:
+	if (memory.busy_cycles == 0) {
+	    if (c->fill_counter) {
+		int word_index = (c->fill_address >> 2) & ((1 << (c->nsetlg2 + LINESIZELG2 - 2)) - 1);
+
+		printf("FILLING I$ from %08x -> <%d,%d>\n", 
+		       c->fill_address,
+		       word_index >> (LINESIZELG2 - 2),
+		       word_index & ((1 << LINESIZELG2)/4 - 1));
+		c->data[word_index] = (uint32_t)arch->load(state, ic_fill_address, 4, &error);
+		c->fill_counter -= 1;
+		c->fill_address += 4;
+		if (c->fill_counter == 0) {
+		    memory.busy_with = 0;
+		    c->state = CSM_UPDATE_TAG;
+		}
+	    }
+	} else
+	    --memory.busy_cycles;
+	break;
+
+    case CSM_UPDATE_TAG:
+	c->tag[c->set_index] = c->tag_bits | LINE_VALID;
+	c->state = CSM_READY;
+	*rdata = c->data[c->data_index];
+	*rdata_valid = true;
+	break;
+
+    default:
+	assert(0); // XXX Not done yet
+    }
+
+    *ready = c->state == CSR_READY;
+}
+
+
+cache_t ic = { .nsetlg2 = IC_NSETLG2 };
+
+#if 0
+/*
+static struct {
+    bool valid;
+    uint32_t pc;
+    uint32_t insn;
+    memory_exception_t error;
+} fetch_output;
+
+
+static void do_fetch(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
+{
+    memory_exception_t error;
+
+    fetch_output.valid = false;
+
+    cache_read(&ic, 
+	    
+	
+    }
+
+    fetch.pc = state->pc;
+        /* Using the world's simplest branch predictor: assume fall through */
+        state->pc += 4;
+        state->pc = CANONICALIZE(state->pc);
+        fetch.insn = (uint32_t)arch->load(state, fetch.pc, 4, &fetch.error);
+        fetch.valid = true;
+    } else
+        fetch.valid = false;
+}
+*/
+#endif
+
 bool
 step_sscalar_in_order(
     const arch_t *arch, cpu_state_t *state, cpu_state_t *costate,
@@ -37,7 +208,13 @@ step_sscalar_in_order(
     uint64_t orig_r[32];
     uint64_t pc       = state->pc;
     memory_exception_t error;
-    uint32_t inst     = (uint32_t)arch->load(state, pc, 0 /* = ifetch */, &error);
+    uint32_t inst;
+    bool ic_ready, inst_valid;
+
+    cache_read(&ic, pc, 1, &ic_ready, &inst, &inst_valid);
+
+    if (!inst_valid)
+	goto skip;
 
     if (error != MEMORY_SUCCESS)
         return error == MEMORY_FATAL;
@@ -161,6 +338,7 @@ step_sscalar_in_order(
     if (dec.dest_reg != ISA_NO_REG)
 	assert(state->r[dec.dest_reg] == costate->r[dec.dest_reg]);
 
+skip:
     arch->tick(state);
 
     return false;
