@@ -91,17 +91,19 @@ static struct {
     cache_t *busy_with;
 } memory;
 
-static void cache_read(cache_t *c,
+static void cache_read(const arch_t *arch,
+		       cpu_state_t *state,
+		       cache_t *c,
 		       uint32_t address, bool readenable,
 		       bool *ready,
 		       uint32_t *rdata, bool *rdata_valid)
 {
     memory_exception_t error;
+
     uint32_t word_address = address >> 2; // address[:2]
     uint32_t data_index   = word_address & ((1 << (c->nsetlg2 + LINESIZELG2 - 2)) - 1); // address[I:2]
 
     uint32_t line_index   = address >> LINESIZELG2;
-    uint32_t line_offset  = address - (line_index << LINESIZELG2);
     uint32_t tag_bits     = line_index >> c->nsetlg2;
     uint32_t set_index    = line_index - (tag_bits << c->nsetlg2);
 
@@ -111,6 +113,9 @@ static void cache_read(cache_t *c,
 	*rdata_valid = c->tag[set_index] == (tag_bits | LINE_VALID);
 
 	if (!*rdata_valid) {
+	    printf("I$ MISS @ %08x\n", address);
+	    if (c->tag[set_index] & LINE_VALID)
+		printf("I$ EVICTION OF %08x\n", c->tag[set_index] << (c->nsetlg2 + LINESIZELG2));
 	    c->fill_counter = 1 << (LINESIZELG2 - 2);
 	    c->fill_address = address & (-1 << LINESIZELG2);
 	    c->tag_bits = tag_bits;
@@ -133,11 +138,12 @@ static void cache_read(cache_t *c,
 	    if (c->fill_counter) {
 		int word_index = (c->fill_address >> 2) & ((1 << (c->nsetlg2 + LINESIZELG2 - 2)) - 1);
 
+		if (0)
 		printf("FILLING I$ from %08x -> <%d,%d>\n", 
 		       c->fill_address,
 		       word_index >> (LINESIZELG2 - 2),
 		       word_index & ((1 << LINESIZELG2)/4 - 1));
-		c->data[word_index] = (uint32_t)arch->load(state, ic_fill_address, 4, &error);
+		c->data[word_index] = (uint32_t)arch->load(state, c->fill_address, 4, &error);
 		c->fill_counter -= 1;
 		c->fill_address += 4;
 		if (c->fill_counter == 0) {
@@ -160,7 +166,7 @@ static void cache_read(cache_t *c,
 	assert(0); // XXX Not done yet
     }
 
-    *ready = c->state == CSR_READY;
+    *ready = c->state == CSM_READY;
 }
 
 
@@ -188,7 +194,7 @@ static void do_fetch(const arch_t *arch, cpu_state_t *state, verbosity_t verbosi
     }
 
     fetch.pc = state->pc;
-        /* Using the world's simplest branch predictor: assume fall through */
+        // Using the world's simplest branch predictor: assume fall through
         state->pc += 4;
         state->pc = CANONICALIZE(state->pc);
         fetch.insn = (uint32_t)arch->load(state, fetch.pc, 4, &fetch.error);
@@ -211,16 +217,17 @@ step_sscalar_in_order(
     uint32_t inst;
     bool ic_ready, inst_valid;
 
-    cache_read(&ic, pc, 1, &ic_ready, &inst, &inst_valid);
+    cache_read(arch, state, &ic, pc, 1, &ic_ready, &inst, &inst_valid);
 
     if (!inst_valid)
 	goto skip;
 
-    if (error != MEMORY_SUCCESS)
+    if (0 && error != MEMORY_SUCCESS)
         return error == MEMORY_FATAL;
 
     /* Co-simulate */
     assert(pc == costate->pc);
+    assert(inst == (uint32_t)arch->load(costate, pc, 4, &error));
     step_simple(arch, costate, 0);
 
     isa_decoded_t dec = arch->decode(pc, inst);
