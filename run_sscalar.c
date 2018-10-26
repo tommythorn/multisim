@@ -38,7 +38,7 @@
  * Access to the arrays are 32-bit wide (possibly wider or banked in
  * future for wider fetch).  Note, that bit 31 must be valid, so we
  * have "holes" in the address bits and describe this with a mask.
- * 
+ *
  * NB: normally we'd keep all this state in the `cpu_state`, but we'll
  * only ever run one instance of this.
  */
@@ -92,11 +92,11 @@ static struct {
 } memory;
 
 static void cache_read(const arch_t *arch,
-		       cpu_state_t *state,
-		       cache_t *c,
-		       uint32_t address, bool readenable,
-		       bool *ready,
-		       uint32_t *rdata, bool *rdata_valid)
+                       cpu_state_t *state,
+                       cache_t *c,
+                       uint32_t address, bool readenable,
+                       bool *ready,
+                       uint32_t *rdata, bool *rdata_valid)
 {
     memory_exception_t error;
 
@@ -109,61 +109,62 @@ static void cache_read(const arch_t *arch,
 
     switch (c->state) {
     case CSM_READY:
-	*rdata = c->data[data_index];
-	*rdata_valid = c->tag[set_index] == (tag_bits | LINE_VALID);
+        *rdata = c->data[data_index];
+        *rdata_valid = c->tag[set_index] == (tag_bits | LINE_VALID);
 
-	if (!*rdata_valid) {
-	    printf("I$ MISS @ %08x\n", address);
-	    if (c->tag[set_index] & LINE_VALID)
-		printf("I$ EVICTION OF %08x\n", c->tag[set_index] << (c->nsetlg2 + LINESIZELG2));
-	    c->fill_counter = 1 << (LINESIZELG2 - 2);
-	    c->fill_address = address & (-1 << LINESIZELG2);
-	    c->tag_bits = tag_bits;
-	    c->set_index = set_index;
-	    c->data_index = data_index;
-	    c->state = CSM_WANT_TO_READ; // XXX we could skip this if memory is ready
-	}
-	break;
+        if (!*rdata_valid) {
+            printf("I$ MISS @ %08x\n", address);
+            if (c->tag[set_index] & LINE_VALID)
+                printf("I$ EVICT %08x\n",
+                       ((c->tag[set_index] << c->nsetlg2) + set_index) << LINESIZELG2);
+            c->fill_counter = 1 << (LINESIZELG2 - 2);
+            c->fill_address = address & (-1 << LINESIZELG2);
+            c->tag_bits = tag_bits;
+            c->set_index = set_index;
+            c->data_index = data_index;
+            c->state = CSM_WANT_TO_READ; // XXX we could skip this if memory is ready
+        }
+        break;
 
     case CSM_WANT_TO_READ:
-	if (memory.busy_with == 0) {
-	    memory.busy_with = c;
-	    memory.busy_cycles = MEMORY_CAS;
-	    c->state = CSM_FILLING;
-	}
-	break;
+        if (memory.busy_with == 0) {
+            memory.busy_with = c;
+            memory.busy_cycles = MEMORY_CAS;
+            c->state = CSM_FILLING;
+        }
+        break;
 
     case CSM_FILLING:
-	if (memory.busy_cycles == 0) {
-	    if (c->fill_counter) {
-		int word_index = (c->fill_address >> 2) & ((1 << (c->nsetlg2 + LINESIZELG2 - 2)) - 1);
+        if (memory.busy_cycles == 0) {
+            if (c->fill_counter) {
+                int word_index = (c->fill_address >> 2) & ((1 << (c->nsetlg2 + LINESIZELG2 - 2)) - 1);
 
-		if (0)
-		printf("FILLING I$ from %08x -> <%d,%d>\n", 
-		       c->fill_address,
-		       word_index >> (LINESIZELG2 - 2),
-		       word_index & ((1 << LINESIZELG2)/4 - 1));
-		c->data[word_index] = (uint32_t)arch->load(state, c->fill_address, 4, &error);
-		c->fill_counter -= 1;
-		c->fill_address += 4;
-		if (c->fill_counter == 0) {
-		    memory.busy_with = 0;
-		    c->state = CSM_UPDATE_TAG;
-		}
-	    }
-	} else
-	    --memory.busy_cycles;
-	break;
+                if (0)
+                printf("FILLING I$ from %08x -> <%d,%d>\n",
+                       c->fill_address,
+                       word_index >> (LINESIZELG2 - 2),
+                       word_index & ((1 << LINESIZELG2)/4 - 1));
+                c->data[word_index] = (uint32_t)arch->load(state, c->fill_address, 4, &error);
+                c->fill_counter -= 1;
+                c->fill_address += 4;
+                if (c->fill_counter == 0) {
+                    memory.busy_with = 0;
+                    c->state = CSM_UPDATE_TAG;
+                }
+            }
+        } else
+            --memory.busy_cycles;
+        break;
 
     case CSM_UPDATE_TAG:
-	c->tag[c->set_index] = c->tag_bits | LINE_VALID;
-	c->state = CSM_READY;
-	*rdata = c->data[c->data_index];
-	*rdata_valid = true;
-	break;
+        c->tag[c->set_index] = c->tag_bits | LINE_VALID;
+        c->state = CSM_READY;
+        *rdata = c->data[c->data_index];
+        *rdata_valid = true;
+        break;
 
     default:
-	assert(0); // XXX Not done yet
+        assert(0); // XXX Not done yet
     }
 
     *ready = c->state == CSM_READY;
@@ -188,9 +189,9 @@ static void do_fetch(const arch_t *arch, cpu_state_t *state, verbosity_t verbosi
 
     fetch_output.valid = false;
 
-    cache_read(&ic, 
-	    
-	
+    cache_read(&ic,
+
+
     }
 
     fetch.pc = state->pc;
@@ -220,7 +221,7 @@ step_sscalar_in_order(
     cache_read(arch, state, &ic, pc, 1, &ic_ready, &inst, &inst_valid);
 
     if (!inst_valid)
-	goto skip;
+        goto skip;
 
     if (0 && error != MEMORY_SUCCESS)
         return error == MEMORY_FATAL;
@@ -260,9 +261,9 @@ step_sscalar_in_order(
 
     isa_result_t res;
     if (!dec.system)
-	res = arch->inst_exec(dec, op_a, op_b, msr_a);
+        res = arch->inst_exec(dec, op_a, op_b, msr_a);
     else
-	res = arch->inst_exec_system(state, dec, op_a, op_b, msr_a);
+        res = arch->inst_exec_system(state, dec, op_a, op_b, msr_a);
     res.result = CANONICALIZE(res.result);
 
     if (res.fatal_error)
@@ -273,7 +274,7 @@ step_sscalar_in_order(
 
     switch (dec.class) {
     case isa_inst_class_load:
-	res.load_addr = CANONICALIZE(res.load_addr);
+        res.load_addr = CANONICALIZE(res.load_addr);
         res.result = arch->load(state, res.load_addr, dec.loadstore_size, &error);
         res.result = CANONICALIZE(res.result);
 
@@ -284,8 +285,8 @@ step_sscalar_in_order(
         break;
 
     case isa_inst_class_store:
-	res.store_addr = CANONICALIZE(res.store_addr);
-	res.store_value = CANONICALIZE(res.store_value);
+        res.store_addr = CANONICALIZE(res.store_addr);
+        res.store_value = CANONICALIZE(res.store_value);
         arch->store(state, res.store_addr, res.store_value, dec.loadstore_size, &error);
 
         if (error != MEMORY_SUCCESS)
@@ -295,8 +296,8 @@ step_sscalar_in_order(
         break;
 
     case isa_inst_class_atomic:
-	// XXX ??
-	res.load_addr = CANONICALIZE(res.load_addr);
+        // XXX ??
+        res.load_addr = CANONICALIZE(res.load_addr);
         arch->store(state, atomic_load_addr, res.result, dec.loadstore_size, &error);
 
         if (error != MEMORY_SUCCESS)
@@ -308,17 +309,17 @@ step_sscalar_in_order(
 
 
     case isa_inst_class_branch:
-	dec.jumpbranch_target = CANONICALIZE(dec.jumpbranch_target);
+        dec.jumpbranch_target = CANONICALIZE(dec.jumpbranch_target);
         state->pc = res.branch_taken ? dec.jumpbranch_target : state->pc + 4;
         break;
 
     case isa_inst_class_jump:
-	dec.jumpbranch_target = CANONICALIZE(dec.jumpbranch_target);
+        dec.jumpbranch_target = CANONICALIZE(dec.jumpbranch_target);
         state->pc = dec.jumpbranch_target;
         break;
 
     case isa_inst_class_compjump:
-	res.compjump_target = CANONICALIZE(res.compjump_target);
+        res.compjump_target = CANONICALIZE(res.compjump_target);
         state->pc = res.compjump_target;
         break;
 
@@ -343,7 +344,7 @@ step_sscalar_in_order(
     }
 
     if (dec.dest_reg != ISA_NO_REG)
-	assert(state->r[dec.dest_reg] == costate->r[dec.dest_reg]);
+        assert(state->r[dec.dest_reg] == costate->r[dec.dest_reg]);
 
 skip:
     arch->tick(state);
@@ -351,7 +352,7 @@ skip:
     return false;
 }
 
-void run_sscalar_io(int num_images, char *images[], verbosity_t verbosity)
+void run_sscalar(int num_images, char *images[], verbosity_t verbosity)
 {
     cpu_state_t *state = state_create();
     cpu_state_t *costate = state_create();

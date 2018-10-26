@@ -62,7 +62,7 @@ typedef enum verbosity_e {
 
 void exception(char *kind);
 void run_simple(int, char **, verbosity_t);
-void run_sscalar_io(int, char **, verbosity_t);
+void run_sscalar(int, char **, verbosity_t);
 void run_sscalar_oooe(int, char **, verbosity_t);
 
 static inline cpu_state_t *

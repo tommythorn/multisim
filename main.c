@@ -135,7 +135,7 @@ int main(int argc, char **argv)
         break;
 
     case '2':
-        run_sscalar_io(num_images, images, verbosity);
+        run_sscalar(num_images, images, verbosity);
         break;
 
     case '3':

@@ -22,7 +22,7 @@ CFLAGS=-g -std=c99 $(WARN) -MD $(OPT) -g -I/opt/local/include
 LDFLAGS=-g
 FLAGS=
 OBJS=main.o arch.o \
-	run_simple.o run_sscalar_io.o run_sscalar_oooe.o \
+	run_simple.o run_sscalar.o run_sscalar_oooe.o \
 	memory.o loadelf.o alpha.o lm32.o riscv.o
 #VERB=-t
 VERB=-d
