@@ -166,7 +166,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     if (verbosity & VERBOSE_DISASS)
         isa_disass(arch, dec, res);
 
-    arch->tick(state);
+    arch->tick(state, 1);
 
     return false;
 }

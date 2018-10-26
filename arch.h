@@ -173,9 +173,10 @@ typedef struct isa_st {
 
     /*
      * tick() advances the state of any devices that run
-     * asynchronously with the CPU.
+     * asynchronously with the CPU.  Provide it with the number of
+     * instruction retired this cycle.
      */
-    void (*tick)(cpu_state_t *state);
+    void (*tick)(cpu_state_t *state, int instret);
 
     /*
      * read_msr() is the MSR equivalent of the register read.  However

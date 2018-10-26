@@ -299,7 +299,7 @@ setup(cpu_state_t *state, elf_info_t *info)
 
 /* executed every cycle */
 static void
-tick(cpu_state_t *state)
+tick(cpu_state_t *state, int instret)
 {
 }
 

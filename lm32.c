@@ -270,7 +270,7 @@ decode(uint64_t inst_addr, uint32_t inst)
 
 /* executed every cycle */
 static void
-tick(cpu_state_t *state)
+tick(cpu_state_t *state, int instret)
 {
     // Update cycle counter
     ++state->msr[CSR_CC];

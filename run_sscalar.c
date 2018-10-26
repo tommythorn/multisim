@@ -28,6 +28,12 @@
 #include "run_simple.h"
 #include "loadelf.h"
 
+const bool cosimulating = false;
+const bool debug_icache = false;
+
+// XXX The cache model doesn't really belong here, but we'll develop
+// it along with the superscalar implementation
+
 /*
  * Let's first model a simple five stage pipeline with a 16 KiB
  * directly mapped I$ and a 8 KiB directly mapped D$.  We'll use 32 B
@@ -49,6 +55,14 @@
 #define MAX_NSETLG2  9
 
 #define LINE_VALID  (1 << 31)
+
+/*
+ * We don't know much about the memory, so I'll make persimistic
+ * assumptions that we can only have a single transaction outstanding
+ * of a certain latency.  However, I do assume we can transfer bursts
+ * at the rate of 32-bit per cycle.
+ */
+#define MEMORY_CAS 6
 
 /* Cache State Machine */
 typedef enum {
@@ -74,17 +88,6 @@ typedef struct cache_st {
     uint32_t set_index;
     uint32_t data_index;
 } cache_t;
-
-/*
- * We don't know much about the memory, so I'll make persimistic
- * assumptions that we can only have a single transaction outstanding
- * of a certain latency.  However, I do assume we can transfer bursts
- * at the rate of 32-bit per cycle.
- */
-
-#define MEMORY_CAS 6
-
-
 
 static struct {
     int busy_cycles;
@@ -113,9 +116,8 @@ static void cache_read(const arch_t *arch,
         *rdata_valid = c->tag[set_index] == (tag_bits | LINE_VALID);
 
         if (!*rdata_valid) {
-            printf("I$ MISS @ %08x\n", address);
-            if (c->tag[set_index] & LINE_VALID)
-                printf("I$ EVICT %08x\n",
+            if (debug_icache && c->tag[set_index] & LINE_VALID)
+                printf("I$ EVICT  %08x\n",
                        ((c->tag[set_index] << c->nsetlg2) + set_index) << LINESIZELG2);
             c->fill_counter = 1 << (LINESIZELG2 - 2);
             c->fill_address = address & (-1 << LINESIZELG2);
@@ -214,9 +216,10 @@ step_sscalar_in_order(
     static int cycle = 0;
     uint64_t orig_r[32];
     uint64_t pc       = state->pc;
-    memory_exception_t error;
+    memory_exception_t error = MEMORY_SUCCESS;
     uint32_t inst;
     bool ic_ready, inst_valid;
+    int instret = 0;
 
     cache_read(arch, state, &ic, pc, 1, &ic_ready, &inst, &inst_valid);
 
@@ -227,9 +230,11 @@ step_sscalar_in_order(
         return error == MEMORY_FATAL;
 
     /* Co-simulate */
-    assert(pc == costate->pc);
-    assert(inst == (uint32_t)arch->load(costate, pc, 4, &error));
-    step_simple(arch, costate, 0);
+    if (cosimulating) {
+        assert(pc == costate->pc);
+        assert(inst == (uint32_t)arch->load(costate, pc, 4, &error));
+        step_simple(arch, costate, 0);
+    }
 
     isa_decoded_t dec = arch->decode(pc, inst);
 
@@ -244,8 +249,11 @@ step_sscalar_in_order(
 
     uint64_t op_a     = state->r[dec.source_reg_a];
     uint64_t op_b     = state->r[dec.source_reg_b];
-    uint64_t msr_a    = dec.source_msr_a != ISA_NO_REG ?
-        arch->read_msr(state, dec.source_msr_a) : 0;
+    uint64_t msr_a    = dec.source_msr_a == ISA_NO_REG ? 0 :
+        (cosimulating ?
+        // NOTE, reading MSRs from the co-state to deal with divergences in MSRs
+         arch->read_msr(costate, dec.source_msr_a) :
+         arch->read_msr(state, dec.source_msr_a));
 
     uint64_t atomic_load_addr = op_a;
 
@@ -343,11 +351,13 @@ step_sscalar_in_order(
         ++cycle;
     }
 
-    if (dec.dest_reg != ISA_NO_REG)
+    if (cosimulating && dec.dest_reg != ISA_NO_REG)
         assert(state->r[dec.dest_reg] == costate->r[dec.dest_reg]);
 
+    instret += 1;
+
 skip:
-    arch->tick(state);
+    arch->tick(state, instret);
 
     return false;
 }

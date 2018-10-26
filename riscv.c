@@ -1111,11 +1111,11 @@ static void raise(cpu_state_t *s, uint64_t cause)
 #define HTIF_DEV_SHIFT      (56)
 
 /* executed every cycle */
-static void tick(cpu_state_t *s)
+static void tick(cpu_state_t *s, int instret)
 {
     s->counter += 1;
     // XXX for now, an instruction per tick
-    s->msr[CSR_INSTRET] = (uint32_t) (s->msr[CSR_INSTRET] + 1);
+    s->msr[CSR_INSTRET] = (uint32_t) (s->msr[CSR_INSTRET] + instret);
     s->msr[CSR_CYCLE]   = (uint32_t) (s->msr[CSR_CYCLE]   + 1);
 
 #if 0
