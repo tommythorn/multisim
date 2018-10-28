@@ -23,7 +23,7 @@ LDFLAGS=-g
 FLAGS=
 OBJS=main.o arch.o \
 	run_simple.o run_sscalar.o run_sscalar_oooe.o \
-	memory.o loadelf.o alpha.o lm32.o riscv.o
+	memory.o loadelf.o riscv.o
 #VERB=-t
 VERB=-d
 

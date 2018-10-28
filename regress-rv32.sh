@@ -1,7 +1,6 @@
 #!/bin/bash
 
-RISCV_TOOLS=$HOME/BTSync/riscv-tools
-RV32_ISA=../workloads/riscv-tests/
+RV32_ISA=workloads/riscv-tests/
 TESTS="rv32ui-p-add rv32ui-p-addi rv32ui-p-and rv32ui-p-andi rv32ui-p-auipc \
 rv32ui-p-beq rv32ui-p-bge rv32ui-p-bgeu rv32ui-p-blt rv32ui-p-bltu \
 rv32ui-p-bne rv32ui-p-fence_i rv32ui-p-jal rv32ui-p-jalr rv32ui-p-lb \
@@ -15,7 +14,7 @@ ulimit -t 1
 
 for x in $TESTS
 do
-    printf "%-16s %s\n" $x "$(./multisim -d $RV32_ISA/$x 2>&1 |grep '\[0x0000000080001000\] <- '|head -1)"
+#    printf "%-16s %s\n" $x "$(./multisim -d $RV32_ISA/$x $* 2>&1 |grep '\[0xffffffff80001000\]'|head -1)"
+    echo $x
+    ./multisim $* $RV32_ISA/$x 2>&1|head -100
 done
-
-    # | sort | grep -v 'HOST RESULT 1 ' | tee regressions.log

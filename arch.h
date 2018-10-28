@@ -72,16 +72,16 @@ typedef int isa_msr_t;
  *
  * - for computed jumps, actual target is register source_reg_a.
  */
-typedef enum isa_inst_class_e {
-    isa_inst_class_illegal,
-    isa_inst_class_alu,
-    isa_inst_class_load,
-    isa_inst_class_store,
-    isa_inst_class_jump,
-    isa_inst_class_branch,
-    isa_inst_class_compjump,
-    isa_inst_class_atomic,
-} isa_inst_class_t;
+typedef enum isa_insn_class_e {
+    isa_insn_class_illegal,
+    isa_insn_class_alu,
+    isa_insn_class_load,
+    isa_insn_class_store,
+    isa_insn_class_jump,
+    isa_insn_class_branch,
+    isa_insn_class_compjump,
+    isa_insn_class_atomic,
+} isa_insn_class_t;
 
 /*
  * Decode enough of the instruction to guide the dynamic scheduling.
@@ -96,11 +96,11 @@ typedef enum isa_inst_class_e {
  * serialize on such instructions.
  */
 typedef struct isa_decoded_st {
-    uint64_t            inst_addr;
-    uint32_t            inst;
+    uint64_t            insn_addr;
+    uint32_t            insn;
     isa_reg_t           dest_reg, source_reg_a, source_reg_b;
     isa_msr_t           dest_msr, source_msr_a;
-    isa_inst_class_t    class;
+    isa_insn_class_t    class;
     bool                system; // system instruction are handled differently
     union {
         int                 loadstore_size;
@@ -158,18 +158,18 @@ typedef struct isa_st {
 
     void (*setup)(cpu_state_t *, elf_info_t *);
 
-    isa_decoded_t (*decode)(uint64_t inst_addr, uint32_t inst);
+    isa_decoded_t (*decode)(uint64_t insn_addr, uint32_t insn);
 
-    isa_result_t (*inst_exec)(isa_decoded_t dec, uint64_t op_a, uint64_t op_b,
+    isa_result_t (*insn_exec)(isa_decoded_t dec, uint64_t op_a, uint64_t op_b,
                               uint64_t msr_a);
 
     /* System instructions are serializing and must be executed by
      * this, however they can affect system state.  */
-    isa_result_t (*inst_exec_system)(cpu_state_t *state, 
+    isa_result_t (*insn_exec_system)(cpu_state_t *state, 
 				     isa_decoded_t dec, uint64_t op_a, uint64_t op_b,
 				     uint64_t msr_a);
 
-    void (*disass_inst)(uint64_t pc, uint32_t inst, char *buf, size_t buf_size);
+    void (*disass_insn)(uint64_t pc, uint32_t insn, char *buf, size_t buf_size);
 
     /*
      * tick() advances the state of any devices that run

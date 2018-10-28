@@ -90,7 +90,7 @@ typedef union riscv_instruction {
         int        imm20    :  1;
     } uj;
     u_int32_t raw;
-} inst_t;
+} insn_t;
 
 typedef enum riscv_opcode_e {
     LOAD,   LOAD_FP,  CUSTOM0, MISC_MEM, OP_IMM, AUIPC, OP_IMM_32, EXT0,
@@ -257,9 +257,9 @@ enum {
 
 /* Exceptions */
 enum {
-    EXCP_INST_MISALIGN          = 0,
-    EXCP_INST_ACCESS_FAULT,
-    EXCP_INST_ILLEGAL,
+    EXCP_INSN_MISALIGN          = 0,
+    EXCP_INSN_ACCESS_FAULT,
+    EXCP_INSN_ILLEGAL,
     EXCP_BREAKPOINT,
 
     EXCP_LOAD_MISALIGN,
@@ -272,7 +272,7 @@ enum {
     EXCP_RESERVED_10,
     EXCP_MODE_CALL,
 
-    EXCP_INST_PAGE_FAULT,
+    EXCP_INSN_PAGE_FAULT,
     EXCP_LOAD_PAGE_FAULT,
     EXCP_RESERVED_14,
     EXCP_STORE_PAGE_FAULT,

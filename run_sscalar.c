@@ -28,7 +28,7 @@
 #include "run_simple.h"
 #include "loadelf.h"
 
-const bool cosimulating = false;
+const bool cosimulating = true;
 const bool debug_icache = false;
 
 // XXX The cache model doesn't really belong here, but we'll develop
@@ -46,7 +46,7 @@ const bool debug_icache = false;
  * have "holes" in the address bits and describe this with a mask.
  *
  * NB: normally we'd keep all this state in the `cpu_state`, but we'll
- * only ever run one instance of this.
+ * only ever run one insnance of this.
  */
 
 #define LINESIZELG2 5
@@ -87,6 +87,8 @@ typedef struct cache_st {
     uint32_t tag_bits;
     uint32_t set_index;
     uint32_t data_index;
+
+    uint32_t orig_address;
 } cache_t;
 
 static struct {
@@ -94,12 +96,11 @@ static struct {
     cache_t *busy_with;
 } memory;
 
-static void cache_read(const arch_t *arch,
-                       cpu_state_t *state,
-                       cache_t *c,
-                       uint32_t address, bool readenable,
-                       bool *ready,
-                       uint32_t *rdata, bool *rdata_valid)
+static void cache_read(const arch_t *arch, cpu_state_t *state, cache_t *c,
+                       // Inputs
+                       uint32_t address, bool readenable, bool reset_cache_access,
+                       // Outputs
+                       bool *ready, uint32_t *rdata, bool *rdata_valid)
 {
     memory_exception_t error;
 
@@ -110,20 +111,34 @@ static void cache_read(const arch_t *arch,
     uint32_t tag_bits     = line_index >> c->nsetlg2;
     uint32_t set_index    = line_index - (tag_bits << c->nsetlg2);
 
+    if (reset_cache_access && c->state != CSM_READY) {
+        if (debug_icache)
+            printf("I$ reset to %08x\n", address);
+        c->state = CSM_READY;
+    }
+
     switch (c->state) {
     case CSM_READY:
         *rdata = c->data[data_index];
         *rdata_valid = c->tag[set_index] == (tag_bits | LINE_VALID);
 
         if (!*rdata_valid) {
+
+            if (debug_icache)
+                printf("I$ MISS on %08x\n", address);
+
             if (debug_icache && c->tag[set_index] & LINE_VALID)
                 printf("I$ EVICT  %08x\n",
                        ((c->tag[set_index] << c->nsetlg2) + set_index) << LINESIZELG2);
+
             c->fill_counter = 1 << (LINESIZELG2 - 2);
             c->fill_address = address & (-1 << LINESIZELG2);
             c->tag_bits = tag_bits;
             c->set_index = set_index;
             c->data_index = data_index;
+
+            c->orig_address = address;
+
             c->state = CSM_WANT_TO_READ; // XXX we could skip this if memory is ready
         }
         break;
@@ -162,7 +177,12 @@ static void cache_read(const arch_t *arch,
         c->tag[c->set_index] = c->tag_bits | LINE_VALID;
         c->state = CSM_READY;
         *rdata = c->data[c->data_index];
-        *rdata_valid = true;
+
+        if (address != c->orig_address)
+            printf("I$ request address has changed! was %08x, now %08x\n",
+                   c->orig_address, address);
+        else
+            *rdata_valid = true;
         break;
 
     default:
@@ -175,188 +195,201 @@ static void cache_read(const arch_t *arch,
 
 cache_t ic = { .nsetlg2 = IC_NSETLG2 };
 
-#if 0
-/*
 static struct {
+    // Inputs
+    bool ic_ready;
+
+    // Outputs
     bool valid;
+    bool reset_cache_access;
     uint32_t pc;
     uint32_t insn;
     memory_exception_t error;
-} fetch_output;
+} fetch;
+
+static struct {
+    // Outputs
+    bool valid;
+    isa_decoded_t dec;
+    uint64_t op_a;
+    uint64_t op_b;
+    uint64_t msr_a;
+} decode;
 
 
-static void do_fetch(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
-{
-    memory_exception_t error;
+static struct {
+    // Outputs
+    bool valid;
+    isa_result_t res;
+    isa_decoded_t dec;
+} execute;
 
-    fetch_output.valid = false;
-
-    cache_read(&ic,
-
-
-    }
-
-    fetch.pc = state->pc;
-        // Using the world's simplest branch predictor: assume fall through
-        state->pc += 4;
-        state->pc = CANONICALIZE(state->pc);
-        fetch.insn = (uint32_t)arch->load(state, fetch.pc, 4, &fetch.error);
-        fetch.valid = true;
-    } else
-        fetch.valid = false;
-}
-*/
-#endif
-
-bool
-step_sscalar_in_order(
+static bool step_sscalar(
     const arch_t *arch, cpu_state_t *state, cpu_state_t *costate,
     verbosity_t verbosity)
 {
-    static int cycle = 0;
-    uint64_t orig_r[32];
-    uint64_t pc       = state->pc;
     memory_exception_t error = MEMORY_SUCCESS;
-    uint32_t inst;
-    bool ic_ready, inst_valid;
     int instret = 0;
 
-    cache_read(arch, state, &ic, pc, 1, &ic_ready, &inst, &inst_valid);
+    /* Execute */
 
-    if (!inst_valid)
-        goto skip;
+    execute.valid = decode.valid;
+    execute.dec   = decode.dec;
+    if (decode.valid) {
+        uint64_t atomic_load_addr = decode.op_a;
 
-    if (0 && error != MEMORY_SUCCESS)
-        return error == MEMORY_FATAL;
+        if (decode.dec.class == isa_insn_class_atomic)
+            decode.op_a = arch->load(state, atomic_load_addr, decode.dec.loadstore_size, &error);
 
-    /* Co-simulate */
-    if (cosimulating) {
-        assert(pc == costate->pc);
-        assert(inst == (uint32_t)arch->load(costate, pc, 4, &error));
-        step_simple(arch, costate, 0);
+        // if (error != MEMORY_SUCCESS) return (error == MEMORY_FATAL);
+
+        if (!decode.dec.system)
+            execute.res = arch->insn_exec(decode.dec, decode.op_a, decode.op_b, decode.msr_a);
+        else {
+            execute.res = arch->insn_exec_system(state, decode.dec, decode.op_a, decode.op_b, decode.msr_a);
+            /* Serializing instruction, flush the pipe */
+            state->pc = decode.dec.insn_addr + 4;
+            fetch.reset_cache_access = true;
+            fetch.valid = false;
+            decode.valid = false;
+        }
+        execute.res.result = CANONICALIZE(execute.res.result);
+
+        if (execute.res.fatal_error)
+            return true;
+
+        switch (decode.dec.class) {
+        case isa_insn_class_load:
+            execute.res.load_addr = CANONICALIZE(execute.res.load_addr);
+            execute.res.result = arch->load(state, execute.res.load_addr, decode.dec.loadstore_size, &error);
+            execute.res.result = CANONICALIZE(execute.res.result);
+            if (error != MEMORY_SUCCESS)
+                return (error == MEMORY_FATAL);
+            break;
+
+        case isa_insn_class_store:
+            execute.res.store_addr = CANONICALIZE(execute.res.store_addr);
+            execute.res.store_value = CANONICALIZE(execute.res.store_value);
+            arch->store(state, execute.res.store_addr, execute.res.store_value, decode.dec.loadstore_size, &error);
+            if (error != MEMORY_SUCCESS)
+                return (error == MEMORY_FATAL);
+            break;
+
+        case isa_insn_class_atomic:
+            // XXX ??
+            execute.res.load_addr = CANONICALIZE(execute.res.load_addr);
+            arch->store(state, atomic_load_addr, execute.res.result, decode.dec.loadstore_size, &error);
+            if (error != MEMORY_SUCCESS)
+                return (error == MEMORY_FATAL);
+            execute.res.result = decode.op_a;
+            break;
+
+        case isa_insn_class_branch:
+            decode.dec.jumpbranch_target = CANONICALIZE(decode.dec.jumpbranch_target);
+            if (execute.res.branch_taken != false) {
+                // Mispredict
+                state->pc = decode.dec.jumpbranch_target;
+                fetch.reset_cache_access = true;
+                fetch.valid = false;
+                decode.valid = false;
+            }
+            break;
+
+        case isa_insn_class_jump:
+            decode.dec.jumpbranch_target = CANONICALIZE(decode.dec.jumpbranch_target);
+            state->pc = decode.dec.jumpbranch_target;
+            // Mispredict
+            fetch.reset_cache_access = true;
+            fetch.valid = false;
+            decode.valid = false;
+            break;
+
+        case isa_insn_class_compjump:
+            execute.res.compjump_target = CANONICALIZE(execute.res.compjump_target);
+            state->pc = execute.res.compjump_target;
+            // Mispredict
+            fetch.reset_cache_access = true;
+            fetch.valid = false;
+            decode.valid = false;
+            break;
+
+        default:
+            break;
+        }
+
+        if (decode.dec.dest_reg != ISA_NO_REG)
+            state->r[decode.dec.dest_reg] = execute.res.result;
+
+        if (decode.dec.dest_msr != ISA_NO_REG)
+            arch->write_msr(state, decode.dec.dest_msr, execute.res.msr_result);
+
+        /* Co-simulate XXX Switch this to check at commit time */
+        if (execute.valid && cosimulating) {
+            if (execute.dec.insn_addr != costate->pc)
+                assert(execute.dec.insn_addr == costate->pc);
+            else {
+                uint32_t coinsn = (uint32_t)arch->load(costate, execute.dec.insn_addr, 4, &error);
+                if (execute.dec.insn != coinsn)
+                    assert(execute.dec.insn == coinsn);
+                else {
+                    step_simple(arch, costate, verbosity);
+                    if (execute.dec.dest_reg != ISA_NO_REG &&
+                        state->r[execute.dec.dest_reg] != costate->r[execute.dec.dest_reg]) {
+
+                        printf("my r%d/%s = %08x != models %08x\n",
+                               execute.dec.dest_reg,
+                               arch->reg_name[execute.dec.dest_reg],
+                               (uint32_t)state->r[execute.dec.dest_reg],
+                               (uint32_t)costate->r[execute.dec.dest_reg]);
+
+                        assert(state->r[execute.dec.dest_reg] == costate->r[execute.dec.dest_reg]);
+                    }
+                }
+            }
+        }
+
+        instret += 1;
     }
 
-    isa_decoded_t dec = arch->decode(pc, inst);
+    /* Decode */
+    if (fetch.valid) {
+        decode.dec = arch->decode(fetch.pc, fetch.insn);
 
-    if (verbosity & VERBOSE_TRACE)
-        memcpy(orig_r, state->r, sizeof orig_r);
+        assert(decode.dec.source_reg_a == ISA_NO_REG || decode.dec.source_reg_a < ISA_REGISTERS);
+        assert(decode.dec.source_reg_b == ISA_NO_REG || decode.dec.source_reg_b < ISA_REGISTERS);
+        assert(decode.dec.dest_reg     == ISA_NO_REG || decode.dec.dest_reg     < ISA_REGISTERS);
+        assert(decode.dec.dest_msr     == ISA_NO_REG || decode.dec.dest_msr     < ISA_MSRS);
+        assert(decode.dec.source_msr_a == ISA_NO_REG || decode.dec.source_msr_a < ISA_MSRS);
 
-    assert(dec.source_reg_a == ISA_NO_REG || dec.source_reg_a < ISA_REGISTERS);
-    assert(dec.source_reg_b == ISA_NO_REG || dec.source_reg_b < ISA_REGISTERS);
-    assert(dec.dest_reg     == ISA_NO_REG || dec.dest_reg     < ISA_REGISTERS);
-    assert(dec.dest_msr     == ISA_NO_REG || dec.dest_msr     < ISA_MSRS);
-    assert(dec.source_msr_a == ISA_NO_REG || dec.source_msr_a < ISA_MSRS);
+        decode.op_a     = (decode.dec.source_reg_a == execute.dec.dest_reg
+                           ? execute.res.result
+                           : state->r[decode.dec.source_reg_a]);
 
-    uint64_t op_a     = state->r[dec.source_reg_a];
-    uint64_t op_b     = state->r[dec.source_reg_b];
-    uint64_t msr_a    = dec.source_msr_a == ISA_NO_REG ? 0 :
-        (cosimulating ?
-        // NOTE, reading MSRs from the co-state to deal with divergences in MSRs
-         arch->read_msr(costate, dec.source_msr_a) :
-         arch->read_msr(state, dec.source_msr_a));
+        decode.op_b     = (decode.dec.source_reg_b == execute.dec.dest_reg
+                           ? execute.res.result
+                           : state->r[decode.dec.source_reg_b]);
 
-    uint64_t atomic_load_addr = op_a;
+        decode.msr_a    = decode.dec.source_msr_a == ISA_NO_REG ? 0 :
+            (cosimulating ?
+             // NOTE, reading MSRs from the co-state to deal with divergences in MSRs
+             arch->read_msr(costate, decode.dec.source_msr_a) :
+             arch->read_msr(state, decode.dec.source_msr_a));
+    }
+    decode.valid = fetch.valid;
 
-    if (dec.class == isa_inst_class_atomic)
-        op_a = arch->load(state, atomic_load_addr, dec.loadstore_size, &error);
+    /* Fetch */
+    fetch.pc = state->pc;
+    cache_read(arch, state, &ic,
+               fetch.pc, 1, fetch.reset_cache_access,
+               &fetch.ic_ready, &fetch.insn, &fetch.valid);
 
-    if (error != MEMORY_SUCCESS)
-        return (error == MEMORY_FATAL);
-
-    /// XXX hack for now: we need to know if an exception was fired, just like with loads
-    extern int exception_raised;
-    exception_raised = 0;
-
-    isa_result_t res;
-    if (!dec.system)
-        res = arch->inst_exec(dec, op_a, op_b, msr_a);
-    else
-        res = arch->inst_exec_system(state, dec, op_a, op_b, msr_a);
-    res.result = CANONICALIZE(res.result);
-
-    if (res.fatal_error)
-        return true;
-
-    if (exception_raised)
-        return false;
-
-    switch (dec.class) {
-    case isa_inst_class_load:
-        res.load_addr = CANONICALIZE(res.load_addr);
-        res.result = arch->load(state, res.load_addr, dec.loadstore_size, &error);
-        res.result = CANONICALIZE(res.result);
-
-        if (error != MEMORY_SUCCESS)
-            return (error == MEMORY_FATAL);
-
-        state->pc += 4;
-        break;
-
-    case isa_inst_class_store:
-        res.store_addr = CANONICALIZE(res.store_addr);
-        res.store_value = CANONICALIZE(res.store_value);
-        arch->store(state, res.store_addr, res.store_value, dec.loadstore_size, &error);
-
-        if (error != MEMORY_SUCCESS)
-            return (error == MEMORY_FATAL);
-
-        state->pc += 4;
-        break;
-
-    case isa_inst_class_atomic:
-        // XXX ??
-        res.load_addr = CANONICALIZE(res.load_addr);
-        arch->store(state, atomic_load_addr, res.result, dec.loadstore_size, &error);
-
-        if (error != MEMORY_SUCCESS)
-            return (error == MEMORY_FATAL);
-
-        res.result = op_a;
-        state->pc += 4;
-        break;
-
-
-    case isa_inst_class_branch:
-        dec.jumpbranch_target = CANONICALIZE(dec.jumpbranch_target);
-        state->pc = res.branch_taken ? dec.jumpbranch_target : state->pc + 4;
-        break;
-
-    case isa_inst_class_jump:
-        dec.jumpbranch_target = CANONICALIZE(dec.jumpbranch_target);
-        state->pc = dec.jumpbranch_target;
-        break;
-
-    case isa_inst_class_compjump:
-        res.compjump_target = CANONICALIZE(res.compjump_target);
-        state->pc = res.compjump_target;
-        break;
-
-    default:
+    if (fetch.valid) {
         state->pc += 4;
         state->pc = CANONICALIZE(state->pc);
-        break;
     }
 
-    if (dec.dest_reg != ISA_NO_REG)
-        state->r[dec.dest_reg] = res.result;
+    fetch.reset_cache_access = false;
 
-    if (dec.dest_msr != ISA_NO_REG)
-        arch->write_msr(state, dec.dest_msr, res.msr_result);
-
-    if (verbosity & VERBOSE_TRACE) {
-        if (dec.dest_reg != ISA_NO_REG && orig_r[dec.dest_reg] != res.result)
-            fprintf(stderr,"%d:r%d=0x%08"PRIx64"\n", cycle, dec.dest_reg,
-                    res.result);
-        fflush(stderr);
-        ++cycle;
-    }
-
-    if (cosimulating && dec.dest_reg != ISA_NO_REG)
-        assert(state->r[dec.dest_reg] == costate->r[dec.dest_reg]);
-
-    instret += 1;
-
-skip:
     arch->tick(state, instret);
 
     return false;
@@ -378,7 +411,7 @@ void run_sscalar(int num_images, char *images[], verbosity_t verbosity)
 
     int cycle;
     for (cycle = 0;; ++cycle) {
-        if (step_sscalar_in_order(arch, state, costate, verbosity))
+        if (step_sscalar(arch, state, costate, verbosity))
             break;
     }
 

@@ -119,7 +119,7 @@ static const uint64_t csr_mask[0x1000] = {
 
     [CSR_MIE]           = 0xFFFFFFFF,
     [CSR_MSTATUS]       = (BF_PACK(~0, CSR_STATUS_MPP_BF)  |
-			   BF_PACK(~0, CSR_STATUS_MPIE_BF) |
+                           BF_PACK(~0, CSR_STATUS_MPIE_BF) |
                            BF_PACK(~0, CSR_STATUS_MIE_BF)),
     [CSR_MEPC]          = -4LL,
 };
@@ -185,17 +185,17 @@ static const char * const dirties_s[] = {"prline", "prbyte"};
 
 typedef struct riscv_state_st {
     struct cache_st {
-	struct line_st {
-	    uint32_t tag;
-	    unsigned last_access; // cycle of access, for eviction decisions
-	    uint64_t valid_bytes; // Can actually be summarized with a single bit
-	    uint64_t dirty_bytes;
-	} line[MAX_WAYS][MAX_SETS];
-	unsigned nways, nsetslg2, linesizelg2;
-	uint64_t nhits, nmiss, nfetches, ndirty_evicts, ndirty_evict_bytes;
-	enum policy_e policy;
-	enum dirties_e dirties;
-	uint64_t alllinebytes;
+        struct line_st {
+            uint32_t tag;
+            unsigned last_access; // cycle of access, for eviction decisions
+            uint64_t valid_bytes; // Can actually be summarized with a single bit
+            uint64_t dirty_bytes;
+        } line[MAX_WAYS][MAX_SETS];
+        unsigned nways, nsetslg2, linesizelg2;
+        uint64_t nhits, nmiss, nfetches, ndirty_evicts, ndirty_evict_bytes;
+        enum policy_e policy;
+        enum dirties_e dirties;
+        uint64_t alllinebytes;
     } cache[MAX_CACHE_CONFIGS];
     int num_caches;
     uint64_t load_count[8+9];
@@ -215,12 +215,12 @@ csr_fmt(unsigned csrno)
 }
 
 static void
-disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
+disass_insn(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
 {
-    inst_t i = {.raw = inst };
+    insn_t i = {.raw = insn };
     const char **N = reg_name;
 
-    snprintf(buf, buf_size, "%08x ", inst);
+    snprintf(buf, buf_size, "%08x ", insn);
     buf += 9;
     buf_size -= 9;
 
@@ -252,10 +252,10 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
             snprintf(buf, buf_size, "%-11s%s,%d",
                      "li", N[i.i.rd], i.i.imm11_0);
         else if (i.i.funct3 == SR_I) {
-	    const char *opcode = i.i.imm11_0 & 1 << 10 ? "srai" : "srli";
-	    snprintf(buf, buf_size, "%-11s%s,%s,%d",
-		     opcode, N[i.i.rd], N[i.i.rs1], i.i.imm11_0);
-	} else
+            const char *opcode = i.i.imm11_0 & 1 << 10 ? "srai" : "srli";
+            snprintf(buf, buf_size, "%-11s%s,%s,%d",
+                     opcode, N[i.i.rd], N[i.i.rs1], i.i.imm11_0);
+        } else
             snprintf(buf, buf_size, "%-11s%s,%s,%d",
                      opcode_imm_name[i.i.funct3], N[i.i.rd], N[i.i.rs1], i.i.imm11_0);
         break;
@@ -293,15 +293,15 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
 
 //  case CUSTOM1:
     case AMO: {
-        char inst[16];
+        char insn[16];
         char *suffix = i.r.funct3 & 1 ? ".d" : ".w";
         char *aq = i.r.funct7 & 2 ? ".aq" : "";
         char *rl = i.r.funct7 & 1 ? ".rl" : "";
 
         switch (i.r.funct7 >> 2) {
         case LR:
-            snprintf(inst, sizeof inst, "lr%s%s%s", suffix, aq, rl);
-            snprintf(buf, buf_size, "%-11s%s,(%s)", inst,
+            snprintf(insn, sizeof insn, "lr%s%s%s", suffix, aq, rl);
+            snprintf(buf, buf_size, "%-11s%s,(%s)", insn,
                      N[i.r.rd], N[i.r.rs1]);
             break;
         case SC:
@@ -314,9 +314,9 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
         case AMOMAX:
         case AMOMINU:
         case AMOMAXU:
-            snprintf(inst, sizeof inst, "%s%s%s%s",
+            snprintf(insn, sizeof insn, "%s%s%s%s",
                      opcode_amo_name[i.r.funct7 >> 2], suffix, aq, rl);
-            snprintf(buf, buf_size, "%-11s%s,%s,(%s)", inst,
+            snprintf(buf, buf_size, "%-11s%s,%s,(%s)", insn,
                      N[i.r.rd], N[i.r.rs2], N[i.r.rs1]);
             break;
         }
@@ -407,8 +407,8 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
           case URET:   snprintf(buf, buf_size, "%-11s", "uret"); return;
           case SRET:   snprintf(buf, buf_size, "%-11s", "sret"); return;
           case MRET:   snprintf(buf, buf_size, "%-11s", "mret"); return;
-          default:     
-	      goto unhandled;
+          default:
+              goto unhandled;
           }
           break;
 
@@ -448,29 +448,29 @@ disass_inst(uint64_t pc, uint32_t inst, char *buf, size_t buf_size)
 
     default:
 unhandled:
-        warn("Opcode %s isn't handled, inst 0x%08x\n", opcode_name[i.r.opcode], inst);
+        warn("Opcode %s isn't handled, insn 0x%08x\n", opcode_name[i.r.opcode], insn);
         *buf = 0;
         return;
     }
 }
 
 static isa_decoded_t
-decode(uint64_t inst_addr, uint32_t inst)
+decode(uint64_t insn_addr, uint32_t insn)
 {
-    inst_t i = { .raw = inst };
-    isa_decoded_t dec = { .inst_addr = inst_addr, .inst = inst };
+    insn_t i = { .raw = insn };
+    isa_decoded_t dec = { .insn_addr = insn_addr, .insn = insn };
 
     dec.dest_reg     = ISA_NO_REG;
     dec.source_reg_a = 0;
     dec.source_reg_b = 0;
     dec.dest_msr     = ISA_NO_REG;
     dec.source_msr_a = ISA_NO_REG;
-    dec.class        = isa_inst_class_illegal;
+    dec.class        = isa_insn_class_illegal;
     dec.system       = false;
 
     switch (i.r.opcode) {
     case LOAD:
-        dec.class        = isa_inst_class_load;
+        dec.class        = isa_insn_class_load;
         dec.loadstore_size = 1 << (i.i.funct3 & 3);
         // LB, LH, [LW in 64-bit] needs sign-extension.
         if (i.i.funct3 < LW)
@@ -481,11 +481,11 @@ decode(uint64_t inst_addr, uint32_t inst)
 
     case LOAD_FP:
         // XXX Pretend it's a nop
-        dec.class        = isa_inst_class_alu;
+        dec.class        = isa_insn_class_alu;
         break;
 
     case MISC_MEM:
-        dec.class        = isa_inst_class_branch;
+        dec.class        = isa_insn_class_branch;
         break;
 
     case OP_IMM:
@@ -494,31 +494,31 @@ decode(uint64_t inst_addr, uint32_t inst)
     case LUI:
         dec.dest_reg     = i.i.rd;
         dec.source_reg_a = i.i.rs1;
-        dec.class        = isa_inst_class_alu;
+        dec.class        = isa_insn_class_alu;
         break;
 
     case STORE:
-        dec.class        = isa_inst_class_store;
+        dec.class        = isa_insn_class_store;
         dec.loadstore_size = 1 << (i.s.funct3 & 3);
         dec.source_reg_a = i.s.rs1;
         dec.source_reg_b = i.s.rs2;
         break;
 
     case STORE_FP:
-        dec.class        = isa_inst_class_alu; // nop
+        dec.class        = isa_insn_class_alu; // nop
         break;
 
     case AMO: {
         switch (i.r.funct7 >> 2) {
         case LR:
-            dec.class        = isa_inst_class_load;
+            dec.class        = isa_insn_class_load;
             dec.loadstore_size = i.r.funct3 & 1 ? 8 : -4;
             dec.source_reg_a = i.r.rs1;
             dec.dest_reg     = i.r.rd;
             break;
 
         case SC:
-            dec.class        = isa_inst_class_store;
+            dec.class        = isa_insn_class_store;
             dec.loadstore_size = i.r.funct3 & 1 ? 8 : 4;
             dec.source_reg_a = i.r.rs1;
             dec.source_reg_b = i.r.rs2;
@@ -534,7 +534,7 @@ decode(uint64_t inst_addr, uint32_t inst)
         case AMOOR:
         case AMOSWAP:
         case AMOXOR:
-            dec.class          = isa_inst_class_atomic;
+            dec.class          = isa_insn_class_atomic;
             dec.loadstore_size = i.r.funct3 & 1 ? 8 : -4;
             dec.source_reg_a   = i.s.rs1;
             dec.source_reg_b   = i.s.rs2;
@@ -549,12 +549,12 @@ decode(uint64_t inst_addr, uint32_t inst)
         /* RV32M */
         if (i.r.funct7 != 1)
             if (!((i.r.funct3 == ADDSUB || i.r.funct3 == SR_) && i.r.funct7 == 0x20 ||
-		  i.r.funct7 == 0x00))
-		goto unhandled;
+                  i.r.funct7 == 0x00))
+                goto unhandled;
         dec.dest_reg     = i.r.rd;
         dec.source_reg_a = i.r.rs1;
         dec.source_reg_b = i.r.rs2;
-        dec.class        = isa_inst_class_alu;
+        dec.class        = isa_insn_class_alu;
         break;
 
     case BRANCH: {
@@ -562,15 +562,15 @@ decode(uint64_t inst_addr, uint32_t inst)
             i.sb.imm12 << 12 | i.sb.imm11 << 11 |
             i.sb.imm10_5 << 5 | i.sb.imm4_1 << 1;
 
-        dec.class             = isa_inst_class_branch;
-        dec.jumpbranch_target = inst_addr + imm;
+        dec.class             = isa_insn_class_branch;
+        dec.jumpbranch_target = insn_addr + imm;
         dec.source_reg_a      = i.r.rs1;
         dec.source_reg_b      = i.r.rs2;
         break;
     }
 
     case JALR:
-        dec.class        = isa_inst_class_compjump;
+        dec.class        = isa_insn_class_compjump;
         dec.source_reg_a = i.i.rs1;
         dec.dest_reg     = i.i.rd;
         break;
@@ -582,9 +582,9 @@ decode(uint64_t inst_addr, uint32_t inst)
             i.uj.imm11    << 11 |
             i.uj.imm10_1  << 1;
 
-        dec.class        = isa_inst_class_jump;
+        dec.class        = isa_insn_class_jump;
         dec.dest_reg     = i.uj.rd;
-        dec.jumpbranch_target = inst_addr + imm;
+        dec.jumpbranch_target = insn_addr + imm;
         break;
     }
 
@@ -598,7 +598,7 @@ decode(uint64_t inst_addr, uint32_t inst)
           case SRET:
           case MRET:
               // XXX but it has a speculation barrier not accounted for
-              dec.class = isa_inst_class_compjump;
+              dec.class = isa_insn_class_compjump;
               break;
           }
           break;
@@ -607,7 +607,7 @@ decode(uint64_t inst_addr, uint32_t inst)
           if (i.i.rs1 == 0) {
               dec.source_msr_a = 0xFFF & (unsigned) i.i.imm11_0;
               dec.dest_reg     = i.i.rd;
-	      dec.class        = isa_inst_class_alu;
+              dec.class        = isa_insn_class_alu;
               break;
           }
           /* Fall-through */
@@ -619,7 +619,7 @@ decode(uint64_t inst_addr, uint32_t inst)
           dec.source_msr_a = 0xFFF & (unsigned) i.i.imm11_0;
           dec.dest_msr     = 0xFFF & (unsigned) i.i.imm11_0;
           dec.dest_reg     = i.i.rd;
-	  dec.class        = isa_inst_class_alu;
+          dec.class        = isa_insn_class_alu;
           break;
 
       case CSRRW:
@@ -627,7 +627,7 @@ decode(uint64_t inst_addr, uint32_t inst)
       case CSRRWI:
           dec.dest_msr     = 0xFFF & (unsigned) i.i.imm11_0;
           dec.dest_reg     = i.i.rd;
-	  dec.class        = isa_inst_class_alu;
+          dec.class        = isa_insn_class_alu;
 
           if (i.i.rd)
               dec.source_msr_a = 0xFFF & (unsigned) i.i.imm11_0;
@@ -641,7 +641,7 @@ decode(uint64_t inst_addr, uint32_t inst)
     case OP_FP:
         switch (i.r.funct7) {
         case FMV_D_X:
-            dec.class        = isa_inst_class_alu; // XXX alu_fp?
+            dec.class        = isa_insn_class_alu; // XXX alu_fp?
             //dec.source_freg_a = i.r.rs1;
             //dec.dest_freg     = i.r.rd;
             break;
@@ -651,8 +651,8 @@ decode(uint64_t inst_addr, uint32_t inst)
 
     default:
     unhandled:
-        warn("Opcode %s not decoded, inst %016"PRIx64":%08x\n",
-             opcode_name[i.r.opcode], inst_addr, i.raw);
+        warn("Opcode %s not decoded, insn %016"PRIx64":%08x\n",
+             opcode_name[i.r.opcode], insn_addr, i.raw);
         break;
     }
 
@@ -663,7 +663,7 @@ decode(uint64_t inst_addr, uint32_t inst)
 }
 
 static isa_result_t
-inst_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
+insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
 {
     int64_t op_a      = (int64_t) op_a_u;
     int64_t op_b      = (int64_t) op_b_u;
@@ -671,7 +671,7 @@ inst_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_
     int32_t op_b_32   = (int32_t) op_b;
     uint32_t op_a_u_32= (uint32_t) op_a_u;
     uint32_t op_b_u_32= (uint32_t) op_b_u;
-    inst_t i          = { .raw = dec.inst };
+    insn_t i          = { .raw = dec.insn };
     isa_result_t res  = { 0 };
     uint64_t ea_load  = op_a + i.i.imm11_0;
     uint64_t ea_store = op_a + (i.s.imm11_5 << 5 | i.s.imm4_0);
@@ -740,7 +740,7 @@ inst_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_
         return res;
 
     case AUIPC:
-        res.result = dec.inst_addr + (i.u.imm31_12 << 12);
+        res.result = dec.insn_addr + (i.u.imm31_12 << 12);
         return res;
 
     case STORE:
@@ -937,18 +937,18 @@ inst_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_
         return res;
 
     case JALR:
-        res.result = dec.inst_addr + 4;
+        res.result = dec.insn_addr + 4;
         res.compjump_target = (op_a + i.i.imm11_0) & -2LL;
         return res;
 
     case JAL:
-        res.result = dec.inst_addr + 4;
+        res.result = dec.insn_addr + 4;
         return res;
 
     default:
-        warn("Opcode %s exec not implemented, inst %016"PRIx64":%08x "
+        warn("Opcode %s exec not implemented, insn %016"PRIx64":%08x "
              "i{%x,%s,%x,%s,%s,%x}\n",
-             opcode_name[i.r.opcode], dec.inst_addr, i.raw,
+             opcode_name[i.r.opcode], dec.insn_addr, i.raw,
              i.i.imm11_0, reg_name[i.r.rs1], i.r.funct3,
              reg_name[i.r.rd],
              opcode_name[i.r.opcode], i.r.opext);
@@ -962,10 +962,10 @@ inst_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_
 }
 
 static isa_result_t
-inst_exec_system(cpu_state_t *s, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
+insn_exec_system(cpu_state_t *s, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
 {
     int64_t op_a      = (int64_t) op_a_u;
-    inst_t i          = { .raw = dec.inst };
+    insn_t i          = { .raw = dec.insn };
     isa_result_t res  = { 0 };
     res.fatal_error   = false;
 
@@ -978,7 +978,7 @@ inst_exec_system(cpu_state_t *s, isa_decoded_t dec, uint64_t op_a_u, uint64_t op
             switch (i.i.imm11_0) {
             case ECALL: {
                 s->msr[CSR_MCAUSE] = EXCP_UMODE_CALL + s->priv;
-                s->msr[CSR_MEPC] = dec.inst_addr;
+                s->msr[CSR_MEPC] = dec.insn_addr;
                 s->msr[CSR_MTVAL] = 0;
 
                 /* When a trap is taken from privilege mode y into privilege
@@ -1022,7 +1022,7 @@ inst_exec_system(cpu_state_t *s, isa_decoded_t dec, uint64_t op_a_u, uint64_t op
             default:
                 break;
             }
-	    dump_cache_stats((riscv_state_t *)s->arch_specific);
+            dump_cache_stats((riscv_state_t *)s->arch_specific);
             assert(0);
 
         case CSRRS:  res.msr_result = msr_a |  op_a;    return res;
@@ -1038,9 +1038,9 @@ inst_exec_system(cpu_state_t *s, isa_decoded_t dec, uint64_t op_a_u, uint64_t op
         break;
 
     default:
-        warn("Opcode %s exec not implemented, inst %016"PRIx64":%08x "
+        warn("Opcode %s exec not implemented, insn %016"PRIx64":%08x "
              "i{%x,%s,%x,%s,%s,%x}\n",
-             opcode_name[i.r.opcode], dec.inst_addr, i.raw,
+             opcode_name[i.r.opcode], dec.insn_addr, i.raw,
              i.i.imm11_0, reg_name[i.r.rs1], i.r.funct3,
              reg_name[i.r.rd],
              opcode_name[i.r.opcode], i.r.opext);
@@ -1055,15 +1055,15 @@ inst_exec_system(cpu_state_t *s, isa_decoded_t dec, uint64_t op_a_u, uint64_t op
 
 
 static isa_result_t
-inst_exec32(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
+insn_exec32(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
 {
-    return inst_exec(32, dec, op_a_u, op_b_u, msr_a);
+    return insn_exec(32, dec, op_a_u, op_b_u, msr_a);
 }
 
 static isa_result_t
-inst_exec64(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
+insn_exec64(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
 {
-    return inst_exec(64, dec, op_a_u, op_b_u, msr_a);
+    return insn_exec(64, dec, op_a_u, op_b_u, msr_a);
 }
 
 int exception_raised; // XXX hack
@@ -1137,7 +1137,7 @@ static uint64_t read_msr(cpu_state_t *s, unsigned csrno)
 {
     if (s->priv < ((csrno >> 8) & 3)) {
         ERROR("  Illegal Read of CSR %3x\n", csrno);
-        raise(s, EXCP_INST_ILLEGAL);
+        raise(s, EXCP_INSN_ILLEGAL);
         return 0;
     }
 
@@ -1164,7 +1164,7 @@ static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value)
 {
     if (s->priv < ((csrno >> 8) & 3) || (csrno & 0xc00) == 0xc00) {
         ERROR("  Illegal Write of CSR %3x\n", csrno);
-        raise(s, EXCP_INST_ILLEGAL);
+        raise(s, EXCP_INSN_ILLEGAL);
         return;
     }
 
@@ -1201,11 +1201,11 @@ static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value)
 }
 
 static void make_cache(riscv_state_t *s,
-		       unsigned nways, unsigned nsetslg2, unsigned linesizelg2,
-		       enum policy_e policy, enum dirties_e dirties)
+                       unsigned nways, unsigned nsetslg2, unsigned linesizelg2,
+                       enum policy_e policy, enum dirties_e dirties)
 {
     if (s->num_caches >= MAX_CACHE_CONFIGS)
-	return;
+        return;
 
     struct cache_st *c = s->cache + s->num_caches;
     c->nways = nways;
@@ -1216,16 +1216,16 @@ static void make_cache(riscv_state_t *s,
     unsigned size = c->nways << (c->nsetslg2 + c->linesizelg2);
     c->alllinebytes = (1LL << (1LL << c->linesizelg2)) - 1;
     if (c->alllinebytes == 0) // Sigh, 1 << 64 doesn't make 0
-	c->alllinebytes = ~0ULL;
+        c->alllinebytes = ~0ULL;
 
     if (8192 <= size && size <= 16384) {
-	if (0)
-	    fprintf(stderr, "Cache Creation: config #%d: <%d,%d,%d>, %d KiB %6s %s\n",
-		    s->num_caches,
-		    nways, 1 << nsetslg2, 1 << linesizelg2,
-		    (c->nways << (c->nsetslg2 + c->linesizelg2)) / 1024,
-		    policy_s[policy], dirties_s[dirties]);
-	++s->num_caches;
+        if (0)
+            fprintf(stderr, "Cache Creation: config #%d: <%d,%d,%d>, %d KiB %6s %s\n",
+                    s->num_caches,
+                    nways, 1 << nsetslg2, 1 << linesizelg2,
+                    (c->nways << (c->nsetslg2 + c->linesizelg2)) / 1024,
+                    policy_s[policy], dirties_s[dirties]);
+        ++s->num_caches;
     }
 }
 
@@ -1234,19 +1234,19 @@ static void dump_cache_stats(riscv_state_t *s)
     const int fetchoverhead = 24; // XXX Guess
 
     for (int i = 0; i < s->num_caches; ++i) {
-	struct cache_st *c = s->cache + i;
+        struct cache_st *c = s->cache + i;
 
-	fprintf(stderr, 
-		"Cache %3d %5d KiB %d ways %4d sets %3d Bline %6s %s %8ld hits, %8ld misses, %8ld Bfetches, %8ld (%8ld B) WB\n",
-		i, c->nways << (c->nsetslg2 + c->linesizelg2), c->nways, 1 << c->nsetslg2, 1 << c->linesizelg2,
-		policy_s[c->policy], dirties_s[c->dirties],
-		c->nhits, c->nmiss, c->nfetches * (fetchoverhead + (1 << c->linesizelg2)), c->ndirty_evicts, c->ndirty_evict_bytes);
+        fprintf(stderr,
+                "Cache %3d %5d KiB %d ways %4d sets %3d Bline %6s %s %8ld hits, %8ld misses, %8ld Bfetches, %8ld (%8ld B) WB\n",
+                i, c->nways << (c->nsetslg2 + c->linesizelg2), c->nways, 1 << c->nsetslg2, 1 << c->linesizelg2,
+                policy_s[c->policy], dirties_s[c->dirties],
+                c->nhits, c->nmiss, c->nfetches * (fetchoverhead + (1 << c->linesizelg2)), c->ndirty_evicts, c->ndirty_evict_bytes);
     }
 
     if (0)
     for (int i = 0; i < 8+9; ++i)
-	if (s->load_count[i])
-	    fprintf(stderr, "L%2d %8ld\n", i-8, s->load_count[i]);
+        if (s->load_count[i])
+            fprintf(stderr, "L%2d %8ld\n", i-8, s->load_count[i]);
 
     fflush(stderr);
 }
@@ -1257,105 +1257,105 @@ static void cache_sim(cpu_state_t *cpu, uint64_t address, bool isStore, int mem_
 
     if (debug_cache)
     fprintf(stderr, "%s ACCESS address %08lx..%08lx\n", isStore ? "ST" : "LD",
-	   address, address + mem_access_size - 1);
+           address, address + mem_access_size - 1);
 
     for (int i = 0; i < s->num_caches; ++i) {
-	struct cache_st *c = s->cache + i;
+        struct cache_st *c = s->cache + i;
 
-	unsigned cache_index = address                >> c->linesizelg2;
-	unsigned line_offset = address - (cache_index << c->linesizelg2);
-	unsigned cache_tag   = cache_index              >> c->nsetslg2;
-	unsigned cache_set   = cache_index - (cache_tag << c->nsetslg2);
-	uint64_t bytes_mask = ((1LL << mem_access_size) - 1) << line_offset;
-	int w;
+        unsigned cache_index = address                >> c->linesizelg2;
+        unsigned line_offset = address - (cache_index << c->linesizelg2);
+        unsigned cache_tag   = cache_index              >> c->nsetslg2;
+        unsigned cache_set   = cache_index - (cache_tag << c->nsetslg2);
+        uint64_t bytes_mask = ((1LL << mem_access_size) - 1) << line_offset;
+        int w;
 
-	if (debug_cache)
-	    fprintf(stderr, " Cache #%3d <%6x,%3x,%2x> ", i, cache_tag, cache_set, line_offset);
+        if (debug_cache)
+            fprintf(stderr, " Cache #%3d <%6x,%3x,%2x> ", i, cache_tag, cache_set, line_offset);
 
-	for (w = 0; w < c->nways; ++w)
-	    if (c->line[w][cache_set].tag == cache_tag)
-		break;
+        for (w = 0; w < c->nways; ++w)
+            if (c->line[w][cache_set].tag == cache_tag)
+                break;
 
-	if (w < c->nways) {
-	    if (isStore && c->dirties == PR_BYTE ||
-		(c->line[w][cache_set].valid_bytes & bytes_mask) == bytes_mask) {
+        if (w < c->nways) {
+            if (isStore && c->dirties == PR_BYTE ||
+                (c->line[w][cache_set].valid_bytes & bytes_mask) == bytes_mask) {
 
-		if (debug_cache)
-		    fprintf(stderr, "HIT way %d  (line V %lx, D %lx)\n",
-			    w,
-			    c->line[w][cache_set].valid_bytes,
-			    c->line[w][cache_set].dirty_bytes);
+                if (debug_cache)
+                    fprintf(stderr, "HIT way %d  (line V %lx, D %lx)\n",
+                            w,
+                            c->line[w][cache_set].valid_bytes,
+                            c->line[w][cache_set].dirty_bytes);
 
-		c->nhits += 1;
-		c->line[w][cache_set].last_access = cpu->counter;
+                c->nhits += 1;
+                c->line[w][cache_set].last_access = cpu->counter;
 
-		if (isStore)
-		    switch (c->dirties) {
-		    case PR_LINE:
-			c->line[w][cache_set].dirty_bytes = c->alllinebytes;
-			break;
-		    case PR_BYTE:
-			c->line[w][cache_set].valid_bytes |= bytes_mask;
-			c->line[w][cache_set].dirty_bytes |= bytes_mask;
-			break;
-		    }
+                if (isStore)
+                    switch (c->dirties) {
+                    case PR_LINE:
+                        c->line[w][cache_set].dirty_bytes = c->alllinebytes;
+                        break;
+                    case PR_BYTE:
+                        c->line[w][cache_set].valid_bytes |= bytes_mask;
+                        c->line[w][cache_set].dirty_bytes |= bytes_mask;
+                        break;
+                    }
 
-		continue;
-	    }
-	}
+                continue;
+            }
+        }
 
-	/* We have a miss, so evict something (assume cache is full) */
-	c->nmiss += 1;
-	if (c->policy == RANDOM)
-	    w = random() % c->nways;
-	else {
-	    w = 0;
-	    for (int j = 1; j < c->nways; ++j)
-		if (c->line[j][cache_set].last_access < c->line[w][cache_set].last_access)
-		    w = j;
-	}
+        /* We have a miss, so evict something (assume cache is full) */
+        c->nmiss += 1;
+        if (c->policy == RANDOM)
+            w = random() % c->nways;
+        else {
+            w = 0;
+            for (int j = 1; j < c->nways; ++j)
+                if (c->line[j][cache_set].last_access < c->line[w][cache_set].last_access)
+                    w = j;
+        }
 
-	if (debug_cache)
-	    fprintf(stderr, "MISS evict way %d  (line V %lx, D %lx)\n",
-		    w,
-		    c->line[w][cache_set].valid_bytes,
-		    c->line[w][cache_set].dirty_bytes);
+        if (debug_cache)
+            fprintf(stderr, "MISS evict way %d  (line V %lx, D %lx)\n",
+                    w,
+                    c->line[w][cache_set].valid_bytes,
+                    c->line[w][cache_set].dirty_bytes);
 
-	if (c->line[w][cache_set].dirty_bytes) {
-	    c->ndirty_evicts += 1;
-	    c->ndirty_evict_bytes += __builtin_popcount(c->line[w][cache_set].dirty_bytes);
-	    c->line[w][cache_set].dirty_bytes = 0;
-	}
+        if (c->line[w][cache_set].dirty_bytes) {
+            c->ndirty_evicts += 1;
+            c->ndirty_evict_bytes += __builtin_popcount(c->line[w][cache_set].dirty_bytes);
+            c->line[w][cache_set].dirty_bytes = 0;
+        }
 
-	c->line[w][cache_set].tag = cache_tag;
-	switch (c->policy) {
-	case MRULRU: 
-	    c->line[w][cache_set].last_access = 0; 
-	    break;
-	case LRU:
-	case RANDOM:
-	    c->line[w][cache_set].last_access = cpu->counter;
-	    break;
-	}
+        c->line[w][cache_set].tag = cache_tag;
+        switch (c->policy) {
+        case MRULRU:
+            c->line[w][cache_set].last_access = 0;
+            break;
+        case LRU:
+        case RANDOM:
+            c->line[w][cache_set].last_access = cpu->counter;
+            break;
+        }
 
-	switch (c->dirties) {
-	case PR_BYTE:
-	    if (isStore) {
-		c->line[w][cache_set].valid_bytes = bytes_mask;
-		c->line[w][cache_set].dirty_bytes = bytes_mask;
-	    } else {
-		c->nfetches += 1;
-		c->line[w][cache_set].valid_bytes = c->alllinebytes;
-		c->line[w][cache_set].dirty_bytes = 0;
-	    }
-	    break;
-	case PR_LINE:
-	    c->nfetches += 1;
-	    c->line[w][cache_set].valid_bytes = c->alllinebytes;
-	    if (isStore)
-		c->line[w][cache_set].dirty_bytes = c->alllinebytes;
-	    break;
-	}
+        switch (c->dirties) {
+        case PR_BYTE:
+            if (isStore) {
+                c->line[w][cache_set].valid_bytes = bytes_mask;
+                c->line[w][cache_set].dirty_bytes = bytes_mask;
+            } else {
+                c->nfetches += 1;
+                c->line[w][cache_set].valid_bytes = c->alllinebytes;
+                c->line[w][cache_set].dirty_bytes = 0;
+            }
+            break;
+        case PR_LINE:
+            c->nfetches += 1;
+            c->line[w][cache_set].valid_bytes = c->alllinebytes;
+            if (isStore)
+                c->line[w][cache_set].dirty_bytes = c->alllinebytes;
+            break;
+        }
     }
 }
 
@@ -1369,7 +1369,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *
     bool ifetch = false;
 
     if (mem_access_size == 0)
-	mem_access_size = 4, ifetch = true;
+        mem_access_size = 4, ifetch = true;
 
     *error = MEMORY_SUCCESS;
 
@@ -1378,7 +1378,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *
     uint32_t access = BF_PACK(1, PTE_UR);
 
     if (mem_access_size == 44)
-        mem_access_size = 4, except = EXCP_INST_ADDR, access = BF_PACK(1, PTE_UX);
+        mem_access_size = 4, except = EXCP_INSN_ADDR, access = BF_PACK(1, PTE_UX);
 
     if (BF_GET(s->msr[CSR_STATUS], CSR_STATUS_S_BF))
         access <<= 3;
@@ -1427,10 +1427,10 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *
     }
 
     if (ifetch)
-	cache_sim(s, address, 0, abs(mem_access_size));
+        cache_sim(s, address, 0, abs(mem_access_size));
 
     if (!ifetch)
-	((riscv_state_t *)s->arch_specific)->load_count[mem_access_size + 8] += 1;
+        ((riscv_state_t *)s->arch_specific)->load_count[mem_access_size + 8] += 1;
 
     switch (mem_access_size) {
     case -1: return *( int8_t  *)p;
@@ -1454,8 +1454,8 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, mem
 
     // XXX Hack for Dhrystone
     if (address == 0x0000000010000000) {
-	putchar(value & 255);
-	return;
+        putchar(value & 255);
+        return;
     }
 
 #if 0
@@ -1531,21 +1531,21 @@ setup(cpu_state_t *state, elf_info_t *info)
 
 
     if (0)
-    for (unsigned setslg2 = 5; setslg2 <= 12; setslg2 += 1) 
-	for (unsigned ways = 1; ways <= 4; ++ways)
-	    for (unsigned linesizelg2 = 4; linesizelg2 <= 6; ++linesizelg2)
-		for (enum dirties_e d = PR_LINE; d <= PR_BYTE; ++d)
-		{
-		    make_cache(s, ways, setslg2, linesizelg2, LRU, d);
-		    make_cache(s, ways, setslg2, linesizelg2, RANDOM, d);
-		    make_cache(s, ways, setslg2, linesizelg2, MRULRU, d);
-		}
+    for (unsigned setslg2 = 5; setslg2 <= 12; setslg2 += 1)
+        for (unsigned ways = 1; ways <= 4; ++ways)
+            for (unsigned linesizelg2 = 4; linesizelg2 <= 6; ++linesizelg2)
+                for (enum dirties_e d = PR_LINE; d <= PR_BYTE; ++d)
+                {
+                    make_cache(s, ways, setslg2, linesizelg2, LRU, d);
+                    make_cache(s, ways, setslg2, linesizelg2, RANDOM, d);
+                    make_cache(s, ways, setslg2, linesizelg2, MRULRU, d);
+                }
 
-    for (unsigned setslg2 = 5; setslg2 <= 18; setslg2 += 1) 
-	for (unsigned ways = 1; ways <= 1; ++ways)
-	    for (unsigned linesizelg2 = 4; linesizelg2 <= 6; ++linesizelg2)
-		for (enum dirties_e d = PR_LINE; d <= PR_LINE; ++d)
-		    make_cache(s, ways, setslg2, linesizelg2, RANDOM, d);
+    for (unsigned setslg2 = 5; setslg2 <= 18; setslg2 += 1)
+        for (unsigned ways = 1; ways <= 1; ++ways)
+            for (unsigned linesizelg2 = 4; linesizelg2 <= 6; ++linesizelg2)
+                for (enum dirties_e d = PR_LINE; d <= PR_LINE; ++d)
+                    make_cache(s, ways, setslg2, linesizelg2, RANDOM, d);
 }
 
 #if 1
@@ -1555,9 +1555,9 @@ const arch_t arch_riscv32 = {
     .is_64bit = false,
     .setup = setup,
     .decode = decode,
-    .inst_exec = inst_exec32,
-    .inst_exec_system = inst_exec_system,
-    .disass_inst = disass_inst,
+    .insn_exec = insn_exec32,
+    .insn_exec_system = insn_exec_system,
+    .disass_insn = disass_insn,
     .tick = tick,
     .read_msr = read_msr,
     .write_msr = write_msr,
@@ -1572,9 +1572,9 @@ const arch_t arch_riscv64 = {
     .is_64bit = true,
     .setup = setup,
     .decode = decode,
-    .inst_exec = inst_exec64,
-    .inst_exec_system = inst_exec_system,
-    .disass_inst = disass_inst,
+    .insn_exec = insn_exec64,
+    .insn_exec_system = insn_exec_system,
+    .disass_insn = disass_insn,
     .tick = tick,
     .read_msr = read_msr,
     .write_msr = write_msr,

@@ -110,15 +110,15 @@ step_sscalar_oooe(
             break;
 
         if (state->fatal_error)
-            // XXX We should be able to poison the instruction instead
+            // XXX We should be able to poison the instruction insnead
             return true;
 
         reservation_station_t *rs =
             reservation_stations + (rs_size++ + rs_start) % WINDOW_SIZE;
         isa_decoded_t dec = arch->decode(state->pc, i);
 
-        n_load += dec.class == isa_inst_class_load;
-        n_store += dec.class == isa_inst_class_store;
+        n_load += dec.class == isa_insn_class_load;
+        n_store += dec.class == isa_insn_class_store;
 
         /*
          * Only fetch instructions that can safely be reordered.  It's
@@ -155,9 +155,9 @@ step_sscalar_oooe(
 
         ++fetch_number;
 
-        if (rs->dec.class == isa_inst_class_jump ||
-            rs->dec.class == isa_inst_class_branch ||
-            rs->dec.class == isa_inst_class_compjump) { // XXX continue on unconditional branches
+        if (rs->dec.class == isa_insn_class_jump ||
+            rs->dec.class == isa_insn_class_branch ||
+            rs->dec.class == isa_insn_class_compjump) { // XXX continue on unconditional branches
             if (DEBUG_SB)
                 printf("stop fetching past %08"PRIx64"\n", state->pc);
 
@@ -193,14 +193,14 @@ step_sscalar_oooe(
         if (!scoreboard[rs->pr_a]) {
             if (DEBUG_SB)
                 printf("... skipping %08"PRIx64" because op a (R%d) isn't ready\n",
-                       rs->dec.inst_addr, rs->pr_a);
+                       rs->dec.insn_addr, rs->pr_a);
             continue;
         }
 
         if (!scoreboard[rs->pr_b]) {
             if (DEBUG_SB)
                 printf("... skipping %08"PRIx64" because op b (R%d) isn't ready\n",
-                       rs->dec.inst_addr, rs->pr_b);
+                       rs->dec.insn_addr, rs->pr_b);
             continue;
         }
 
@@ -213,21 +213,21 @@ step_sscalar_oooe(
 
         rs->issued  = true;
 
-        isa_result_t res = arch->inst_exec(rs->dec, op_a, op_b, 0);
+        isa_result_t res = arch->insn_exec(rs->dec, op_a, op_b, 0);
         res.result = CANONICALIZE(res.result);
 
         if (res.fatal_error)
             return true;
 
         switch (rs->dec.class) {
-        case isa_inst_class_illegal:
-        case isa_inst_class_atomic:
+        case isa_insn_class_illegal:
+        case isa_insn_class_atomic:
             assert(0); // This would require a bit more thought
 
-        case isa_inst_class_alu:
+        case isa_insn_class_alu:
             break;
 
-        case isa_inst_class_load:
+        case isa_insn_class_load:
             res.result = arch->load(state, res.result, rs->dec.loadstore_size, &error);
             res.result = CANONICALIZE(res.result);
 
@@ -236,7 +236,7 @@ step_sscalar_oooe(
 
             break;
 
-        case isa_inst_class_store:
+        case isa_insn_class_store:
             arch->store(state, res.result, res.store_value, rs->dec.loadstore_size, &error);
 
             if (error != MEMORY_SUCCESS)
@@ -244,23 +244,23 @@ step_sscalar_oooe(
 
             break;
 
-        case isa_inst_class_jump:
+        case isa_insn_class_jump:
             state->pc = rs->dec.jumpbranch_target;
             break;
 
-        case isa_inst_class_branch:
+        case isa_insn_class_branch:
             if (res.branch_taken)
                 state->pc = rs->dec.jumpbranch_target;
             else
                 state->pc += 4;
             break;
 
-        case isa_inst_class_compjump:
+        case isa_insn_class_compjump:
             state->pc = op_a;
             break;
         }
 
-        if (isa_inst_class_jump <= rs->dec.class) {
+        if (isa_insn_class_jump <= rs->dec.class) {
             if (DEBUG_SB)
                 printf("resume fetching from %08"PRIx64"\n", state->pc);
             stop_fetching = false;
@@ -284,7 +284,7 @@ step_sscalar_oooe(
     while (reservation_stations[rs_start].issued) {
         reservation_station_t *rs = &reservation_stations[rs_start];
         /* Co-simulate */
-        assert(rs->dec.inst_addr == costate->pc);
+        assert(rs->dec.insn_addr == costate->pc);
 
         if (step_simple(arch, costate, false))
             break;
@@ -292,7 +292,7 @@ step_sscalar_oooe(
         if (rs->dec.dest_reg != ISA_NO_REG &&
             rs->wbv != costate->r[rs->dec.dest_reg]) {
             printf("%08"PRIx64" got r%d <- %016"PRIx64", expected r%d <- %016"PRIx64"\n",
-                   rs->dec.inst_addr,
+                   rs->dec.insn_addr,
                    rs->dec.dest_reg, rs->wbv,
                    rs->dec.dest_reg, costate->r[rs->dec.dest_reg]);
 

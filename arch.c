@@ -28,12 +28,12 @@ isa_disass(const arch_t *arch, isa_decoded_t dec, isa_result_t res)
 {
     char dis_buf[99];
 
-    fprintf(stderr, "%016"PRIx64" ", dec.inst_addr);
+    fprintf(stderr, "%016"PRIx64" ", dec.insn_addr);
 
-    arch->disass_inst(dec.inst_addr, dec.inst, dis_buf, sizeof dis_buf);
+    arch->disass_insn(dec.insn_addr, dec.insn, dis_buf, sizeof dis_buf);
 
     switch (dec.class) {
-    case isa_inst_class_load:
+    case isa_insn_class_load:
         if (dec.dest_reg != ISA_NO_REG)
             fprintf(stderr, "%-32s %s <~ 0x%016"PRIx64" [0x%016"PRIx64"]",
 		    dis_buf, arch->reg_name[dec.dest_reg], res.result, res.load_addr);
@@ -42,7 +42,7 @@ isa_disass(const arch_t *arch, isa_decoded_t dec, isa_result_t res)
 		    dis_buf, res.result, res.load_addr);
         break;
 
-    case isa_inst_class_store:
+    case isa_insn_class_store:
         fprintf(stderr, "%-32s [0x%016"PRIx64"] <- 0x%016"PRIx64, dis_buf, res.store_addr, res.store_value);
         break;
 
@@ -70,12 +70,6 @@ extern const arch_t arch_alpha, arch_lm32, arch_riscv32, arch_riscv64;
 const arch_t *
 get_arch(uint16_t machine, bool is_64bit)
 {
-    if (machine == EM_ALPHA)
-        return &arch_alpha;
-
-    if (machine == EM_LM32 || machine == EM_LM32_ALT)
-        return &arch_lm32;
-
     if (machine == EM_RISCV && is_64bit)
         return &arch_riscv64;
 

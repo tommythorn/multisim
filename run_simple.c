@@ -38,17 +38,14 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     uint64_t orig_r[32];
     uint64_t pc       = state->pc;
     memory_exception_t error;
-    uint32_t inst     = (uint32_t)arch->load(state, pc, 0 /* = ifetch */, &error);
+    uint32_t insn     = (uint32_t)arch->load(state, pc, 0 /* = ifetch */, &error);
 
     if (error != MEMORY_SUCCESS)
 	/* arch->raise_exception(...);
            return;  */
         return error == MEMORY_FATAL;
 
-    if (verbosity & VERBOSE_TRACE)
-        fprintf(stderr, "%5d:%08"PRIx64" %08x\n", cycle, pc, inst);
-
-    isa_decoded_t dec = arch->decode(pc, inst);
+    isa_decoded_t dec = arch->decode(pc, insn);
 
     if (verbosity & VERBOSE_TRACE)
         memcpy(orig_r, state->r, sizeof orig_r);
@@ -66,7 +63,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
 
     uint64_t atomic_load_addr = op_a;
 
-    if (dec.class == isa_inst_class_atomic)
+    if (dec.class == isa_insn_class_atomic)
         op_a = arch->load(state, atomic_load_addr, dec.loadstore_size, &error);
 
     // XXX If (raised exception) return;
@@ -81,9 +78,9 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     isa_result_t res;
 
     if (!dec.system)
-	res = arch->inst_exec(dec, op_a, op_b, msr_a);
+	res = arch->insn_exec(dec, op_a, op_b, msr_a);
     else
-	res = arch->inst_exec_system(state, dec, op_a, op_b, msr_a);
+	res = arch->insn_exec_system(state, dec, op_a, op_b, msr_a);
     res.result = CANONICALIZE(res.result);
 
     if (res.fatal_error) // XXX If (raised exception) return;
@@ -93,7 +90,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
         return false;
 
     switch (dec.class) {
-    case isa_inst_class_load:
+    case isa_insn_class_load:
 	res.load_addr = CANONICALIZE(res.load_addr);
         res.result = arch->load(state, res.load_addr, dec.loadstore_size, &error);
         res.result = CANONICALIZE(res.result);
@@ -104,7 +101,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
         state->pc += 4;
         break;
 
-    case isa_inst_class_store:
+    case isa_insn_class_store:
 	res.store_addr = CANONICALIZE(res.store_addr);
 	res.store_value = CANONICALIZE(res.store_value);
         arch->store(state, res.store_addr, res.store_value, dec.loadstore_size, &error);
@@ -115,7 +112,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
         state->pc += 4;
         break;
 
-    case isa_inst_class_atomic:
+    case isa_insn_class_atomic:
 	// XXX ??
 	res.load_addr = CANONICALIZE(res.load_addr);
         arch->store(state, atomic_load_addr, res.result, dec.loadstore_size, &error);
@@ -128,17 +125,17 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
         break;
 
 
-    case isa_inst_class_branch:
+    case isa_insn_class_branch:
 	dec.jumpbranch_target = CANONICALIZE(dec.jumpbranch_target);
         state->pc = res.branch_taken ? dec.jumpbranch_target : state->pc + 4;
         break;
 
-    case isa_inst_class_jump:
+    case isa_insn_class_jump:
 	dec.jumpbranch_target = CANONICALIZE(dec.jumpbranch_target);
         state->pc = dec.jumpbranch_target;
         break;
 
-    case isa_inst_class_compjump:
+    case isa_insn_class_compjump:
 	res.compjump_target = CANONICALIZE(res.compjump_target);
         state->pc = res.compjump_target;
         break;
@@ -156,10 +153,11 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
         arch->write_msr(state, dec.dest_msr, res.msr_result);
 
     if (verbosity & VERBOSE_TRACE) {
+        if (verbosity & VERBOSE_TRACE)
+            fprintf(stderr, "%5d:%08"PRIx64" %08x", cycle, pc, insn);
         if (dec.dest_reg != ISA_NO_REG && orig_r[dec.dest_reg] != res.result)
-            fprintf(stderr,"%d:r%d=0x%08"PRIx64"\n", cycle, dec.dest_reg,
-                    res.result);
-        fflush(stderr);
+            fprintf(stderr, "r%d = 0x%08"PRIx64, dec.dest_reg, res.result);
+        fprintf(stderr, "\n");
         ++cycle;
     }
 
