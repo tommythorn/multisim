@@ -1,0 +1,277 @@
+2-way superscalar pipeline with scoreboard with early & late ALUs fusion; 4-wide fetch?
+
+Option:
+Fetch two instructions, from any addresses (incl two cache lines)
+
+ slot0 ALUa/shift/LD/ST
+ slot1 ALUa/LD/ST/ALUz; BRANCH/JUMP
+
+Q: What if one slot can't issue; stall all or issue partial?
+  - If all, then we can treat like VLIW and use trace cache
+
+0000000000010000 00014197 auipc      gp,0x14      gp <- 0x0000000000024000
+0000000000010004 44818193 addi       gp,gp,1096   gp <- 0x0000000000024448
+0000000000010008 82c18513 addi       a0,gp,-2004  a0 <- 0x0000000000023c74
+000000000001000c 00016617 auipc      a2,0x16      a2 <- 0x000000000002600c
+0000000000010010 4d460613 addi       a2,a2,1236   a2 <- 0x00000000000264e0
+0000000000010014 40a60633 sub        a2,a2,a0     a2 <- 0x000000000000286c
+
+In a perfect world:
+
+fused_auipc_addi gp,0x24448;    L_addi  a0,gp,-2004
+fused_auipc_addi a2,0x264e0;    L_sub   a2,a2,a0
+addi a1,zero,0;                 jal 0x00010d18
+
+addi       t1,zero,15;          addi       a4,a0,0
+-                               bgeu       t1,a2,0x00010d5c [misprd]
+
+andi       a5,a4,15;            bne        a5,zero,0x00010dc8 [misprd]
+
+slli       a3,a5,2;             auipc      t0,0x0
+
+add        a3,a3,t0;            addi       t0,ra,0
+jalr       ra,a3,-96  [indirect branch/call]
+
+sb         a1,11(a4);           sb         a1,10(a4)
+sb         a1,9(a4);            sb         a1,8(a4)
+sb         a1,7(a4);            sb         a1,6(a4)
+sb         a1,5(a4);            sb         a1,4(a4)
+sb         a1,3(a4);            sb         a1,2(a4)
+sb         a1,1(a4);            sb         a1,0(a4)
+ret [prd];                      addi       ra,t0,0
+
+addi       a5,a5,-16;           L_sub   a4,a4,a5
+add        a2,a2,a5;            bgeu       t1,a2,0x00010d5c [prd not]
+j          0x00010d2c
+
+bne        a1,zero,0x00010db0;  andi       a3,a2,-16
+andi       a2,a2,15;            add        a3,a3,a4
+
+sw         a1,0(a4);            sw         a1,4(a4)
+sw         a1,8(a4);            sw         a1,12(a4)
+addi       a4,a4,16;            bltu       a4,a3,0x00010d3c  (branches are always late)
+
+sw         a1,0(a4);            sw         a1,4(a4)
+sw         a1,8(a4);            sw         a1,12(a4)
+addi       a4,a4,16;            bltu       a4,a3,0x00010d3c  (branches are always late)
+
+OOH I NEED THAT
+
+...
+
+bne        a2,zero,0x00010d5c
+ret [prd 10020]
+
+auipc      a0,0x0;		L_addi       a0,a0,1404
+jal        0x00010550
+
+addi       a1,a0,0;		addi       a3,zero,0
+addi       a2,zero,0;		addi       a0,zero,0
+j          0x000134b4
+
+lw         a4,-2024(gp);	addi       t1,a0,0
+lw         a5,328(a4);		bne        a5,zero,0x000134cc
+
+addi       a5,a4,332
+sw         a5,328(a4)
+lw         a4,4(a5)
+addi       a6,zero,31
+addi       a0,zero,-1
+blt        a6,a4,0x0001352c
+slli       a7,a4,2
+beq        t1,zero,0x00013518
+
+Issues:
+- Overlapping stores => restart serially
+- Ether misses => buffer stores (upto N cachelines with pending store misses)
+- Branch mispredict => restart (speculative instructions were still in the pipe)
+
+
+
+sw         a1,0(a4)
+sw         a1,4(a4)
+sw         a1,8(a4)
+sw         a1,12(a4)
+addi       a4,a4,16
+bltu       a4,a3,0x00010d3c
+sw         a1,0(a4)
+sw         a1,4(a4)
+sw         a1,8(a4)
+sw         a1,12(a4)
+addi       a4,a4,16
+bltu       a4,a3,0x00010d3c
+sw         a1,0(a4)
+
+
+
+Random piece of trace from Dhrystone
+ sw         a1,12(a4)
+ addi       a4,a4,16
+ bltu       a4,a3,0x00010d3c
+ sw         a1,0(a4)
+ sw         a1,4(a4)
+ sw         a1,8(a4)
+ sw         a1,12(a4)
+ addi       a4,a4,16
+ bltu       a4,a3,0x00010d3c
+ sw         a1,0(a4)
+ sw         a1,4(a4)
+ sw         a1,8(a4)
+ sw         a1,12(a4)
+ addi       a4,a4,16
+ bltu       a4,a3,0x00010d3c
+
+
+
+ sw         a1,12(a4)
+ addi       a4,a4,16
+ bltu       a4,a3,0x00010d3c
+
+Could all issue together
+
+ sw         a1,0(a4)
+ sw         a1,4(a4)
+ bubble
+
+Can all issue together (assuming I can sustain two cache writes)
+
+ sw         a1,8(a4)
+ sw         a1,12(a4)
+ addi       a4,a4,16
+
+ bltu       a4,a3,0x00010d3c
+ sw         a1,0(a4) <- prd
+ sw         a1,4(a4) <- prd
+
+
+
+1001c 4fd000ef jal        0x00010d18   ra <- 0x0000000000010020
+10d20 02c37e63 bgeu       t1,a2,0x00010d5c
+10d28 0a079063 bne        a5,zero,0x00010dc8
+10dd8 fa0680e7 jalr       ra,a3,-96    ra <- 0x0000000000010ddc
+10dac 00008067 ret
+10dec f6c378e3 bgeu       t1,a2,0x00010d5c
+10df0 f3dff06f j          0x00010d2c
+10d2c 08059263 bne        a1,zero,0x00010db0
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+10d50 fed766e3 bltu       a4,a3,0x00010d3c
+11240 1cc050ef jal        0x0001640c   ra <- 0x0000000000011244
+16414 00051663 bne        a0,zero,0x00016420
+16424 00008067 ret
+11250 f8dff0ef jal        0x000111dc   ra <- 0x0000000000011254
+111e8 fe071ce3 bne        a4,zero,0x000111e0
+111e8 fe071ce3 bne        a4,zero,0x000111e0
+111f4 00008067 ret
+11268 00098a63 beq        s3,zero,0x0001127c
+1041c 00008067 ret
+20a48 ef0ef0ef jal        0x00010138   ra <- 0x0000000000020a4c
+20a48 ef0ef0ef jal        0x00010138   ra <- 0x0000000000020a4c
+101e4 1c4000ef jal        0x000103a8   ra <- 0x00000000000101e8
+10e78 380000ef jal        0x000111f8   ra <- 0x0000000000010e7c
+11240 1cc050ef jal        0x0001640c   ra <- 0x0000000000011244
+16414 00051663 bne        a0,zero,0x00016420
+16424 00008067 ret
+11250 f8dff0ef jal        0x000111dc   ra <- 0x0000000000011254
+111e8 fe071ce3 bne        a4,zero,0x000111e00000000000016854 fef616e3 bne        a2,a5,0x00016840
+16854 fef616e3 bne        a2,a5,0x00016840
+16854 fef616e3 bne        a2,a5,0x00016840
+16854 fef616e3 bne        a2,a5,0x00016840
+16854 fef616e3 bne        a2,a5,0x00016840
+16854 fef616e3 bne        a2,a5,0x00016840
+16854 fef616e3 bne        a2,a5,0x00016840
+16854 fef616e3 bne        a2,a5,0x00016840
+16854 fef616e3 bne        a2,a5,0x00016840
+14334 cb1ff06f j          0x00013fe4
+13fec 000b9a63 bne        s7,zero,0x00014000
+14014 f4049ce3 bne        s1,zero,0x00013f6c
+13f6c 36098463 beq        s3,zero,0x000142d4
+142e4 c89ff06f j          0x00013f6c
+13f6c 36098463 beq        s3,zero,0x000142d4
+13f70 02051263 bne        a0,zero,0x00013f94
+13f80 78c020ef jal        0x0001670c   ra <- 0x0000000000013f84
+16714 00c51663 bne        a0,a2,0x00016720
+16724 feb78ce3 beq        a5,a1,0x0001671c
+1671c 00008067 ret
+13f88 00050663 beq        a0,zero,0x00013f94
+13f98 0179f463 bgeu       s3,s7,0x00013fa0
+13fac 32a7fe63 bgeu       a5,a0,0x000142e8
+13fb8 3384d863 bge        s1,s8,0x000142e8
+142e8 02dc4263 blt        s8,a3,0x0001430c
+14314 4f4020ef jal        0x00016808   ra <- 0x0000000000014318
+16808 04a5fa63 bgeu       a1,a0,0x0001685c
+16810 04d57663 bgeu       a0,a3,0x0001685c
+16860 ff5ff06f j          0x00016854
+16854 fef616e3 bne        a2,a5,0x00016840
+16854 fef616e3 bne        a2,a5,0x00016840
+16858 00008067 ret
+1139c 00078463 beq        a5,zero,0x000113a4
+113a0 0ae79c63 bne        a5,a4,0x00011458
+1145c f3dff06f j          0x00011398
+1139c 00078463 beq        a5,zero,0x000113a4
+113a0 0ae79c63 bne        a5,a4,0x00011458
+1145c f3dff06f j          0x00011398
+1139c 00078463 beq        a5,zero,0x000113a4
+113a0 0ae79c63 bne        a5,a4,0x00011458
+1145c f3dff06f j          0x00011398
+1139c 00078463 beq        a5,zero,0x000113a4
+113a0 0ae79c63 bne        a5,a4,0x00011458
+1145c f3dff06f j          0x00011398
+1139c 00078463 beq        a5,zero,0x000113a4
+113a0 0ae79c63 bne        a5,a4,0x00011458
+1145c f3dff06f j          0x00011398
+1139c 00078463 beq        a5,zero,0x000113a4
+113a0 0ae79c63 bne        a5,a4,0x00011458
+1145c f3dff06f j          0x00011398
+1139c 00078463 beq        a5,zero,0x000113a4
+113a0 0ae79c63 bne        a5,a4,0x00011458
+1145c f3dff06f j          0x00011398
+1139c 00078463 beq        a5,zero,0x000113a4
+113a0 0ae79c63 bne        a5,a4,0x00011458
+1145c f3dff06f j          0x00011398
+1139c 00078463 beq        a5,zero,0x000113a4
+113a0 0ae79c63 bne        a5,a4,0x00011458
+113a8 040b0a63 beq        s6,zero,0x000113fc
+113d4 00f75e63 bge        a4,a5,0x000113f0
+11344 00008067 ret
+10e84 00008067 ret
+20d9c 8a0f00ef jal        0x00010e3c   ra <- 0x0000000000020da0
+10e78 380000ef jal        0x000111f8   ra <- 0x0000000000010e7c
+17f8c 00078a63 beq        a5,zero,0x00017fa0
+17fdc 6710206f j          0x0001ae4c
+1ae74 e60f50ef jal        0x000104d4   ra <- 0x000000000001ae78
+104d8 00e58c63 beq        a1,a4,0x000104f0
+104ec feb71ae3 bne        a4,a1,0x000104e0
+104ec feb71ae3 bne        a4,a1,0x000104e0
+104ec feb71ae3 bne        a4,a1,0x000104e0
+104ec feb71ae3 bne        a4,a1,0x000104e0
+104ec feb71ae3 bne        a4,a1,0x000104e0
