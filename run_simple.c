@@ -28,14 +28,10 @@
 #include "run_simple.h"
 #include "loadelf.h"
 
-extern verbosity_t verbosity_override;
-
-
 bool
-step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
+step_simple(const arch_t *arch, cpu_state_t *state)
 {
     static int cycle = 0;
-    uint64_t orig_r[32];
     uint64_t pc       = state->pc;
     memory_exception_t error;
     uint32_t insn     = (uint32_t)arch->load(state, pc, 0 /* = ifetch */, &error);
@@ -46,9 +42,6 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
         return error == MEMORY_FATAL;
 
     isa_decoded_t dec = arch->decode(pc, insn);
-
-    if (verbosity & VERBOSE_TRACE)
-        memcpy(orig_r, state->r, sizeof orig_r);
 
     assert(dec.source_reg_a == ISA_NO_REG || dec.source_reg_a < ISA_REGISTERS);
     assert(dec.source_reg_b == ISA_NO_REG || dec.source_reg_b < ISA_REGISTERS);
@@ -152,16 +145,16 @@ step_simple(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     if (dec.dest_msr != ISA_NO_REG)
         arch->write_msr(state, dec.dest_msr, res.msr_result);
 
-    if (verbosity & VERBOSE_TRACE) {
-        if (verbosity & VERBOSE_TRACE)
-            fprintf(stderr, "%5d:%08"PRIx64" %08x", cycle, pc, insn);
-        if (dec.dest_reg != ISA_NO_REG && orig_r[dec.dest_reg] != res.result)
-            fprintf(stderr, "r%d = 0x%08"PRIx64, dec.dest_reg, res.result);
-        fprintf(stderr, "\n");
+    if (state->verbosity & VERBOSE_TRACE) {
+        fprintf(stderr, "%5d:%08"PRIx64" %08x ", cycle, pc, insn);
+        if (dec.dest_reg != ISA_NO_REG)
+            fprintf(stderr, "r%-2d = %08x\n", dec.dest_reg, (uint32_t)res.result);
+        else
+            fprintf(stderr, " .   .   .   .\n");
         ++cycle;
     }
 
-    if (verbosity & VERBOSE_DISASS)
+    if (state->verbosity & VERBOSE_DISASS)
         isa_disass(arch, dec, res);
 
     arch->tick(state, 1);
@@ -178,16 +171,11 @@ void run_simple(int num_images, char *images[], verbosity_t verbosity)
 
     loadelfs(state->mem, num_images, images, &info);
 
-    // hack to support vmlinux which expects to be relocated?
-    if (info.text_segments >= 1 &&
-        (int64_t) info.text_start < 0)
-        info.program_entry += info.text_start;
-
     arch = get_arch(info.machine, info.is_64bit);
-    arch->setup(state, &info);
+    arch->setup(state, &info, verbosity);
 
     for (cycle = 0;; ++cycle) {
-        if (step_simple(arch, state, verbosity))
+        if (step_simple(arch, state))
             break;
     }
 

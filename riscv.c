@@ -1089,7 +1089,7 @@ static void raise(cpu_state_t *s, uint64_t cause)
                    BF_GET(s->msr[CSR_STATUS], CSR_STATUS_EI_BF),
                   intr_pend, intr_mask, s->pc);
 
-            verbosity_override |= VERBOSE_DISASS;
+            s->verbosity_override |= VERBOSE_DISASS;
             */
 
             return;
@@ -1454,7 +1454,8 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, mem
 
     // XXX Hack for Dhrystone
     if (address == 0x0000000010000000) {
-        putchar(value & 255);
+        if (s->verbosity & VERBOSE_CONSOLE)
+            putchar(value & 255);
         return;
     }
 
@@ -1504,10 +1505,11 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, mem
 }
 
 static void
-setup(cpu_state_t *state, elf_info_t *info)
+setup(cpu_state_t *state, elf_info_t *info, verbosity_t verbosity)
 {
     riscv_state_t *s = calloc(1, sizeof (riscv_state_t));
     state->arch_specific = s;
+    state->verbosity = verbosity;
     memset(state->r, 0, sizeof state->r);
     state->pc = info->program_entry;
     if (!info->is_64bit)

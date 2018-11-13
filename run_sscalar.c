@@ -112,9 +112,10 @@ static void cache_fsm(const arch_t *arch, cpu_state_t *state, cache_t *c,
     uint32_t set_index    = line_index - (tag_bits << c->nsetlg2);
 
     if (reset_cache_access && c->state != CSM_READY) {
-        if (debug_icache)
-            printf("I$ reset to %08x\n", address);
         c->state = CSM_READY;
+
+        if (state->verbosity & VERBOSE_CACHE)
+            fprintf(stderr, "I$ reset to %08x\n", address);
     }
 
     switch (c->state) {
@@ -124,11 +125,11 @@ static void cache_fsm(const arch_t *arch, cpu_state_t *state, cache_t *c,
 
         if (!*rdata_valid) {
 
-            if (debug_icache)
-                printf("I$ MISS on %08x\n", address);
+            if (state->verbosity & VERBOSE_CACHE)
+                fprintf(stderr, "I$ MISS on %08x\n", address);
 
-            if (debug_icache && c->tag[set_index] & LINE_VALID)
-                printf("I$ EVICT  %08x\n",
+            if (state->verbosity & VERBOSE_CACHE && c->tag[set_index] & LINE_VALID)
+                fprintf(stderr, "I$ EVICT  %08x\n",
                        ((c->tag[set_index] << c->nsetlg2) + set_index) << LINESIZELG2);
 
             c->fill_counter = 1 << (LINESIZELG2 - 2);
@@ -157,7 +158,7 @@ static void cache_fsm(const arch_t *arch, cpu_state_t *state, cache_t *c,
                 int word_index = (c->fill_address >> 2) & ((1 << (c->nsetlg2 + LINESIZELG2 - 2)) - 1);
 
                 if (0)
-                printf("FILLING I$ from %08x -> <%d,%d>\n",
+                fprintf(stderr, "FILLING I$ from %08x -> <%d,%d>\n",
                        c->fill_address,
                        word_index >> (LINESIZELG2 - 2),
                        word_index & ((1 << LINESIZELG2)/4 - 1));
@@ -178,9 +179,9 @@ static void cache_fsm(const arch_t *arch, cpu_state_t *state, cache_t *c,
         c->state = CSM_READY;
         *rdata = c->data[c->data_index];
 
-        if (address != c->orig_address)
-            printf("I$ request address has changed! was %08x, now %08x\n",
-                   c->orig_address, address);
+        if (state->verbosity & VERBOSE_CACHE && address != c->orig_address)
+            fprintf(stderr, "I$ request address has changed! was %08x, now %08x\n",
+                    c->orig_address, address);
         else
             *rdata_valid = true;
         break;
@@ -277,7 +278,7 @@ static bool step_sscalar(
                     assert(commit.dec.insn == coinsn);
                 else {
 
-                    step_simple(arch, costate, verbosity);
+                    step_simple(arch, costate);
 
                     if (commit.dec.dest_reg != ISA_NO_REG &&
                         state->r[commit.dec.dest_reg] != costate->r[commit.dec.dest_reg]) {
@@ -339,8 +340,7 @@ static bool step_sscalar(
                        CANONICALIZE(execute.res.load_addr), 1, false,
                        &fetch.ic_ready, &fetch.insn, &fetch.valid);
 
-            memory.res.result = 
-                                arch->load(state, execute.res.load_addr, execute.dec.loadstore_size, &error);
+            memory.res.result = arch->load(state, execute.res.load_addr, execute.dec.loadstore_size, &error);
             memory.res.result = CANONICALIZE(memory.res.result);
             if (error != MEMORY_SUCCESS)
                 return (error == MEMORY_FATAL);
@@ -466,8 +466,8 @@ void run_sscalar(int num_images, char *images[], verbosity_t verbosity)
     loadelfs(costate->mem, num_images, images, &info);
 
     arch = get_arch(info.machine, info.is_64bit);
-    arch->setup(state, &info);
-    arch->setup(costate, &info);
+    arch->setup(state, &info, verbosity);
+    arch->setup(costate, &info, verbosity & ~VERBOSE_CONSOLE);
     fetch.pc = state->pc;
 
     int cycle;

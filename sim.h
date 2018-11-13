@@ -31,6 +31,8 @@
 
 /* All the common architectual state */
 struct cpu_state_st {
+    verbosity_t     verbosity;
+
     memory_t       *mem;
 
     uint64_t        pc;
@@ -51,11 +53,6 @@ struct cpu_state_st {
     int             priv;   // Priviledge level
     void           *arch_specific; // XXX Ok, C++ would have made this cleaner
 };
-
-typedef enum verbosity_e {
-    VERBOSE_DISASS = 1 << 0,
-    VERBOSE_TRACE  = 1 << 1,
-} verbosity_t;
 
 #define fatal(msg...) ({fprintf(stderr, msg); exit(1);})
 #define warn(msg...)  fprintf(stderr, msg)

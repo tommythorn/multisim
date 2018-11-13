@@ -81,7 +81,7 @@ int main(int argc, char **argv)
 {
     char **images;
     int num_images;
-    verbosity_t verbosity = 0;
+    verbosity_t verbosity = VERBOSE_CONSOLE;
 
     for (;;) {
         int c;
@@ -101,7 +101,7 @@ int main(int argc, char **argv)
 	    break;
 
         case 'd':
-            verbosity |= VERBOSE_DISASS;
+            verbosity = verbosity*2 + 1;
             break;
 
         case 't':
@@ -123,6 +123,9 @@ int main(int argc, char **argv)
     if (optind >= argc) {
         usage(argv[0]);
     }
+
+    if (verbosity & VERBOSE_DISASS)
+        verbosity &= ~VERBOSE_TRACE;
 
     images = argv + optind;
     num_images = argc - optind;

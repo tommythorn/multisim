@@ -144,6 +144,14 @@ typedef enum memory_exception_e {
     MEMORY_FATAL	= 2,	// cannot proceed simulation
 } memory_exception_t;
 
+typedef enum verbosity_e {
+    VERBOSE_CONSOLE= 1 << 0,
+    VERBOSE_TRACE  = 1 << 1,
+    VERBOSE_DISASS = 1 << 2,
+    VERBOSE_PIPE   = 1 << 3,
+    VERBOSE_CACHE  = 1 << 4,
+} verbosity_t;
+
 typedef struct isa_st {
     /*
      * Many RISC architectures have a special register which reads as
@@ -156,7 +164,7 @@ typedef struct isa_st {
 
     const bool is_64bit;
 
-    void (*setup)(cpu_state_t *, elf_info_t *);
+    void (*setup)(cpu_state_t *, elf_info_t *, verbosity_t);
 
     isa_decoded_t (*decode)(uint64_t insn_addr, uint32_t insn);
 

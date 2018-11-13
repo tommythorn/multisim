@@ -286,7 +286,7 @@ step_sscalar_oooe(
         /* Co-simulate */
         assert(rs->dec.insn_addr == costate->pc);
 
-        if (step_simple(arch, costate, false))
+        if (step_simple(arch, costate))
             break;
 
         if (rs->dec.dest_reg != ISA_NO_REG &&
@@ -328,8 +328,8 @@ run_sscalar_oooe(int num_images, char *images[], verbosity_t verbosity)
     loadelfs(costate->mem, num_images, images, &info);
 
     arch = get_arch(info.machine, info.is_64bit);
-    arch->setup(state, &info);
-    arch->setup(costate, &info);
+    arch->setup(state, &info, verbosity);
+    arch->setup(costate, &info, verbosity);
 
 
     /* Scoreboard and reservation station initialization */
