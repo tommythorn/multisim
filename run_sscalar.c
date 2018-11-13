@@ -89,6 +89,7 @@ typedef struct cache_st {
     uint32_t data_index;
 
     uint32_t orig_address;
+    bool cancelled;
 } cache_t;
 
 static struct {
@@ -116,6 +117,9 @@ static void cache_fsm(const arch_t *arch, cpu_state_t *state, cache_t *c,
 
         if (state->verbosity & VERBOSE_CACHE)
             fprintf(stderr, "I$ reset to %08x\n", address);
+        // We cannot stop the FSM as we may already have partially
+        // overwritten the line
+        c->cancelled = true;
     }
 
     switch (c->state) {
@@ -179,7 +183,9 @@ static void cache_fsm(const arch_t *arch, cpu_state_t *state, cache_t *c,
         c->state = CSM_READY;
         *rdata = c->data[c->data_index];
 
-        if (state->verbosity & VERBOSE_CACHE && address != c->orig_address)
+        if (c->cancelled)
+            c->cancelled = true;
+        else if (state->verbosity & VERBOSE_CACHE && address != c->orig_address)
             fprintf(stderr, "I$ request address has changed! was %08x, now %08x\n",
                     c->orig_address, address);
         else
@@ -209,7 +215,7 @@ static struct {
     uint32_t insn_addr;
     uint32_t insn;
     memory_exception_t error;
-} fetch;
+} fetch, fetch_next;
 
 static struct {
     // Outputs
@@ -218,15 +224,14 @@ static struct {
     uint64_t op_a;
     uint64_t op_b;
     uint64_t msr_a;
-} decode;
-
+} decode, decode_next;
 
 static struct {
     // Outputs
     bool valid;
     isa_decoded_t dec;
     isa_result_t res;
-} execute;
+} execute, execute_next;
 
 #if 0
 static struct {
@@ -242,7 +247,7 @@ static struct {
     bool valid;
     isa_decoded_t dec;
     isa_result_t res;
-} commit;
+} commit, commit_next;
 
 static void flush_pipe_and_restart_from(uint32_t new_pc)
 {
