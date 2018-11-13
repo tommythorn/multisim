@@ -29,7 +29,6 @@
 #include "loadelf.h"
 
 const bool cosimulating = true;
-const bool debug_icache = false;
 
 // XXX The cache model doesn't really belong here, but we'll develop
 // it along with the superscalar implementation
@@ -89,7 +88,6 @@ typedef struct cache_st {
     uint32_t data_index;
 
     uint32_t orig_address;
-    bool cancelled;
 } cache_t;
 
 static struct {
@@ -112,21 +110,18 @@ static void cache_fsm(const arch_t *arch, cpu_state_t *state, cache_t *c,
     uint32_t tag_bits     = line_index >> c->nsetlg2;
     uint32_t set_index    = line_index - (tag_bits << c->nsetlg2);
 
-    if (reset_cache_access && c->state != CSM_READY) {
-        c->state = CSM_READY;
+    *rdata                = c->data[data_index];
+    *rdata_valid          = c->tag[set_index] == (tag_bits | LINE_VALID) && !reset_cache_access;
 
+    if (reset_cache_access) {
         if (state->verbosity & VERBOSE_CACHE)
             fprintf(stderr, "I$ reset to %08x\n", address);
-        // We cannot stop the FSM as we may already have partially
-        // overwritten the line
-        c->cancelled = true;
+        // We cannot stop the FSM as we may already have a memory transaction going
+        // c->state = CSM_READY;
     }
 
     switch (c->state) {
     case CSM_READY:
-        *rdata = c->data[data_index];
-        *rdata_valid = c->tag[set_index] == (tag_bits | LINE_VALID);
-
         if (!*rdata_valid) {
 
             if (state->verbosity & VERBOSE_CACHE)
@@ -181,19 +176,9 @@ static void cache_fsm(const arch_t *arch, cpu_state_t *state, cache_t *c,
     case CSM_UPDATE_TAG:
         c->tag[c->set_index] = c->tag_bits | LINE_VALID;
         c->state = CSM_READY;
-        *rdata = c->data[c->data_index];
-
-        if (c->cancelled)
-            c->cancelled = true;
-        else if (state->verbosity & VERBOSE_CACHE && address != c->orig_address)
-            fprintf(stderr, "I$ request address has changed! was %08x, now %08x\n",
-                    c->orig_address, address);
-        else
-            *rdata_valid = true;
         break;
 
-    default:
-        assert(0); // XXX Not done yet
+    default: assert(0); // XXX Not done yet
     }
 
     *ready = c->state == CSM_READY;
@@ -233,14 +218,12 @@ static struct {
     isa_result_t res;
 } execute, execute_next;
 
-#if 0
 static struct {
     // Outputs
     bool valid;
     isa_decoded_t dec;
     isa_result_t res;
-} mem;
-#endif
+} mem, mem_next;
 
 static struct {
     // Outputs
@@ -251,10 +234,12 @@ static struct {
 
 static void flush_pipe_and_restart_from(uint32_t new_pc)
 {
-    fetch.pc = new_pc;
-    fetch.reset_cache_access = true;
-    fetch.valid = false;
-    decode.valid = false;
+    // if (state->verbosity & VERBOSE_PIPE)
+    //    fprintf(stderr, "Flush and restart from %08x\n", new_pc);
+    fetch_next.pc = new_pc;
+    fetch_next.reset_cache_access = true;
+    fetch_next.valid = false;
+    decode_next.valid = false;
 }
 
 static bool step_sscalar(
@@ -263,40 +248,180 @@ static bool step_sscalar(
 {
     memory_exception_t error = MEMORY_SUCCESS;
     int instret = 0;
-    fetch.reset_cache_access = false;
+
+    fetch   = fetch_next;
+    decode  = decode_next;
+    execute = execute_next;
+    mem     = mem_next;
+    commit  = commit_next;
+
+    fetch_next.reset_cache_access = false;
+
+    /* Fetch */
+    cache_fsm(arch, state, &ic,
+              fetch.pc, true, fetch.reset_cache_access,
+              &fetch_next.ic_ready, &fetch_next.insn, &fetch_next.valid);
+
+    fetch_next.insn_addr = fetch.pc;
+    if (fetch_next.valid)
+        fetch_next.pc = CANONICALIZE(fetch.pc + 4);
+
+    /* Decode */
+    decode_next.valid = fetch.valid;
+    if (fetch.valid) {
+        decode_next.dec = arch->decode(fetch.insn_addr, fetch.insn);
+        decode_next.op_a = state->r[decode_next.dec.source_reg_a];
+        decode_next.op_b = state->r[decode_next.dec.source_reg_b];
+        decode_next.msr_a = decode_next.dec.source_msr_a == ISA_NO_REG ? 0 :
+            arch->read_msr(state, decode_next.dec.source_msr_a);
+    }
+
+    /* Execute */
+    execute_next.valid = decode.valid;
+    execute_next.dec   = decode.dec;
+    if (decode.valid) {
+        /* Forward */
+        if (decode.dec.source_reg_a == execute.dec.dest_reg && execute.valid)
+            decode.op_a = execute.res.result;
+        else if (decode.dec.source_reg_a == mem.dec.dest_reg && mem.valid)
+            decode.op_a = mem.res.result;
+        else if (decode.dec.source_reg_a == commit.dec.dest_reg && commit.valid)
+            decode.op_a = commit.res.result;
+
+        if (decode.dec.source_reg_b == execute.dec.dest_reg && execute.valid)
+            decode.op_b = execute.res.result;
+        else if (decode.dec.source_reg_b == mem.dec.dest_reg && mem.valid)
+            decode.op_b = mem.res.result;
+        else if (decode.dec.source_reg_b == commit.dec.dest_reg && commit.valid)
+            decode.op_b = commit.res.result;
+
+        if (0)
+        fprintf(stderr, " [%s=%08x%s, %s=%08x%s]",
+                arch->reg_name[decode.dec.source_reg_a],
+                (uint32_t)decode.op_a,
+                decode.dec.source_reg_a == execute.dec.dest_reg ? " fwd" : "",
+
+                arch->reg_name[decode.dec.source_reg_b],
+                (uint32_t)decode.op_b, decode.dec.source_reg_b == execute.dec.dest_reg ? " fwd" : "");
+
+        if (decode.dec.system) {
+            execute_next.res = arch->insn_exec_system(state, decode.dec, decode.op_a, decode.op_b, decode.msr_a);
+            flush_pipe_and_restart_from(decode.dec.insn_addr + 4);
+        }
+        else
+            execute_next.res = arch->insn_exec(decode.dec, decode.op_a, decode.op_b, decode.msr_a);
+        execute_next.res.result = CANONICALIZE(execute_next.res.result);
+
+        switch (decode.dec.class) {
+        case isa_insn_class_load:
+            execute_next.res.load_addr = CANONICALIZE(execute_next.res.load_addr);
+            execute_next.res.result = arch->load(state, execute_next.res.load_addr, decode.dec.loadstore_size, &error);
+            execute_next.res.result = CANONICALIZE(execute_next.res.result);
+            if (error != MEMORY_SUCCESS)
+                return (error == MEMORY_FATAL);
+            break;
+
+        case isa_insn_class_store:
+            execute_next.res.store_addr = CANONICALIZE(execute_next.res.store_addr);
+            execute_next.res.store_value = CANONICALIZE(execute_next.res.store_value);
+            arch->store(state, execute_next.res.store_addr, execute_next.res.store_value, decode.dec.loadstore_size, &error);
+            if (error != MEMORY_SUCCESS)
+                return (error == MEMORY_FATAL);
+            break;
+
+        case isa_insn_class_branch:
+            decode.dec.jumpbranch_target = CANONICALIZE(decode.dec.jumpbranch_target);
+            if (execute_next.res.branch_taken != false) {
+                // Mispredict
+                flush_pipe_and_restart_from(decode.dec.jumpbranch_target);
+            }
+            break;
+
+        case isa_insn_class_jump:
+            decode.dec.jumpbranch_target = CANONICALIZE(decode.dec.jumpbranch_target);
+            flush_pipe_and_restart_from(decode.dec.jumpbranch_target);
+            break;
+
+        case isa_insn_class_compjump:
+            execute_next.res.compjump_target = CANONICALIZE(execute_next.res.compjump_target);
+            flush_pipe_and_restart_from(execute_next.res.compjump_target);
+            break;
+
+        default:
+            break;
+        }
+    }
+    mem_next.valid = execute.valid;
+    mem_next.dec   = execute.dec;
+    mem_next.res   = execute.res;
+
+    commit_next.valid = mem.valid;
+    commit_next.dec   = mem.dec;
+    commit_next.res   = mem.res;
+
+
+    if (state->verbosity & VERBOSE_PIPE) {
+        if (fetch.valid)
+            fprintf(stderr, " %08x", fetch.insn_addr);
+        else
+            fprintf(stderr, " --------");
+
+        if (decode.valid)
+            fprintf(stderr, " %08x", (uint32_t)decode.dec.insn_addr);
+        else
+            fprintf(stderr, " --------");
+
+        if (execute.valid)
+            fprintf(stderr, " %08x:%s=%08x", (uint32_t)execute.dec.insn_addr,
+                    execute.dec.dest_reg == ISA_NO_REG ? "--" : arch->reg_name[execute.dec.dest_reg],
+                    (uint32_t)execute.res.result);
+        else
+            fprintf(stderr, " -----------------");
+
+        if (execute.valid && cosimulating)
+            fprintf(stderr, " ");
+        else
+            fprintf(stderr, "\n");
+    }
+
 
     /* Write back (= Commit stage) */
-    if (commit.valid) {
-
-        if (commit.dec.dest_reg != ISA_NO_REG)
-            state->r[commit.dec.dest_reg] = commit.res.result;
-        if (commit.dec.dest_msr != ISA_NO_REG)
-            arch->write_msr(state, commit.dec.dest_msr, commit.res.msr_result);
+    if (mem.valid) {
+        if (mem.dec.dest_reg != ISA_NO_REG)
+            state->r[mem.dec.dest_reg] = mem.res.result;
+        if (mem.dec.dest_msr != ISA_NO_REG)
+            arch->write_msr(state, mem.dec.dest_msr, mem.res.msr_result);
 
         /* Check Co-simulation */
         if (cosimulating) {
-            if (commit.dec.insn_addr != costate->pc)
-                assert(commit.dec.insn_addr == costate->pc);
-            else {
-                uint32_t coinsn = (uint32_t)arch->load(costate, commit.dec.insn_addr, 4, &error);
-                if (commit.dec.insn != coinsn)
-                    assert(commit.dec.insn == coinsn);
-                else {
+            if (mem.dec.insn_addr != costate->pc) {
+                fprintf(stderr, "my pc %08x != models %08x\n", (uint32_t)mem.dec.insn_addr, (uint32_t)costate->pc);
+                fflush(stderr);
+                assert(mem.dec.insn_addr == costate->pc);
+            }
 
-                    step_simple(arch, costate);
+            uint32_t coinsn = (uint32_t)arch->load(costate, mem.dec.insn_addr, 4, &error);
+            if (mem.dec.insn != coinsn)
+                assert(mem.dec.insn == coinsn);
 
-                    if (commit.dec.dest_reg != ISA_NO_REG &&
-                        state->r[commit.dec.dest_reg] != costate->r[commit.dec.dest_reg]) {
+            step_simple(arch, costate);
 
-                        printf("my r%d/%s = %08x != models %08x\n",
-                               commit.dec.dest_reg,
-                               arch->reg_name[commit.dec.dest_reg],
-                               (uint32_t)state->r[commit.dec.dest_reg],
-                               (uint32_t)costate->r[commit.dec.dest_reg]);
+            /* Need to override the simple model for things that involve the cycle csr */
+            if (mem.dec.source_msr_a == /*CSR_CYCLE*/ 0xC00 ||  // XXX Breaks the abstraction!
+                mem.dec.source_msr_a == /*CSR_INSTRET*/ 0xC02)
+                costate->r[mem.dec.dest_reg] = state->r[mem.dec.dest_reg];
 
-                        assert(state->r[commit.dec.dest_reg] == costate->r[commit.dec.dest_reg]);
-                    }
-                }
+            if (mem.dec.dest_reg != ISA_NO_REG &&
+                state->r[mem.dec.dest_reg] != costate->r[mem.dec.dest_reg]) {
+
+                fprintf(stderr, "my r%d/%s = %08x != models %08x\n",
+                        mem.dec.dest_reg,
+                        arch->reg_name[mem.dec.dest_reg],
+                        (uint32_t)state->r[mem.dec.dest_reg],
+                        (uint32_t)costate->r[mem.dec.dest_reg]);
+                fflush(stderr);
+
+                assert(state->r[mem.dec.dest_reg] == costate->r[mem.dec.dest_reg]);
             }
         }
 
@@ -362,99 +487,6 @@ static bool step_sscalar(
     }
 #endif
 
-    /* Execute */
-
-    execute.valid = decode.valid;
-    execute.dec   = decode.dec;
-    if (decode.valid) {
-        if (decode.dec.system) {
-            execute.res = arch->insn_exec_system(state, decode.dec, decode.op_a, decode.op_b, decode.msr_a);
-            flush_pipe_and_restart_from(decode.dec.insn_addr + 4);
-        }
-        else
-            execute.res = arch->insn_exec(decode.dec, decode.op_a, decode.op_b, decode.msr_a);
-        execute.res.result = CANONICALIZE(execute.res.result);
-
-        switch (decode.dec.class) {
-        case isa_insn_class_load:
-            execute.res.load_addr = CANONICALIZE(execute.res.load_addr);
-            execute.res.result = arch->load(state, execute.res.load_addr, decode.dec.loadstore_size, &error);
-            execute.res.result = CANONICALIZE(execute.res.result);
-            if (error != MEMORY_SUCCESS)
-                return (error == MEMORY_FATAL);
-            break;
-
-        case isa_insn_class_store:
-            execute.res.store_addr = CANONICALIZE(execute.res.store_addr);
-            execute.res.store_value = CANONICALIZE(execute.res.store_value);
-            arch->store(state, execute.res.store_addr, execute.res.store_value, decode.dec.loadstore_size, &error);
-            if (error != MEMORY_SUCCESS)
-                return (error == MEMORY_FATAL);
-            break;
-
-        case isa_insn_class_branch:
-            decode.dec.jumpbranch_target = CANONICALIZE(decode.dec.jumpbranch_target);
-            if (execute.res.branch_taken != false) {
-                // Mispredict
-                flush_pipe_and_restart_from(decode.dec.jumpbranch_target);
-            }
-            break;
-
-        case isa_insn_class_jump:
-            decode.dec.jumpbranch_target = CANONICALIZE(decode.dec.jumpbranch_target);
-            flush_pipe_and_restart_from(decode.dec.jumpbranch_target);
-            break;
-
-        case isa_insn_class_compjump:
-            execute.res.compjump_target = CANONICALIZE(execute.res.compjump_target);
-            flush_pipe_and_restart_from(execute.res.compjump_target);
-            break;
-
-        default:
-            break;
-        }
-    }
-    commit.valid = execute.valid;
-    commit.dec   = execute.dec;
-    commit.res   = execute.res;
-
-    /* Decode */
-    if (fetch.valid) {
-        decode.dec = arch->decode(fetch.insn_addr, fetch.insn);
-
-        assert(decode.dec.source_reg_a == ISA_NO_REG || decode.dec.source_reg_a < ISA_REGISTERS);
-        assert(decode.dec.source_reg_b == ISA_NO_REG || decode.dec.source_reg_b < ISA_REGISTERS);
-        assert(decode.dec.dest_reg     == ISA_NO_REG || decode.dec.dest_reg     < ISA_REGISTERS);
-        assert(decode.dec.dest_msr     == ISA_NO_REG || decode.dec.dest_msr     < ISA_MSRS);
-        assert(decode.dec.source_msr_a == ISA_NO_REG || decode.dec.source_msr_a < ISA_MSRS);
-
-        decode.op_a     = (decode.dec.source_reg_a == execute.dec.dest_reg
-                           ? execute.res.result
-                           : state->r[decode.dec.source_reg_a]);
-
-        decode.op_b     = (decode.dec.source_reg_b == execute.dec.dest_reg
-                           ? execute.res.result
-                           : state->r[decode.dec.source_reg_b]);
-
-        decode.msr_a    = decode.dec.source_msr_a == ISA_NO_REG ? 0 :
-            (cosimulating ?
-             // NOTE, reading MSRs from the co-state to deal with divergences in MSRs
-             arch->read_msr(costate, decode.dec.source_msr_a) :
-             arch->read_msr(state, decode.dec.source_msr_a));
-    }
-    decode.valid = fetch.valid;
-
-    /* Fetch */
-    cache_fsm(arch, state, &ic,
-              fetch.pc, true, fetch.reset_cache_access,
-              &fetch.ic_ready, &fetch.insn, &fetch.valid);
-
-    if (fetch.valid) {
-        fetch.insn_addr = fetch.pc;
-        fetch.pc += 4;
-        fetch.pc = CANONICALIZE(fetch.pc);
-    }
-
     arch->tick(state, instret);
 
     return false;
@@ -473,7 +505,7 @@ void run_sscalar(int num_images, char *images[], verbosity_t verbosity)
     arch = get_arch(info.machine, info.is_64bit);
     arch->setup(state, &info, verbosity);
     arch->setup(costate, &info, verbosity & ~VERBOSE_CONSOLE);
-    fetch.pc = state->pc;
+    fetch_next.pc = state->pc;
 
     int cycle;
     for (cycle = 0;; ++cycle) {
