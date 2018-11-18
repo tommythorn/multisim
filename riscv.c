@@ -1407,7 +1407,11 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *
     }
 #endif
 
-    if (0 && address & 1 << 31) {
+    // Hack for Mi-V
+    if (address == 0x70001010) {
+        iodata = 1;
+        p = (void*)&iodata + (address & 3);
+    } else if (0 && address & 1 << 31) {
         /* We follow Altera's JTAG UART interface:
 
            The core has two registers, data (addr 0) and control (addr 1):
@@ -1465,6 +1469,21 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, mem
 
     // XXX Hack for Dhrystone
     if (address == 0x0000000010000000) {
+        if (s->verbosity & VERBOSE_CONSOLE)
+            putchar(value & 255);
+        return;
+    }
+
+    // Hack for QEMU
+    if (address == 0x40002000) {
+        if (s->verbosity & VERBOSE_CONSOLE)
+            putchar(value & 255);
+        return;
+    }
+
+
+    // Hack for Mi-V
+    if (address == 0x70001000) {
         if (s->verbosity & VERBOSE_CONSOLE)
             putchar(value & 255);
         return;
