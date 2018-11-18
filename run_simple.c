@@ -31,9 +31,8 @@
 bool
 step_simple(const arch_t *arch, cpu_state_t *state)
 {
-    static int cycle = 0;
-    uint64_t pc       = state->pc;
     memory_exception_t error;
+    uint64_t pc       = state->pc;
     uint32_t insn     = (uint32_t)arch->load(state, pc, 0 /* = ifetch */, &error);
 
     if (error != MEMORY_SUCCESS)
@@ -146,12 +145,12 @@ step_simple(const arch_t *arch, cpu_state_t *state)
         arch->write_msr(state, dec.dest_msr, res.msr_result);
 
     if (state->verbosity & VERBOSE_TRACE) {
-        fprintf(stderr, "%5d:%08"PRIx64" %08x ", cycle, pc, insn);
+        fprintf(stderr, "%6ld:%08"PRIx64" %08x ", state->counter, pc, insn);
         if (dec.dest_reg != ISA_NO_REG)
             fprintf(stderr, "r%-2d = %08x\n", dec.dest_reg, (uint32_t)res.result);
         else
             fprintf(stderr, " .   .   .   .\n");
-        ++cycle;
+        ++state->counter;
     }
 
     if (state->verbosity & VERBOSE_DISASS)
@@ -167,20 +166,19 @@ void run_simple(int num_images, char *images[], verbosity_t verbosity)
     cpu_state_t *state = state_create();
     const arch_t *arch;
     elf_info_t info;
-    int cycle;
 
     loadelfs(state->mem, num_images, images, &info);
 
     arch = get_arch(info.machine, info.is_64bit);
     arch->setup(state, &info, verbosity);
 
-    for (cycle = 0;; ++cycle) {
+    for (;;) {
         if (step_simple(arch, state))
             break;
     }
 
     if (verbosity && (verbosity & VERBOSE_DISASS) == 0)
-        printf("IPC = %.2f\n", (double) state->n_issue / cycle);
+        printf("IPC = %.2f\n", (double) state->n_issue / state->counter);
 
     state_destroy(state);
 }

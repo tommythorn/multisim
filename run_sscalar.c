@@ -507,15 +507,14 @@ void run_sscalar(int num_images, char *images[], verbosity_t verbosity)
     arch->setup(costate, &info, verbosity & ~VERBOSE_CONSOLE);
     fetch_next.pc = state->pc;
 
-    int cycle;
-    for (cycle = 0;; ++cycle) {
+    for (;;) {
         if (step_sscalar(arch, state, costate, verbosity))
             break;
     }
 
-    if (verbosity)
-        printf("IPC = %.2f\n", (double) state->n_issue / cycle);
-
+    if (verbosity) {
+        printf("CPI = %.2f\n", state->counter / (double) costate->counter);
+    }
     state_destroy(state);
     state_destroy(costate);
 }
