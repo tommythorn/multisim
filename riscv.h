@@ -129,6 +129,7 @@ enum riscv_subcode_trap_return_e {
     EBREAK = 0x001,
     URET   = 0x002,
     SRET   = 0x102,
+    WFI    = 0x105,
     MRET   = 0x302,
 };
 

@@ -406,6 +406,7 @@ disass_insn(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
           case EBREAK: snprintf(buf, buf_size, "%-11s", "ebreak"); return;
           case URET:   snprintf(buf, buf_size, "%-11s", "uret"); return;
           case SRET:   snprintf(buf, buf_size, "%-11s", "sret"); return;
+          case WFI:    snprintf(buf, buf_size, "%-11s", "wfi"); return;
           case MRET:   snprintf(buf, buf_size, "%-11s", "mret"); return;
           default:
               goto unhandled;
@@ -1019,11 +1020,21 @@ insn_exec_system(cpu_state_t *s, isa_decoded_t dec, uint64_t op_a_u, uint64_t op
                 res.compjump_target = s->msr[CSR_SEPC];
                 return res;
 
+            case WFI:
+                /*
+                 * Wait for interrupts.  Is semantically equivalent to
+                 * a branch backwards to same OR nop, dealers choice.
+                 */
+                break;
+
             default:
+                fprintf(stderr, "Unhandled SYSTEM/ECALLEBREAK instruction %08x (%d)\n",
+                        i.raw, i.i.imm11_0);
+                dump_cache_stats((riscv_state_t *)s->arch_specific);
+                fflush(stdout);
+                assert(0);
                 break;
             }
-            dump_cache_stats((riscv_state_t *)s->arch_specific);
-            assert(0);
 
         case CSRRS:  res.msr_result = msr_a |  op_a;    return res;
         case CSRRC:  res.msr_result = msr_a &~ op_a;    return res;
