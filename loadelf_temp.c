@@ -105,7 +105,7 @@ int SZ(loadelf,)(memory_t *m, char *name, FILE *f, elf_info_t *elf_info)
             printf(" align            %016"PRIx64"\n", (uint64_t)NATIVE(ph[i].p_align));
         }
 
-        if (NATIVE(ph[i].p_type) == PT_LOAD && NATIVE(ph[i].p_filesz)) {
+        if (NATIVE(ph[i].p_type) == PT_LOAD) {
 
             if (enable_verb_prog_sec)
                 fprintf(stderr, "Loading section [%016"PRIx64"; %016"PRIx64"]\n",
@@ -116,7 +116,7 @@ int SZ(loadelf,)(memory_t *m, char *name, FILE *f, elf_info_t *elf_info)
                         (unsigned)NATIVE(ph[i].p_offset),
                         (unsigned)NATIVE(ph[i].p_filesz),
                         m,
-                        NATIVE(ph[i].p_vaddr),
+                        NATIVE(ph[i].p_paddr),
                         NATIVE(ph[i].p_memsz),
                         elf_info);
         }

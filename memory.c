@@ -133,8 +133,8 @@ memory_ensure_mapped_range(memory_t *m, uint64_t start, uint64_t end)
         test(m);
     }
 
-    start = start & ~7ULL;
-    end   = (end + 7ULL) & ~7ULL;
+    start = start & ~4095ULL;
+    end   = (end + 4095ULL) & ~4095ULL;
 
     if (end <= start)
         return;
