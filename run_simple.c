@@ -31,14 +31,12 @@
 bool
 step_simple(const arch_t *arch, cpu_state_t *state)
 {
-    memory_exception_t error;
-    uint64_t pc       = state->pc;
-    uint32_t insn     = (uint32_t)arch->load(state, pc, 0 /* = ifetch */, &error);
+    isa_exception_t exc = { 0 };
+    uint64_t pc = state->pc;
+    uint32_t insn;
 
-    if (error != MEMORY_SUCCESS)
-	/* arch->raise_exception(...);
-           return;  */
-        return error == MEMORY_FATAL;
+    insn = (uint32_t)arch->load(state, pc, 0 /* = ifetch */, &exc);
+    assert(!exc.raised);
 
     isa_decoded_t dec = arch->decode(pc, insn);
 
@@ -51,66 +49,60 @@ step_simple(const arch_t *arch, cpu_state_t *state)
     uint64_t op_a     = state->r[dec.source_reg_a];
     uint64_t op_b     = state->r[dec.source_reg_b];
     uint64_t msr_a    = dec.source_msr_a != ISA_NO_REG ?
-        arch->read_msr(state, dec.source_msr_a) : 0;
+        arch->read_msr(state, dec.source_msr_a, &exc) : 0;
 
     uint64_t atomic_load_addr = op_a;
 
+    if (exc.raised)
+        goto exception;
+
     if (dec.class == isa_insn_class_atomic)
-        op_a = arch->load(state, atomic_load_addr, dec.loadstore_size, &error);
+        op_a = arch->load(state, atomic_load_addr, dec.loadstore_size, &exc);
 
-    // XXX If (raised exception) return;
-
-    if (error != MEMORY_SUCCESS)
-        return (error == MEMORY_FATAL);
-
-    /// XXX hack for now: we need to know if an exception was fired, just like with loads
-    extern int exception_raised;
-    exception_raised = 0;
+    if (exc.raised)
+        goto exception;
 
     isa_result_t res;
 
     if (!dec.system)
-	res = arch->insn_exec(dec, op_a, op_b, msr_a);
+	res = arch->insn_exec(dec, op_a, op_b, msr_a, &exc);
     else
-	res = arch->insn_exec_system(state, dec, op_a, op_b, msr_a);
+	res = arch->insn_exec_system(state, dec, op_a, op_b, msr_a, &exc);
     res.result = CANONICALIZE(res.result);
 
-    if (res.fatal_error) // XXX If (raised exception) return;
-        return true;
-
-    if (exception_raised)
-        return false;
+    if (exc.raised)
+        goto exception;
 
     switch (dec.class) {
     case isa_insn_class_load:
-	res.load_addr = CANONICALIZE(res.load_addr);
-        res.result = arch->load(state, res.load_addr, dec.loadstore_size, &error);
+        res.load_addr = CANONICALIZE(res.load_addr);
+        res.result = arch->load(state, res.load_addr, dec.loadstore_size, &exc);
         res.result = CANONICALIZE(res.result);
 
-        if (error != MEMORY_SUCCESS)
-            return (error == MEMORY_FATAL);
+        if (exc.raised)
+            goto exception;
 
         state->pc += 4;
         break;
 
     case isa_insn_class_store:
-	res.store_addr = CANONICALIZE(res.store_addr);
-	res.store_value = CANONICALIZE(res.store_value);
-        arch->store(state, res.store_addr, res.store_value, dec.loadstore_size, &error);
+        res.store_addr = CANONICALIZE(res.store_addr);
+        res.store_value = CANONICALIZE(res.store_value);
+        arch->store(state, res.store_addr, res.store_value, dec.loadstore_size, &exc);
 
-        if (error != MEMORY_SUCCESS)
-            return (error == MEMORY_FATAL);
+        if (exc.raised)
+            goto exception;
 
         state->pc += 4;
         break;
 
     case isa_insn_class_atomic:
-	// XXX ??
-	res.load_addr = CANONICALIZE(res.load_addr);
-        arch->store(state, atomic_load_addr, res.result, dec.loadstore_size, &error);
+        // XXX ??
+        res.load_addr = CANONICALIZE(res.load_addr);
+        arch->store(state, atomic_load_addr, res.result, dec.loadstore_size, &exc);
 
-        if (error != MEMORY_SUCCESS)
-            return (error == MEMORY_FATAL);
+        if (exc.raised)
+            goto exception;
 
         res.result = op_a;
         state->pc += 4;
@@ -118,17 +110,17 @@ step_simple(const arch_t *arch, cpu_state_t *state)
 
 
     case isa_insn_class_branch:
-	dec.jumpbranch_target = CANONICALIZE(dec.jumpbranch_target);
+        dec.jumpbranch_target = CANONICALIZE(dec.jumpbranch_target);
         state->pc = res.branch_taken ? dec.jumpbranch_target : state->pc + 4;
         break;
 
     case isa_insn_class_jump:
-	dec.jumpbranch_target = CANONICALIZE(dec.jumpbranch_target);
+        dec.jumpbranch_target = CANONICALIZE(dec.jumpbranch_target);
         state->pc = dec.jumpbranch_target;
         break;
 
     case isa_insn_class_compjump:
-	res.compjump_target = CANONICALIZE(res.compjump_target);
+        res.compjump_target = CANONICALIZE(res.compjump_target);
         state->pc = res.compjump_target;
         break;
 
@@ -138,23 +130,25 @@ step_simple(const arch_t *arch, cpu_state_t *state)
         break;
     }
 
+    if (exc.raised)
+        goto exception;
+
     if (dec.dest_reg != ISA_NO_REG)
         state->r[dec.dest_reg] = res.result;
 
     if (dec.dest_msr != ISA_NO_REG)
-        arch->write_msr(state, dec.dest_msr, res.msr_result);
+        arch->write_msr(state, dec.dest_msr, res.msr_result, &exc);
 
-    if (state->verbosity & VERBOSE_TRACE) {
-        fprintf(stderr, "%6ld:%08"PRIx64" %08x ", state->counter, pc, insn);
-        if (dec.dest_reg != ISA_NO_REG)
-            fprintf(stderr, "r%-2d = %08x\n", dec.dest_reg, (uint32_t)res.result);
-        else
-            fprintf(stderr, " .   .   .   .\n");
-        ++state->counter;
-    }
-
+exception:
     if (state->verbosity & VERBOSE_DISASS)
         isa_disass(arch, dec, res);
+
+    if (exc.raised) {
+        if (state->verbosity & VERBOSE_DISASS)
+            fprintf(stderr, "                  EXCEPTION %ld (%08lx) RAISED\n", exc.code, exc.info);
+
+        state->pc = arch->handle_exception(state, dec.insn_addr, exc);
+    }
 
     arch->tick(state, 1);
 
@@ -172,13 +166,31 @@ void run_simple(int num_images, char *images[], verbosity_t verbosity)
     arch = get_arch(info.machine, info.is_64bit);
     arch->setup(state, &info, verbosity);
 
+    uint64_t tohost = 0;
+    isa_exception_t exc = { 0 };
+    getelfsym(&info, "tohost", &tohost);
+
     for (;;) {
         if (step_simple(arch, state))
             break;
+
+        if (verbosity & VERBOSE_COMPLIANCE &&
+            arch->load(state, tohost, 4, &exc))
+            break;
     }
 
-    if (verbosity && (verbosity & VERBOSE_DISASS) == 0)
+    if (verbosity & VERBOSE_DISASS)
         printf("IPC = %.2f\n", (double) state->n_issue / state->counter);
+
+    if (verbosity & VERBOSE_COMPLIANCE) {
+        uint64_t begin_signature;
+        uint64_t end_signature;
+
+        if (getelfsym(&info, "begin_signature", &begin_signature) &&
+            getelfsym(&info, "end_signature", &end_signature))
+            for (uint32_t a = begin_signature; a < end_signature; a += 4)
+                printf("%08lx\n", arch->load(state, a, 4, &exc));
+    }
 
     state_destroy(state);
 }

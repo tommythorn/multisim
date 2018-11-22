@@ -63,7 +63,8 @@ void usage(char *program)
             "\n"
             "  -i<diskimage>\n"
             "  -d   disassemble executed instructions\n"
-            "  -t   trace executed instructions\n",
+            "  -t   trace executed instructions\n"
+            "  -c   compliance\n",
             program);
 
     for (i = 0; long_options[i].name; ++i) {
@@ -87,7 +88,7 @@ int main(int argc, char **argv)
         int c;
         int option_index = 0;
 
-        c = getopt_long(argc, argv, "tdf:i:o:123",
+        c = getopt_long(argc, argv, "ctdf:i:o:123",
                         long_options, &option_index);
         if (c == -1)
             break;
@@ -102,6 +103,10 @@ int main(int argc, char **argv)
 
         case 'd':
             verbosity = verbosity*2 + 1;
+            break;
+
+        case 'c':
+            verbosity = VERBOSE_COMPLIANCE;
             break;
 
         case 't':
@@ -137,6 +142,7 @@ int main(int argc, char **argv)
         run_simple(num_images, images, verbosity);
         break;
 
+#if 0
     case '2':
         run_sscalar(num_images, images, verbosity);
         break;
@@ -144,6 +150,7 @@ int main(int argc, char **argv)
     case '3':
         run_sscalar_oooe(num_images, images, verbosity);
         break;
+#endif
 
     default:
         printf("No XX-run option given\n");

@@ -53,9 +53,15 @@ typedef struct elf_info_st {
     unsigned text_segments;
     uint64_t text_start;
     uint64_t text_size;
+
+    /* Symbol table */
+    void    *symtab;
+    int      symtab_len;
+    char    *strtab;
 } elf_info_t;
 
 int loadelf(memory_t *m, char *name, elf_info_t *program_entry);
+bool getelfsym(elf_info_t *, const char *name, uint64_t *value);
 
 /* loadelfs returns how many successfully loaded */
 void loadelfs(memory_t *m, int n, char *name[], elf_info_t *last_info);

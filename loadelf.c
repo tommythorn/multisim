@@ -119,6 +119,14 @@ int loadelf(memory_t *m, char *name, elf_info_t *elf_info)
     return 4;
 }
 
+bool getelfsym(elf_info_t *info, const char *name, uint64_t *value)
+{
+    return
+        info->is_64bit ?
+        getelf64sym(info, name, value) :
+        getelf32sym(info, name, value);
+}
+
 void loadelfs(memory_t *m, int n, char *name[], elf_info_t *last_info)
 {
     for (int i = 0; i < n; ++i)

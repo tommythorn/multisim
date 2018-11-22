@@ -21,8 +21,10 @@ OPT=
 CFLAGS=-g -std=c99 $(WARN) -MD $(OPT) -g -I/opt/local/include
 LDFLAGS=-g
 FLAGS=
+#MORE_STUFF=run_sscalar.o run_sscalar_oooe.o
+MORE_STUFF=
 OBJS=main.o arch.o \
-	run_simple.o run_sscalar.o run_sscalar_oooe.o \
+	run_simple.o $(MORE_STUFF) \
 	memory.o loadelf.o riscv.o
 #VERB=-t
 VERB=-d

@@ -154,19 +154,13 @@ static void cache_fsm(const arch_t *arch, cpu_state_t *state, cache_t *c,
     case CSM_FILLING:
         if (memory.busy_cycles == 0) {
             if (c->fill_counter) {
-                int word_index = (c->fill_address >> 2) & ((1 << (c->nsetlg2 + LINESIZELG2 - 2)) - 1);
-
-                if (0)
-                fprintf(stderr, "FILLING I$ from %08x -> <%d,%d>\n",
-                       c->fill_address,
-                       word_index >> (LINESIZELG2 - 2),
-                       word_index & ((1 << LINESIZELG2)/4 - 1));
+                int word_index      = (c->fill_address >> 2) & ((1 << (c->nsetlg2 + LINESIZELG2 - 2)) - 1);
                 c->data[word_index] = (uint32_t)arch->load(state, c->fill_address, 4, &error);
-                c->fill_counter -= 1;
-                c->fill_address += 4;
+                c->fill_counter    -= 1;
+                c->fill_address    += 4;
                 if (c->fill_counter == 0) {
                     memory.busy_with = 0;
-                    c->state = CSM_UPDATE_TAG;
+                    c->state         = CSM_UPDATE_TAG;
                 }
             }
         } else
@@ -190,6 +184,9 @@ cache_t ic = { .nsetlg2 = IC_NSETLG2 };
 static struct {
     // State
     uint32_t pc;
+    struct {
+        uint32_t is_taken_branch, branch_target;
+    } bp;
 
     // Inputs
     bool ic_ready;
@@ -199,12 +196,16 @@ static struct {
     bool reset_cache_access;
     uint32_t insn_addr;
     uint32_t insn;
+    bool     predicted_taken_branch;
+    uint32_t predicted_branch_target;
     memory_exception_t error;
 } fetch, fetch_next;
 
 static struct {
     // Outputs
     bool valid;
+    bool     predicted_taken_branch;
+    uint32_t predicted_branch_target;
     isa_decoded_t dec;
     uint64_t op_a;
     uint64_t op_b;
@@ -234,13 +235,14 @@ static struct {
 
 static void flush_pipe_and_restart_from(uint32_t new_pc)
 {
-    // if (state->verbosity & VERBOSE_PIPE)
-    //    fprintf(stderr, "Flush and restart from %08x\n", new_pc);
     fetch_next.pc = new_pc;
     fetch_next.reset_cache_access = true;
     fetch_next.valid = false;
     decode_next.valid = false;
 }
+
+int branches;
+int mispredicts;
 
 static bool step_sscalar(
     const arch_t *arch, cpu_state_t *state, cpu_state_t *costate,
@@ -263,8 +265,17 @@ static bool step_sscalar(
               &fetch_next.ic_ready, &fetch_next.insn, &fetch_next.valid);
 
     fetch_next.insn_addr = fetch.pc;
-    if (fetch_next.valid)
-        fetch_next.pc = CANONICALIZE(fetch.pc + 4);
+
+    if (fetch_next.valid) {
+        if (1 && fetch.pc == fetch.bp.is_taken_branch) {
+            fetch_next.pc                      = fetch.bp.branch_target;
+            fetch_next.predicted_branch_target = fetch.bp.branch_target;
+            fetch_next.predicted_taken_branch  = true;
+        } else {
+            fetch_next.pc = CANONICALIZE(fetch.pc + 4);
+            fetch_next.predicted_taken_branch = false;
+        }
+    }
 
     /* Decode */
     decode_next.valid = fetch.valid;
@@ -274,6 +285,8 @@ static bool step_sscalar(
         decode_next.op_b = state->r[decode_next.dec.source_reg_b];
         decode_next.msr_a = decode_next.dec.source_msr_a == ISA_NO_REG ? 0 :
             arch->read_msr(state, decode_next.dec.source_msr_a);
+        decode_next.predicted_taken_branch = fetch.predicted_taken_branch;
+        decode_next.predicted_branch_target = fetch.predicted_branch_target;
     }
 
     /* Execute */
@@ -305,8 +318,11 @@ static bool step_sscalar(
                 (uint32_t)decode.op_b, decode.dec.source_reg_b == execute.dec.dest_reg ? " fwd" : "");
 
         if (decode.dec.system) {
+            if (decode.dec.insn == 0x100073) /* EBREAK */
+                return true;
+
             execute_next.res = arch->insn_exec_system(state, decode.dec, decode.op_a, decode.op_b, decode.msr_a);
-            flush_pipe_and_restart_from(decode.dec.insn_addr + 4);
+            flush_pipe_and_restart_from(decode.dec.insn_addr + 4); // XXX wrong for at least ECALL
         }
         else
             execute_next.res = arch->insn_exec(decode.dec, decode.op_a, decode.op_b, decode.msr_a);
@@ -330,11 +346,39 @@ static bool step_sscalar(
             break;
 
         case isa_insn_class_branch:
-            decode.dec.jumpbranch_target = CANONICALIZE(decode.dec.jumpbranch_target);
-            if (execute_next.res.branch_taken != false) {
-                // Mispredict
-                flush_pipe_and_restart_from(decode.dec.jumpbranch_target);
+            execute_next.dec.jumpbranch_target = CANONICALIZE(execute_next.dec.jumpbranch_target);
+            if (execute_next.res.branch_taken      != decode.predicted_taken_branch ||
+                execute_next.res.branch_taken &&
+                execute_next.dec.jumpbranch_target != decode.predicted_branch_target) {
+                // Mispredicted
+                fprintf(stderr, "Mispredicted: %08lx: predicted %staken, target %08x, was %staken, target %08lx\n",
+                        decode.dec.insn_addr,
+                        decode.predicted_taken_branch ? "" : "non-",
+                        decode.predicted_branch_target,
+                        execute_next.res.branch_taken ? "" : "non-",
+                        execute_next.dec.jumpbranch_target);
+
+                ++mispredicts;
+                if (execute_next.res.branch_taken) {
+                    fetch_next.bp.is_taken_branch = decode.dec.insn_addr;
+                    fetch_next.bp.branch_target   = execute_next.dec.jumpbranch_target;
+                    flush_pipe_and_restart_from(execute_next.dec.jumpbranch_target);
+                    fprintf(stderr, "  Restarting from %08lx\n", execute_next.dec.jumpbranch_target);
+                } else {
+                    fetch_next.bp.is_taken_branch = 0;
+                    flush_pipe_and_restart_from(decode.dec.insn_addr + 4);
+                    fprintf(stderr, "  Restarting to  %08lx\n", decode.dec.insn_addr + 4);
+                }
+            } else {
+                fprintf(stderr, "Good predicted: %08lx: predicted %staken, target %08x, was %staken, target %08lx\n",
+                        decode.dec.insn_addr,
+                        decode.predicted_taken_branch ? "" : "non-",
+                        decode.predicted_branch_target,
+                        execute_next.res.branch_taken ? "" : "non-",
+                        execute_next.dec.jumpbranch_target);
+
             }
+            ++branches;
             break;
 
         case isa_insn_class_jump:
@@ -376,9 +420,9 @@ static bool step_sscalar(
                     execute.dec.dest_reg == ISA_NO_REG ? "--" : arch->reg_name[execute.dec.dest_reg],
                     (uint32_t)execute.res.result);
         else
-            fprintf(stderr, " -----------------");
+            fprintf(stderr, " --------------------");
 
-        if (execute.valid && cosimulating)
+        if (cosimulating)
             fprintf(stderr, " ");
         else
             fprintf(stderr, "\n");
@@ -396,7 +440,6 @@ static bool step_sscalar(
         if (cosimulating) {
             if (mem.dec.insn_addr != costate->pc) {
                 fprintf(stderr, "my pc %08x != models %08x\n", (uint32_t)mem.dec.insn_addr, (uint32_t)costate->pc);
-                fflush(stderr);
                 assert(mem.dec.insn_addr == costate->pc);
             }
 
@@ -419,14 +462,14 @@ static bool step_sscalar(
                         arch->reg_name[mem.dec.dest_reg],
                         (uint32_t)state->r[mem.dec.dest_reg],
                         (uint32_t)costate->r[mem.dec.dest_reg]);
-                fflush(stderr);
 
                 assert(state->r[mem.dec.dest_reg] == costate->r[mem.dec.dest_reg]);
             }
         }
 
         instret += 1;
-    }
+    } else if (cosimulating)
+        fprintf(stderr, "\n");
 
 #if 0
     static uint32_t dc_readdata  = 0;
@@ -514,6 +557,7 @@ void run_sscalar(int num_images, char *images[], verbosity_t verbosity)
 
     if (verbosity) {
         printf("CPI = %.2f\n", state->counter / (double) costate->counter);
+        printf("%d branches, %d mispredicts = %5.2f%% accurate\n", branches, mispredicts, 100 - 100.0*mispredicts/(double)branches);
     }
     state_destroy(state);
     state_destroy(costate);

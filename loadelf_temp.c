@@ -18,6 +18,23 @@
  * Boston, MA 02111-1307, USA.
  */
 
+bool SZ(getelf,sym)(elf_info_t *elf_info, const char *name, uint64_t *value)
+{
+    const SZ(Elf,_Sym) *symtab = elf_info->symtab;
+
+    for (int i = 0; i < elf_info->symtab_len; ++i) {
+        const SZ(Elf,_Sym) *sym = &symtab[i];
+
+        if (strcmp(name, elf_info->strtab + sym->st_name) == 0 &&
+            SZ(ELF,_ST_BIND)(sym->st_info) == STB_GLOBAL) {
+            *value = sym->st_value;
+            return true;
+        }
+    }
+
+    return false;
+}
+
 int SZ(loadelf,)(memory_t *m, char *name, FILE *f, elf_info_t *elf_info)
 {
     memset(elf_info, 0, sizeof *elf_info);
@@ -154,6 +171,28 @@ int SZ(loadelf,)(memory_t *m, char *name, FILE *f, elf_info_t *elf_info)
         }
 
         printf(" (now at %lx)\n", ftell(f));
+    }
+
+    /* Load symbol table */
+    {
+        SZ(Elf,_Shdr) sh[ehdr.e_shnum];
+        fseek(f, ehdr.e_shoff, SEEK_SET);
+        if (fread(&sh, sizeof sh[0], ehdr.e_shnum, f) != ehdr.e_shnum) return 0;
+
+        for (int i = 0; i < ehdr.e_shnum; ++i) {
+            if (sh[i].sh_type == SHT_STRTAB && i != ehdr.e_shstrndx && !elf_info->strtab) {
+                elf_info->strtab = malloc(sh[i].sh_size);
+                fseek(f, sh[i].sh_offset, SEEK_SET);
+                if (fread(elf_info->strtab, sh[i].sh_size, 1, f) != 1) break;
+            }
+
+            if (sh[i].sh_type == SHT_SYMTAB && !elf_info->symtab) {
+                elf_info->symtab = malloc(sh[i].sh_size);
+                fseek(f, sh[i].sh_offset, SEEK_SET);
+                if (fread(elf_info->symtab, sh[i].sh_size, 1, f) != 1) break;
+                elf_info->symtab_len = sh[i].sh_size / sizeof(SZ(Elf,_Sym));
+            }
+        }
     }
 
     return 0;

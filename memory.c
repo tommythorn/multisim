@@ -139,6 +139,8 @@ memory_ensure_mapped_range(memory_t *m, uint64_t start, uint64_t end)
     if (end <= start)
         return;
 
+    // fprintf(stderr, "MAP %08lx %ld KiB\n", start, (end - start) / 1024);
+
     struct entry *s0 = memory_lookup(m, start - 1);
     struct entry *s1 = memory_lookup(m, end   + 1);
 

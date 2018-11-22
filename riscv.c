@@ -110,6 +110,8 @@ static const char *csr_name[0x1000] = {
 
 /* Per CSR bit mask of csrXX settable bits (in addition to other constraints) */
 static const uint64_t csr_mask[0x1000] = {
+    [CSR_MSCRATCH]      = 0xFFFFFFFF,
+
     [CSR_FFLAGS]        = 0x1F,
     [CSR_FRM]           = 7,
     [CSR_FCSR]          = 0xFF,
@@ -663,8 +665,22 @@ decode(uint64_t insn_addr, uint32_t insn)
     return dec;
 }
 
+
 static isa_result_t
-insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
+raise_exception(int cause, uint64_t info, isa_exception_t *exc)
+{
+    exc->raised = true;
+    exc->code = cause;
+    exc->info = info;
+
+    isa_result_t res  = { 0 };
+    return res;
+}
+
+
+static isa_result_t
+insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
+          uint64_t msr_a, isa_exception_t *exc)
 {
     int64_t op_a      = (int64_t) op_a_u;
     int64_t op_b      = (int64_t) op_b_u;
@@ -676,7 +692,6 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_
     isa_result_t res  = { 0 };
     uint64_t ea_load  = op_a + i.i.imm11_0;
     uint64_t ea_store = op_a + (i.s.imm11_5 << 5 | i.s.imm4_0);
-    res.fatal_error   = false;
 
     switch (i.r.opcode) {
     case LOAD:
@@ -935,15 +950,27 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_
         default:
             assert(0);
         }
+
+        if (res.branch_taken && dec.jumpbranch_target & 3)
+            return raise_exception(EXCP_INSN_MISALIGN, dec.jumpbranch_target, exc);
+
         return res;
 
     case JALR:
         res.result = dec.insn_addr + 4;
         res.compjump_target = (op_a + i.i.imm11_0) & -2LL;
+
+        if (res.compjump_target & 3)
+            return raise_exception(EXCP_INSN_MISALIGN, res.compjump_target, exc);
+
         return res;
 
     case JAL:
         res.result = dec.insn_addr + 4;
+
+        if (dec.jumpbranch_target & 3)
+            return raise_exception(EXCP_INSN_MISALIGN, dec.jumpbranch_target, exc);
+
         return res;
 
     default:
@@ -953,22 +980,21 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_
              i.i.imm11_0, reg_name[i.r.rs1], i.r.funct3,
              reg_name[i.r.rd],
              opcode_name[i.r.opcode], i.r.opext);
-        res.fatal_error = true;
-        res.result = 0;
-        return res;
+        return raise_exception(EXCP_INSN_ILLEGAL, 0, exc);
     }
 
     res.result = -1;
     return res;
 }
 
+
 static isa_result_t
-insn_exec_system(cpu_state_t *s, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
+insn_exec_system(cpu_state_t *s, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
+                 uint64_t msr_a, isa_exception_t *exc)
 {
     int64_t op_a      = (int64_t) op_a_u;
     insn_t i          = { .raw = dec.insn };
     isa_result_t res  = { 0 };
-    res.fatal_error   = false;
 
     switch (i.r.opcode) {
     case SYSTEM:
@@ -977,27 +1003,8 @@ insn_exec_system(cpu_state_t *s, isa_decoded_t dec, uint64_t op_a_u, uint64_t op
         switch (i.r.funct3) {
         case ECALLEBREAK:
             switch (i.i.imm11_0) {
-            case ECALL: {
-                s->msr[CSR_MCAUSE] = EXCP_UMODE_CALL + s->priv;
-                s->msr[CSR_MEPC] = dec.insn_addr;
-                s->msr[CSR_MTVAL] = 0;
-
-                /* When a trap is taken from privilege mode y into privilege
-                   mode x, xPIE is set to the value of xIE; xIE is set to 0;
-                   and xPP is set to y.
-
-                   Here x = M, thus MPIE = MIE; MIE = 0; MPP = priv
-                */
-
-                BF_SET(s->msr[CSR_MSTATUS], CSR_STATUS_MPIE_BF,
-                       BF_GET(s->msr[CSR_MSTATUS], CSR_STATUS_MIE_BF));
-                BF_SET(s->msr[CSR_MSTATUS], CSR_STATUS_MIE_BF, 0);
-                BF_SET(s->msr[CSR_MSTATUS], CSR_STATUS_MPP_BF, s->priv);
-                res.compjump_target = s->msr[CSR_MTVEC];
-                s->priv = 3;
-                return res;
-            }
-
+            case ECALL: return raise_exception(EXCP_UMODE_CALL + s->priv, 0, exc);
+            case EBREAK:return raise_exception(EXCP_BREAKPOINT, 0, exc);
             case MRET:
                 /* Copy down MPIE to MIE and set MPIE */
                 BF_SET(s->msr[CSR_MSTATUS], CSR_STATUS_MIE_BF,
@@ -1007,6 +1014,10 @@ insn_exec_system(cpu_state_t *s, isa_decoded_t dec, uint64_t op_a_u, uint64_t op
                 s->priv = BF_GET(s->msr[CSR_MSTATUS], CSR_STATUS_MPP_BF);
                 BF_SET(s->msr[CSR_MSTATUS], CSR_STATUS_MPP_BF, 0);
                 res.compjump_target = s->msr[CSR_MEPC];
+
+                if (res.compjump_target & 3)
+                    return raise_exception(EXCP_INSN_MISALIGN, res.compjump_target, exc);
+
                 return res;
 
             case SRET:
@@ -1018,6 +1029,10 @@ insn_exec_system(cpu_state_t *s, isa_decoded_t dec, uint64_t op_a_u, uint64_t op
                 s->priv = BF_GET(s->msr[CSR_MSTATUS], CSR_STATUS_SPP_BF);
                 BF_SET(s->msr[CSR_MSTATUS], CSR_STATUS_SPP_BF, 0);
                 res.compjump_target = s->msr[CSR_SEPC];
+
+                if (res.compjump_target & 3)
+                    return raise_exception(EXCP_INSN_MISALIGN, res.compjump_target, exc);
+
                 return res;
 
             case WFI:
@@ -1055,68 +1070,45 @@ insn_exec_system(cpu_state_t *s, isa_decoded_t dec, uint64_t op_a_u, uint64_t op
              i.i.imm11_0, reg_name[i.r.rs1], i.r.funct3,
              reg_name[i.r.rd],
              opcode_name[i.r.opcode], i.r.opext);
-        res.fatal_error = true;
-        res.result = 0;
-        return res;
+        return raise_exception(EXCP_INSN_ILLEGAL, 0, exc);
     }
 
     res.result = -1;
     return res;
 }
 
-
-static isa_result_t
-insn_exec32(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
+static uint64_t
+handle_exception(cpu_state_t *s, uint64_t insn_addr, isa_exception_t exc)
 {
-    return insn_exec(32, dec, op_a_u, op_b_u, msr_a);
+    s->msr[CSR_MEPC]   = insn_addr;
+    s->msr[CSR_MCAUSE] = exc.code;
+    s->msr[CSR_MTVAL]  = exc.info;
+
+    /* When a trap is taken from privilege mode y into privilege
+       mode x, xPIE is set to the value of xIE; xIE is set to 0;
+       and xPP is set to y.
+
+       Here x = M, thus MPIE = MIE; MIE = 0; MPP = priv
+    */
+
+    BF_SET(s->msr[CSR_MSTATUS], CSR_STATUS_MPIE_BF,
+           BF_GET(s->msr[CSR_MSTATUS], CSR_STATUS_MIE_BF));
+    BF_SET(s->msr[CSR_MSTATUS], CSR_STATUS_MIE_BF, 0);
+    BF_SET(s->msr[CSR_MSTATUS], CSR_STATUS_MPP_BF, s->priv);
+    s->priv = 3;
+    return s->msr[CSR_MTVEC];
 }
 
 static isa_result_t
-insn_exec64(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a)
+insn_exec32(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a, isa_exception_t *exc)
 {
-    return insn_exec(64, dec, op_a_u, op_b_u, msr_a);
+    return insn_exec(32, dec, op_a_u, op_b_u, msr_a, exc);
 }
 
-int exception_raised; // XXX hack
-
-
-static void raise(cpu_state_t *s, uint64_t cause)
+static isa_result_t
+insn_exec64(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a, isa_exception_t *exc)
 {
-#if 0
-    if (cause & (1ULL << 63)) {
-        int intr_pend = BF_GET(s->msr[CSR_STATUS], CSR_STATUS_IP_BF);
-        int intr_mask = BF_GET(s->msr[CSR_STATUS], CSR_STATUS_IM_BF);
-
-        intr_pend |= 1 << (cause & 7);
-
-        BF_SET(s->msr[CSR_STATUS], CSR_STATUS_IP_BF, intr_pend);
-
-        if (!BF_GET(s->msr[CSR_STATUS], CSR_STATUS_EI_BF) ||
-            (intr_pend & intr_mask) == 0) {
-
-            /*
-            ERROR("  Interrupt %d ignored (for now) as it's disabled\n", (int) cause);
-            ERROR("    (EI = %d IP = 0x%x, IM = 0x%x, pc = %"PRIx64")\n",
-                   BF_GET(s->msr[CSR_STATUS], CSR_STATUS_EI_BF),
-                  intr_pend, intr_mask, s->pc);
-
-            s->verbosity_override |= VERBOSE_DISASS;
-            */
-
-            return;
-        }
-    }
-
-    INFO("  Raised 0x%"PRIx64"\n", cause);
-
-    s->msr[CSR_EPC] = s->pc;
-    s->pc = s->msr[CSR_EVEC];
-    // XXX not correct in case of instruction fetches
-    s->msr[CSR_CAUSE] = cause;
-    push_priv();
-
-    exception_raised = 1;
-#endif
+    return insn_exec(64, dec, op_a_u, op_b_u, msr_a, exc);
 }
 
 #define HTIF_DEV_SHIFT      (56)
@@ -1144,11 +1136,11 @@ static void tick(cpu_state_t *s, int instret)
 #endif
 }
 
-static uint64_t read_msr(cpu_state_t *s, unsigned csrno)
+static uint64_t read_msr(cpu_state_t *s, unsigned csrno, isa_exception_t *exc)
 {
     if (s->priv < ((csrno >> 8) & 3)) {
         ERROR("  Illegal Read of CSR %3x\n", csrno);
-        raise(s, EXCP_INSN_ILLEGAL);
+        raise_exception(EXCP_INSN_ILLEGAL, 0, exc); // XXX is that legal?
         return 0;
     }
 
@@ -1171,11 +1163,11 @@ static uint64_t read_msr(cpu_state_t *s, unsigned csrno)
     }
 }
 
-static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value)
+static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value, isa_exception_t *exc)
 {
     if (s->priv < ((csrno >> 8) & 3) || (csrno & 0xc00) == 0xc00) {
         ERROR("  Illegal Write of CSR %3x\n", csrno);
-        raise(s, EXCP_INSN_ILLEGAL);
+        raise_exception(EXCP_INSN_ILLEGAL, 0, exc); // XXX is that legal?
         return;
     }
 
@@ -1371,45 +1363,22 @@ static void cache_sim(cpu_state_t *cpu, uint64_t address, bool isStore, int mem_
 }
 
 static uint64_t
-load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *error)
+load(cpu_state_t *s, uint64_t address, int mem_access_size, isa_exception_t *exc)
 {
-    memory_t *m = s->mem;
-    void *p;
-    uint32_t iodata;
-    int except = EXCP_LOAD_ACCESS_FAULT;
     bool ifetch = false;
-
     if (mem_access_size == 0)
         mem_access_size = 4, ifetch = true;
 
-    *error = MEMORY_SUCCESS;
-
-#if 0
-    int except = EXCP_LOAD_FAULT;
-    uint32_t access = BF_PACK(1, PTE_UR);
-
-    if (mem_access_size == 44)
-        mem_access_size = 4, except = EXCP_INSN_ADDR, access = BF_PACK(1, PTE_UX);
-
-    if (BF_GET(s->msr[CSR_STATUS], CSR_STATUS_S_BF))
-        access <<= 3;
-
-    *error = MEMORY_SUCCESS;
-
-    if (BF_GET(s->msr[CSR_STATUS], CSR_STATUS_VM_BF)) {
-        address = virt2phys(s, address, access, error);
-        if (*error != MEMORY_SUCCESS) {
-            raise(s, except);
-            s->msr[CSR_BADVADDR] = address;
-
-            return 0;
-        }
+    if (address & (abs(mem_access_size) - 1)) {
+        ERROR("  load from unaligned physical address %08"PRIx64"\n", address);
+        raise_exception(EXCP_LOAD_MISALIGN, address, exc);
+        return 0;
     }
-#endif
 
+    void *p;
     // Hack for Mi-V
     if (address == 0x70001010) {
-        iodata = 1;
+        uint32_t iodata = 1;
         p = (void*)&iodata + (address & 3);
     } else if (0 && address & 1 << 31) {
         /* We follow Altera's JTAG UART interface:
@@ -1419,7 +1388,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *
            data    (R/W): RAVAIL:16        RVALID:1 RSERV:7          DATA:8
            control (R/W): WSPACE:16        RSERV:5 AC:1 WI:1 RI:1    RSERV:6 WE:1 RE:1
         */
-        iodata = 0;
+        uint32_t iodata = 0;
         if ((address & 4) == 0) {
             int ch = getchar();
             iodata = (0 <= ch) * (1 << 16 | 1 << 15) + (uint8_t) ch;
@@ -1428,16 +1397,12 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *
             iodata = 1 << 16;
 
         p = (void *)&iodata + (address & 3);
-    }
-    else
-        p = memory_physical(m, address,
-                            mem_access_size > 0 ? mem_access_size : -mem_access_size);
+    } else
+        p = memory_physical(s->mem, address, abs(mem_access_size));
 
     if (!p) {
-        raise(s, except);
-        s->msr[CSR_STVAL] = address; /// XXX pass it into raise()
-        ERROR("  load from illegal physical memory %08"PRIx64"\n", address);
-        //XXX s->fatal_error = true;
+        ERROR("  load from illegal physical address %08"PRIx64"\n", address);
+        raise_exception(EXCP_LOAD_ACCESS_FAULT, address, exc);
         return 0;
     }
 
@@ -1463,9 +1428,13 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, memory_exception_t *
 }
 
 static void
-store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, memory_exception_t *error)
+store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, isa_exception_t *exc)
 {
-    *error = MEMORY_SUCCESS;
+    if (address & (mem_access_size - 1)) {
+        ERROR("  store to unaligned physical address %08"PRIx64"\n", address);
+        raise_exception(EXCP_STORE_MISALIGN, address, exc);
+        return;
+    }
 
     // XXX Hack for Dhrystone
     if (address == 0x0000000010000000) {
@@ -1489,35 +1458,12 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, mem
         return;
     }
 
-#if 0
-    if (BF_GET(s->msr[CSR_STATUS], CSR_STATUS_S_BF))
-        access <<= 3;
-
-    if (BF_GET(s->msr[CSR_STATUS], CSR_STATUS_VM_BF)) {
-        address = virt2phys(s, address, access, error);
-        if (*error != MEMORY_SUCCESS) {
-            raise(s, EXCP_STORE_FAULT);
-            s->msr[CSR_BADVADDR] = address;
-            return;
-        }
-    }
-#endif
-
-    if (0 && address & 1 << 31) {
-        if (address == (1U << 31))
-            putchar(value & 255);
-        else
-            fprintf(stderr, "  IGNORED: store to unmapped IO memory %08"PRIx64"\n", address);
-        return;
-    }
-
     memory_t *m = s->mem;
     void *p = memory_physical(m, address, mem_access_size);
 
     if (!p) {
-        raise(s, EXCP_STORE_ACCESS_FAULT);
-        s->msr[CSR_STVAL] = address; // XXX shouldn't that depend on priv?
         ERROR("  store to illegal physical memory %08"PRIx64"\n", address);
+        raise_exception(EXCP_STORE_ACCESS_FAULT, address, exc);
         return;
     }
 
@@ -1550,14 +1496,6 @@ setup(cpu_state_t *state, elf_info_t *info, verbosity_t verbosity)
     // XXX Hack for Dhrystone
     memory_ensure_mapped_range(state->mem, 0x0, 256*1024-1);
     state->r[2] = 0x10000;
-
-#if 0
-    if (disk_image) {
-        disk_fd = open(disk_image, O_RDWR);
-        if (disk_fd < 0)
-            perror(disk_image), exit(1);
-    }
-#endif
 
     fcntl(0, F_SETFL, fcntl(0, F_GETFL, 0) | O_NONBLOCK);
 
@@ -1595,6 +1533,7 @@ const arch_t arch_riscv32 = {
     .write_msr = write_msr,
     .load = load,
     .store = store,
+    .handle_exception = handle_exception,
 };
 #endif
 
