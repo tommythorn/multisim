@@ -357,9 +357,9 @@ disass_insn(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
             i.sb.imm12 << 12 | i.sb.imm11 << 11 |
             i.sb.imm10_5 << 5 | i.sb.imm4_1 << 1;
 
-        snprintf(buf, buf_size, "%-11s%s,%s,0x%08"PRIx64,
+        snprintf(buf, buf_size, "%-11s%s,%s,0x%08"PRIx32,
                  opcode_op_branch_name[i.r.funct3],
-                 N[i.r.rs1], N[i.r.rs2], pc + imm);
+                 N[i.r.rs1], N[i.r.rs2], (uint32_t)(pc + imm));
         break;
     }
 
@@ -387,15 +387,15 @@ disass_insn(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
 
         if (i.uj.rd == 0)
             // Pseudo "j" instruction
-            snprintf(buf, buf_size, "%-11s0x%08"PRIx64,
-                     "j", addr);
+            snprintf(buf, buf_size, "%-11s0x%08"PRIx32,
+                     "j", (uint32_t)addr);
         else if (i.uj.rd == 1)
             // Pseudo "jal" instruction (without destination)
-            snprintf(buf, buf_size, "%-11s0x%08"PRIx64,
-                     "jal", addr);
+            snprintf(buf, buf_size, "%-11s0x%08"PRIx32,
+                     "jal", (uint32_t)addr);
         else
-            snprintf(buf, buf_size, "%-11s%s,0x%08"PRIx64,
-                     "jal", N[i.uj.rd], addr);
+            snprintf(buf, buf_size, "%-11s%s,0x%08"PRIx32,
+                     "jal", N[i.uj.rd], (uint32_t)addr);
 
         break;
     }
@@ -654,8 +654,8 @@ decode(uint64_t insn_addr, uint32_t insn)
 
     default:
     unhandled:
-        warn("Opcode %s not decoded, insn %016"PRIx64":%08x\n",
-             opcode_name[i.r.opcode], insn_addr, i.raw);
+        warn("Opcode %s not decoded, insn %08"PRIx32":%08x\n",
+             opcode_name[i.r.opcode], (uint32_t)insn_addr, i.raw);
         break;
     }
 
@@ -974,9 +974,9 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
         return res;
 
     default:
-        warn("Opcode %s exec not implemented, insn %016"PRIx64":%08x "
+        warn("Opcode %s exec not implemented, insn %08"PRIx32":%08x "
              "i{%x,%s,%x,%s,%s,%x}\n",
-             opcode_name[i.r.opcode], dec.insn_addr, i.raw,
+             opcode_name[i.r.opcode], (uint32_t)dec.insn_addr, i.raw,
              i.i.imm11_0, reg_name[i.r.rs1], i.r.funct3,
              reg_name[i.r.rd],
              opcode_name[i.r.opcode], i.r.opext);
@@ -1064,9 +1064,9 @@ insn_exec_system(cpu_state_t *s, isa_decoded_t dec, uint64_t op_a_u, uint64_t op
         break;
 
     default:
-        warn("Opcode %s exec not implemented, insn %016"PRIx64":%08x "
+        warn("Opcode %s exec not implemented, insn %08"PRIx32":%08x "
              "i{%x,%s,%x,%s,%s,%x}\n",
-             opcode_name[i.r.opcode], dec.insn_addr, i.raw,
+             opcode_name[i.r.opcode], (uint32_t)dec.insn_addr, i.raw,
              i.i.imm11_0, reg_name[i.r.rs1], i.r.funct3,
              reg_name[i.r.rd],
              opcode_name[i.r.opcode], i.r.opext);
@@ -1370,7 +1370,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, isa_exception_t *exc
         mem_access_size = 4, ifetch = true;
 
     if (address & (abs(mem_access_size) - 1)) {
-        ERROR("  load from unaligned physical address %08"PRIx64"\n", address);
+        ERROR("  load from unaligned physical address %08"PRIx32"\n", (uint32_t)address);
         raise_exception(EXCP_LOAD_MISALIGN, address, exc);
         return 0;
     }
@@ -1401,7 +1401,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, isa_exception_t *exc
         p = memory_physical(s->mem, address, abs(mem_access_size));
 
     if (!p) {
-        ERROR("  load from illegal physical address %08"PRIx64"\n", address);
+        ERROR("  load from illegal physical address %08"PRIx32"\n", (uint32_t)address);
         raise_exception(EXCP_LOAD_ACCESS_FAULT, address, exc);
         return 0;
     }
@@ -1431,7 +1431,7 @@ static void
 store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, isa_exception_t *exc)
 {
     if (address & (mem_access_size - 1)) {
-        ERROR("  store to unaligned physical address %08"PRIx64"\n", address);
+        ERROR("  store to unaligned physical address %08"PRIx32"\n", (uint32_t)address);
         raise_exception(EXCP_STORE_MISALIGN, address, exc);
         return;
     }
@@ -1462,7 +1462,7 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, isa
     void *p = memory_physical(m, address, mem_access_size);
 
     if (!p) {
-        ERROR("  store to illegal physical memory %08"PRIx64"\n", address);
+        ERROR("  store to illegal physical memory %08"PRIx32"\n", (uint32_t)address);
         raise_exception(EXCP_STORE_ACCESS_FAULT, address, exc);
         return;
     }
