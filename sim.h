@@ -46,6 +46,9 @@ struct cpu_state_st {
     /* Counter running at the CPU tick rate */
     uint64_t        counter;
 
+    /* memory mapped mtime and mtimecmp */
+    uint64_t        mtimereg[2];
+
     /* Statistics */
     uint64_t        n_issue;
 

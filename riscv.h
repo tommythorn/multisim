@@ -227,7 +227,7 @@ enum riscv_csr_e {
     CSR_MINSTRETH       = 0xB82,
 };
 
-// XXX 32-bit version!
+// 32-bit version!
 #define CSR_STATUS_UIE_BF       0:0
 #define CSR_STATUS_SIE_BF       1:1
 
@@ -239,7 +239,7 @@ enum riscv_csr_e {
 #define CSR_STATUS_SPP_BF       8:8
 
 #define CSR_STATUS_MPP_BF     12:11
-#define CSR_STATUS_FF_BF      14:13
+#define CSR_STATUS_FS_BF      14:13
 #define CSR_STATUS_XS_BF      16:15
 #define CSR_STATUS_MPRV_BF    17:17
 #define CSR_STATUS_SUM_BF     18:18
@@ -251,9 +251,12 @@ enum riscv_csr_e {
 
 /* Interrupts */
 enum {
-    TRAP_INTR_IPI       = 5,
-    TRAP_INTR_HOST      = 6,
     TRAP_INTR_TIMER     = 7,
+};
+
+enum {
+    MIP_MTIP = 1 << TRAP_INTR_TIMER,
+    MIE_MTIE = 1 << TRAP_INTR_TIMER,
 };
 
 /* Exceptions */

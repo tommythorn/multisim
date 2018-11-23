@@ -1113,6 +1113,37 @@ insn_exec64(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a,
 
 #define HTIF_DEV_SHIFT      (56)
 
+static void check_for_interrupts(cpu_state_t *s) {
+    bool intr_globally_enabled = s->priv < 3 || BF_GET(s->msr[CSR_MSTATUS], CSR_STATUS_MIE_BF);
+    uint32_t pending = s->msr[CSR_MIP] & s->msr[CSR_MIE];
+    static bool benoisy = true;
+
+    if (pending != 0 && intr_globally_enabled) {
+        if (0)
+        fprintf(stderr, "  Taking an exception on pending interrupt %d\n",
+                __builtin_ctz(pending));
+
+        isa_exception_t exc = {
+            .code = (1ULL << 31) | __builtin_ctz(pending),
+            .info = 0 }; // XXX 0?
+
+        s->pc = handle_exception(s, s->pc, exc); // XXX this is broken
+        benoisy = false;
+    } else if (benoisy) {
+        if (pending) {
+            fprintf(stderr, "  Pending interrupt %d, but globally disabled (mstatus = %08lx, mstatus.mie = %d\n",
+                    __builtin_ctz(pending),
+                    s->msr[CSR_MSTATUS],
+                    BF_GET(s->msr[CSR_MSTATUS], CSR_STATUS_MIE_BF));
+        } else if (s->msr[CSR_MIP]) {
+            fprintf(stderr, "  Pending interrupts %08lx, but none enabled (MIE %08lx)\n",
+                    s->msr[CSR_MIP], s->msr[CSR_MIE]);
+        }
+        benoisy = false;
+    }
+}
+
+
 /* executed every cycle */
 static void tick(cpu_state_t *s, int instret)
 {
@@ -1121,19 +1152,19 @@ static void tick(cpu_state_t *s, int instret)
     s->msr[CSR_INSTRET] = (uint32_t) (s->msr[CSR_INSTRET] + instret);
     s->msr[CSR_CYCLE]   = (uint32_t) (s->msr[CSR_CYCLE]   + 1);
 
-#if 0
-    int pending =
-        BF_GET(s->msr[CSR_STATUS], CSR_STATUS_IP_BF) &
-        BF_GET(s->msr[CSR_STATUS], CSR_STATUS_IM_BF);
-
-    if (BF_GET(s->msr[CSR_STATUS], CSR_STATUS_EI_BF) && pending) {
-        if (0)
-            ERROR("\npc=%"PRIx64" status write of EI enables these pending (mask) 0x%x (priority %d)\n",
-              s->pc,
-              pending, __builtin_ctz(pending));
-        raise(s, (1ULL << 63) | __builtin_ctz(pending));
+    // mtime on QEMU runs at 10 MHz.  Let's pretend our processors runs at 1 MHz
+    if ((s->counter & 0) == 0) {
+        s->mtimereg[0] += 10;
+        if (s->mtimereg[0] >= s->mtimereg[1] && ~s->msr[CSR_MIP] & MIP_MTIP) {
+            if (0)
+            fprintf(stderr, "MTIME tick %ld vs %ld ==> Raising timer interrupt\n",
+                    s->mtimereg[0], s->mtimereg[1]);
+            s->msr[CSR_MIP] |= MIP_MTIP;
+        } /*else
+            fprintf(stderr, "MTIME tick %ld vs %ld\n", s->mtimereg[0], s->mtimereg[1]);*/
     }
-#endif
+
+    check_for_interrupts(s);
 }
 
 static uint64_t read_msr(cpu_state_t *s, unsigned csrno, isa_exception_t *exc)
@@ -1375,9 +1406,21 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, isa_exception_t *exc
         return 0;
     }
 
-    void *p;
-    // Hack for Mi-V
-    if (address == 0x70001010) {
+    void *p = 0;
+
+    /* QEMU */
+    if ((address & 0xF0000000) == 0x40000000) {
+        address &= 0xFFFFFFF;
+        if (address < 0x10)
+            p = ((void *) &s->mtimereg[0]) + address;
+/*
+        else {
+             if (0x2000 <= address && address < 0x3000) { // XXX QEMU UARTS goes how far?
+
+            p = ((void *) &s->mtimereg[0]) + address;
+        }
+*/
+    } else if (address == 0x70001010) {    // Hack for Mi-V
         uint32_t iodata = 1;
         p = (void*)&iodata + (address & 3);
     } else if (0 && address & 1 << 31) {
@@ -1436,30 +1479,30 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, isa
         return;
     }
 
-    // XXX Hack for Dhrystone
-    if (address == 0x0000000010000000) {
+    void *p = 0;
+    /* QEMU */
+    if ((address & 0xF0000000) == 0x40000000) {
+        address &= 0xFFFFFFF;
+        if (address < 0x10) {
+            p = ((void *) &s->mtimereg[0]) + address;
+            s->msr[CSR_MIP] &= ~MIP_MTIP; } // writing the mtime clear the interrup pendning bit
+        else if (address == 0x2000) {
+            if (s->verbosity & VERBOSE_CONSOLE)
+                putchar(value & 255);
+            return;
+        }
+    } else if (address == 0x0000000010000000) {
+        // XXX Hack for Dhrystone
         if (s->verbosity & VERBOSE_CONSOLE)
             putchar(value & 255);
         return;
-    }
-
-    // Hack for QEMU
-    if (address == 0x40002000) {
+    } else if (address == 0x70001000) {
+        // Hack for Mi-V
         if (s->verbosity & VERBOSE_CONSOLE)
             putchar(value & 255);
         return;
-    }
-
-
-    // Hack for Mi-V
-    if (address == 0x70001000) {
-        if (s->verbosity & VERBOSE_CONSOLE)
-            putchar(value & 255);
-        return;
-    }
-
-    memory_t *m = s->mem;
-    void *p = memory_physical(m, address, mem_access_size);
+    } else
+        p = memory_physical(s->mem, address, mem_access_size);
 
     if (!p) {
         ERROR("  store to illegal physical memory %08"PRIx32"\n", (uint32_t)address);
