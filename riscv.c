@@ -124,6 +124,11 @@ static const uint64_t csr_mask[0x1000] = {
                            BF_PACK(~0, CSR_STATUS_MPIE_BF) |
                            BF_PACK(~0, CSR_STATUS_MIE_BF)),
     [CSR_MEPC]          = -4LL,
+
+    [CSR_MCYCLE]        = 0xFFFFFFFF,
+    [CSR_MINSTRET]      = 0xFFFFFFFF,
+    [CSR_MCYCLEH]       = 0xFFFFFFFF,
+    [CSR_MINSTRETH]     = 0xFFFFFFFF,
 };
 
 static const char *reg_name[32] = {
@@ -234,7 +239,7 @@ disass_insn(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
 
 
     case MISC_MEM:
-        snprintf(buf, buf_size, "%-11s", i.r.funct3 ? "fence.i" : "fence");
+        snprintf(buf, buf_size, "%s", i.r.funct3 ? "fence.i" : "fence");
         break;
 
     case LOAD_FP: {
@@ -404,12 +409,12 @@ disass_insn(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
       switch (i.r.funct3) {
       case ECALLEBREAK:
           switch (i.i.imm11_0) {
-          case ECALL:  snprintf(buf, buf_size, "%-11s", "ecall"); return;
-          case EBREAK: snprintf(buf, buf_size, "%-11s", "ebreak"); return;
-          case URET:   snprintf(buf, buf_size, "%-11s", "uret"); return;
-          case SRET:   snprintf(buf, buf_size, "%-11s", "sret"); return;
-          case WFI:    snprintf(buf, buf_size, "%-11s", "wfi"); return;
-          case MRET:   snprintf(buf, buf_size, "%-11s", "mret"); return;
+          case ECALL:  snprintf(buf, buf_size, "%s", "ecall"); return;
+          case EBREAK: snprintf(buf, buf_size, "%s", "ebreak"); return;
+          case URET:   snprintf(buf, buf_size, "%s", "uret"); return;
+          case SRET:   snprintf(buf, buf_size, "%s", "sret"); return;
+          case WFI:    snprintf(buf, buf_size, "%s", "wfi"); return;
+          case MRET:   snprintf(buf, buf_size, "%s", "mret"); return;
           default:
               goto unhandled;
           }
@@ -1116,32 +1121,15 @@ insn_exec64(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a,
 static void check_for_interrupts(cpu_state_t *s) {
     bool intr_globally_enabled = s->priv < 3 || BF_GET(s->msr[CSR_MSTATUS], CSR_STATUS_MIE_BF);
     uint32_t pending = s->msr[CSR_MIP] & s->msr[CSR_MIE];
-    static bool benoisy = true;
 
     if (pending != 0 && intr_globally_enabled) {
-        if (0)
-        fprintf(stderr, "  Taking an exception on pending interrupt %d\n",
-                __builtin_ctz(pending));
-
         isa_exception_t exc = {
             .code = (1ULL << 31) | __builtin_ctz(pending),
             .info = 0 }; // XXX 0?
 
-        s->pc = handle_exception(s, s->pc, exc); // XXX this is broken
-        benoisy = false;
-    } else if (benoisy) {
-        if (pending) {
-            fprintf(stderr, "  Pending interrupt %d, but globally disabled (mstatus = %08lx, mstatus.mie = %d\n",
-                    __builtin_ctz(pending),
-                    s->msr[CSR_MSTATUS],
-                    BF_GET(s->msr[CSR_MSTATUS], CSR_STATUS_MIE_BF));
-        } else if (s->msr[CSR_MIP]) {
-            fprintf(stderr, "  Pending interrupts %08lx, but none enabled (MIE %08lx)\n",
-                    s->msr[CSR_MIP], s->msr[CSR_MIE]);
-        }
-        benoisy = false;
-    }
-}
+         // XXX this is broken; we need to have a cleaner way to
+         // servicing interrupts
+        s->pc = handle_exception(s, s->pc, exc);}}
 
 
 /* executed every cycle */
@@ -1149,23 +1137,16 @@ static void tick(cpu_state_t *s, int instret)
 {
     s->counter += 1;
     // XXX for now, an instruction per tick
-    s->msr[CSR_INSTRET] = (uint32_t) (s->msr[CSR_INSTRET] + instret);
-    s->msr[CSR_CYCLE]   = (uint32_t) (s->msr[CSR_CYCLE]   + 1);
+    s->msr[CSR_MINSTRET] = (uint32_t) (s->msr[CSR_MINSTRET] + instret);
+    s->msr[CSR_MCYCLE]   = (uint32_t) (s->msr[CSR_MCYCLE]   + 1);
 
     // mtime on QEMU runs at 10 MHz.  Let's pretend our processors runs at 1 MHz
     if ((s->counter & 0) == 0) {
         s->mtimereg[0] += 10;
-        if (s->mtimereg[0] >= s->mtimereg[1] && ~s->msr[CSR_MIP] & MIP_MTIP) {
-            if (0)
-            fprintf(stderr, "MTIME tick %ld vs %ld ==> Raising timer interrupt\n",
-                    s->mtimereg[0], s->mtimereg[1]);
-            s->msr[CSR_MIP] |= MIP_MTIP;
-        } /*else
-            fprintf(stderr, "MTIME tick %ld vs %ld\n", s->mtimereg[0], s->mtimereg[1]);*/
-    }
+        if (s->mtimereg[0] >= s->mtimereg[1])
+            s->msr[CSR_MIP] |= MIP_MTIP;}
 
-    check_for_interrupts(s);
-}
+    check_for_interrupts(s);}
 
 static uint64_t read_msr(cpu_state_t *s, unsigned csrno, isa_exception_t *exc)
 {
@@ -1536,12 +1517,9 @@ setup(cpu_state_t *state, elf_info_t *info, verbosity_t verbosity)
 
     state->priv = 3; // M
 
-    // XXX Hack for Dhrystone
-    memory_ensure_mapped_range(state->mem, 0x0, 256*1024-1);
-    state->r[2] = 0x10000;
-
-    fcntl(0, F_SETFL, fcntl(0, F_GETFL, 0) | O_NONBLOCK);
-
+    // This is all the memory we have, code and data
+    memory_ensure_mapped_range(state->mem,
+                               0x80000000, 0x80000000 + 32*1024-1);
 
     if (0)
     for (unsigned setslg2 = 5; setslg2 <= 12; setslg2 += 1)

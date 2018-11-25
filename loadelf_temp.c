@@ -136,7 +136,10 @@ int SZ(loadelf,)(memory_t *m, char *name, FILE *f, elf_info_t *elf_info)
                         NATIVE(ph[i].p_paddr),
                         NATIVE(ph[i].p_memsz),
                         elf_info);
-        }
+        } else
+            if (0)
+                memory_ensure_mapped_range(m, ph[i].p_paddr, ph[i].p_paddr + ph[i].p_memsz);
+
 
         if (ph[i].p_flags & 1) {
             elf_info->text_segments++;

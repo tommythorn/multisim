@@ -161,6 +161,9 @@ enum riscv_opcode_amo_e {
 enum riscv_csr_e {
 // Table 2.2 User-level CSRs
     CSR_USTATUS         = 0x000,
+    CSR_FFLAGS          = 0x001, // fcsr[4:0] alias
+    CSR_FRM             = 0x002, // fcsr[7:5] alias
+    CSR_FCSR            = 0x003,
     CSR_UIE             = 0x004,
     CSR_UTVEC           = 0x005,
 
@@ -169,18 +172,6 @@ enum riscv_csr_e {
     CSR_UCAUSE          = 0x042,
     CSR_UTVAL           = 0x043,
     CSR_UIP             = 0x044,
-
-    CSR_FFLAGS          = 0x001,// fcsr[4:0] alias
-    CSR_FRM,                    // fcsr[7:5] alias
-    CSR_FCSR,
-
-    CSR_CYCLE           = 0xC00,
-    CSR_TIME,
-    CSR_INSTRET,
-
-    CSR_CYCLEH          = 0xC80,  // only valid in 32-bit mode
-    CSR_TIMEH,
-    CSR_INSTRETH,
 
 // Table 2.3 Supervisor-level CSRs
     CSR_SSTATUS         = 0x100,
@@ -197,6 +188,22 @@ enum riscv_csr_e {
     CSR_SIP             = 0x144,
 
     CSR_SATP            = 0x180,
+
+
+    CSR_MCYCLE          = 0xB00,
+    CSR_MINSTRET        = 0xB02,
+
+    CSR_MCYCLEH         = 0xB80,  // only valid in 32-bit mode
+    CSR_MINSTRETH       = 0xB82,
+
+
+    CSR_CYCLE           = 0xC00,
+    CSR_TIME,
+    CSR_INSTRET,
+
+    CSR_CYCLEH          = 0xC80,  // only valid in 32-bit mode
+    CSR_TIMEH,
+    CSR_INSTRETH,
 
 // Table 2.4 Machine-level CSRs
     CSR_MVENDORID       = 0xF11,
@@ -220,11 +227,6 @@ enum riscv_csr_e {
     // Omitting the Machine Protection and Translation
 
 // Table 2.5
-    CSR_MCYCLE          = 0xB00,
-    CSR_MINSTRET        = 0xB02,
-
-    CSR_MCYCLEH         = 0xB80,  // only valid in 32-bit mode
-    CSR_MINSTRETH       = 0xB82,
 };
 
 // 32-bit version!
@@ -274,7 +276,7 @@ enum {
     EXCP_UMODE_CALL,
     EXCP_SMODE_CALL,
     EXCP_RESERVED_10,
-    EXCP_MODE_CALL,
+    EXCP_MMODE_CALL,
 
     EXCP_INSN_PAGE_FAULT,
     EXCP_LOAD_PAGE_FAULT,

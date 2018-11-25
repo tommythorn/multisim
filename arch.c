@@ -36,10 +36,10 @@ isa_disass(const arch_t *arch, isa_decoded_t dec, isa_result_t res)
     case isa_insn_class_load:
         if (dec.dest_reg != ISA_NO_REG)
             fprintf(stderr, "%-36s %s <~ 0x%08x [0x%08x]",
-		    dis_buf, arch->reg_name[dec.dest_reg], (uint32_t)res.result, (uint32_t)res.load_addr);
+                    dis_buf, arch->reg_name[dec.dest_reg], (uint32_t)res.result, (uint32_t)res.load_addr);
         else
             fprintf(stderr, "%-36s  <~ 0x%08x [0x%08x]",
-		    dis_buf, (uint32_t)res.result, (uint32_t)res.load_addr);
+                    dis_buf, (uint32_t)res.result, (uint32_t)res.load_addr);
         break;
 
     case isa_insn_class_store:

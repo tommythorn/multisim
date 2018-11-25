@@ -140,8 +140,10 @@ step_simple(const arch_t *arch, cpu_state_t *state)
         arch->write_msr(state, dec.dest_msr, res.msr_result, &exc);
 
 exception:
-    if (state->verbosity & VERBOSE_DISASS)
+    if (state->verbosity & VERBOSE_DISASS) {
+        fprintf(stderr, "%d ", state->priv);
         isa_disass(arch, dec, res);
+    }
 
     if (exc.raised) {
         if (state->verbosity & VERBOSE_DISASS)
@@ -174,9 +176,14 @@ void run_simple(int num_images, char *images[], verbosity_t verbosity)
         if (step_simple(arch, state))
             break;
 
-        if (verbosity & VERBOSE_COMPLIANCE &&
-            arch->load(state, tohost, 4, &exc))
-            break;
+        if (verbosity & VERBOSE_COMPLIANCE)  {
+            uint32_t val = arch->load(state, tohost, 4, &exc);
+            if (val) {
+                if (val != 1)
+                    fprintf(stderr, "  FAILED with %d\n", val);
+                break;
+            }
+        }
     }
 
     if (verbosity & VERBOSE_DISASS)
