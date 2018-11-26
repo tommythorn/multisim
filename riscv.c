@@ -227,10 +227,6 @@ disass_insn(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
     insn_t i = {.raw = insn };
     const char **N = reg_name;
 
-    snprintf(buf, buf_size, "%08x ", insn);
-    buf += 9;
-    buf_size -= 9;
-
     switch (i.r.opcode) {
     case LOAD:
         snprintf(buf, buf_size, "%-11s%s,%d(%s)",

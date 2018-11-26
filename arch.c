@@ -28,10 +28,17 @@ isa_disass(const arch_t *arch, isa_decoded_t dec, isa_result_t res)
 {
     char dis_buf[99];
 
-    fprintf(stderr, "%08x ", (uint32_t) dec.insn_addr);
+    fprintf(stderr, "%08x %08x ", (uint32_t) dec.insn_addr, dec.insn);
+
+    if (dec.dest_reg == ISA_NO_REG)
+        fprintf(stderr, "%8s ", "");
+    else
+        fprintf(stderr, "%08x ", (uint32_t)res.result);
 
     arch->disass_insn(dec.insn_addr, dec.insn, dis_buf, sizeof dis_buf);
+    fprintf(stderr, "%s\n", dis_buf);
 
+    if (0)
     switch (dec.class) {
     case isa_insn_class_load:
         if (dec.dest_reg != ISA_NO_REG)
@@ -60,9 +67,6 @@ isa_disass(const arch_t *arch, isa_decoded_t dec, isa_result_t res)
         break;
     }
 
-    // XXX
-    fprintf(stderr, "\n");
-    fflush(stderr);
 }
 
 extern const arch_t arch_alpha, arch_lm32, arch_riscv32, arch_riscv64;
