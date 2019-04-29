@@ -1248,7 +1248,8 @@ static void dump_cache_stats(riscv_state_t *s)
         struct cache_st *c = s->cache + i;
 
         fprintf(stderr,
-                "Cache %3d %5d KiB %d ways %4d sets %3d Bline %6s %s %8ld hits, %8ld misses, %8ld Bfetches, %8ld (%8ld B) WB\n",
+                "Cache %3d %5d KiB %d ways %4d sets %3d Bline %6s %s %8"PRId64" "
+                "hits, %8"PRId64" misses, %8"PRId64" Bfetches, %8"PRId64" (%8"PRId64" B) WB\n",
                 i, c->nways << (c->nsetslg2 + c->linesizelg2), c->nways, 1 << c->nsetslg2, 1 << c->linesizelg2,
                 policy_s[c->policy], dirties_s[c->dirties],
                 c->nhits, c->nmiss, c->nfetches * (fetchoverhead + (1 << c->linesizelg2)), c->ndirty_evicts, c->ndirty_evict_bytes);
@@ -1257,7 +1258,7 @@ static void dump_cache_stats(riscv_state_t *s)
     if (0)
     for (int i = 0; i < 8+9; ++i)
         if (s->load_count[i])
-            fprintf(stderr, "L%2d %8ld\n", i-8, s->load_count[i]);
+            fprintf(stderr, "L%2d %8"PRId64"\n", i-8, s->load_count[i]);
 
     fflush(stderr);
 }
@@ -1267,7 +1268,7 @@ static void cache_sim(cpu_state_t *cpu, uint64_t address, bool isStore, int mem_
     riscv_state_t *s = cpu->arch_specific;
 
     if (debug_cache)
-    fprintf(stderr, "%s ACCESS address %08lx..%08lx\n", isStore ? "ST" : "LD",
+    fprintf(stderr, "%s ACCESS address %08"PRIx64"..%08"PRIx64"\n", isStore ? "ST" : "LD",
            address, address + mem_access_size - 1);
 
     for (int i = 0; i < s->num_caches; ++i) {
@@ -1292,7 +1293,7 @@ static void cache_sim(cpu_state_t *cpu, uint64_t address, bool isStore, int mem_
                 (c->line[w][cache_set].valid_bytes & bytes_mask) == bytes_mask) {
 
                 if (debug_cache)
-                    fprintf(stderr, "HIT way %d  (line V %lx, D %lx)\n",
+                    fprintf(stderr, "HIT way %d  (line V %"PRIx64", D %"PRIx64")\n",
                             w,
                             c->line[w][cache_set].valid_bytes,
                             c->line[w][cache_set].dirty_bytes);
@@ -1327,7 +1328,7 @@ static void cache_sim(cpu_state_t *cpu, uint64_t address, bool isStore, int mem_
         }
 
         if (debug_cache)
-            fprintf(stderr, "MISS evict way %d  (line V %lx, D %lx)\n",
+            fprintf(stderr, "MISS evict way %d  (line V %"PRIx64", D %"PRIx64")\n",
                     w,
                     c->line[w][cache_set].valid_bytes,
                     c->line[w][cache_set].dirty_bytes);
@@ -1461,6 +1462,7 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, isa
     if ((address & 0xF0000000) == 0x40000000) {
         address &= 0xFFFFFFF;
         if (address < 0x10) {
+            fprintf(stderr, "Writing mtimereg %x <- %x\n", (uint32_t)address, (uint32_t)value);
             p = ((void *) &s->mtimereg[0]) + address;
             s->msr[CSR_MIP] &= ~MIP_MTIP; } // writing the mtime clear the interrup pendning bit
         else if (address == 0x2000) {

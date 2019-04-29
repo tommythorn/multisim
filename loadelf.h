@@ -24,17 +24,8 @@
 #include "memory.h"
 #include <stdbool.h>
 
-#if defined(__APPLE__)
-#include "libelf/sys_elf.h"
-/* MacPorts' libelf gets this wrong, Linux elf.h gets it right */
-#undef  EM_ALPHA
-#define EM_ALPHA	0x9026
-#else
 #include "elf.h"
-#endif
-/* Nobody has this */
-#define EM_LM32         0x0666 /* Lattice Mico32 */
-#define EM_LM32_ALT        138 /* Lattice Mico32 */
+
 #ifndef EM_RISCV
 #define EM_RISCV          0xF3 /* Little endian RISC-V, 32- and 64-bit */
 #endif

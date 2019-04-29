@@ -36,7 +36,7 @@ loadsection(FILE *f, unsigned f_offset, unsigned f_len,
 {
     assert(0x80000000 <= m_addr && m_addr + m_len < 0x80000000 + 32*1024);
 
-    memory_ensure_mapped_range(m, m_addr, m_addr + m_len);
+    //memory_ensure_mapped_range(m, m_addr, m_addr + m_len);
 
     info->section_start[info->nsections]  = m_addr;
     info->section_size[info->nsections++] = m_len;

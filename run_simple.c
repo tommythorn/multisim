@@ -147,7 +147,9 @@ exception:
 
     if (exc.raised) {
         if (state->verbosity & VERBOSE_DISASS)
-            fprintf(stderr, "                  EXCEPTION %ld (%08lx) RAISED\n", exc.code, exc.info);
+            fprintf(stderr,
+                    "                  EXCEPTION %"PRId64" (%08"PRId64") RAISED\n",
+                    exc.code, exc.info);
 
         state->pc = arch->handle_exception(state, dec.insn_addr, exc);
     }
@@ -162,6 +164,10 @@ void run_simple(int num_images, char *images[], verbosity_t verbosity)
     cpu_state_t *state = state_create();
     const arch_t *arch;
     elf_info_t info;
+
+    memory_ensure_mapped_range(state->mem,
+                               0x80000000, 0x80000000 + 32*1024-1);
+
 
     loadelfs(state->mem, num_images, images, &info);
 
@@ -196,7 +202,7 @@ void run_simple(int num_images, char *images[], verbosity_t verbosity)
         if (getelfsym(&info, "begin_signature", &begin_signature) &&
             getelfsym(&info, "end_signature", &end_signature))
             for (uint32_t a = begin_signature; a < end_signature; a += 4)
-                printf("%08lx\n", arch->load(state, a, 4, &exc));
+                printf("%08"PRId64"\n", arch->load(state, a, 4, &exc));
     }
 
     state_destroy(state);
