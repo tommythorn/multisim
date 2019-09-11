@@ -87,11 +87,10 @@ static unsigned alloc_reg(void)
 }
 
 static bool
-step_sscalar_oooe(
+step_ooo(
     const arch_t *arch, cpu_state_t *state, cpu_state_t *costate,
     verbosity_t verbosity)
 {
-    memory_exception_t error;
     int n_load = 0;
     int n_store = 0;
 
@@ -100,14 +99,11 @@ step_sscalar_oooe(
      * instruction.
      */
 
+    isa_exception_t exc = { 0 };
+
     while (!stop_fetching && rs_size < WINDOW_SIZE) {
-        uint32_t i = (uint32_t)arch->load(state, state->pc, 4, &error);
-
-        if (error == MEMORY_FATAL)
-            return true;
-
-        if (error != MEMORY_SUCCESS)
-            break;
+        uint32_t i = (uint32_t)arch->load(state, state->pc, 0 /* = ifetch */, &exc);
+	assert(!exc.raised);
 
         if (state->fatal_error)
             // XXX We should be able to poison the instruction insnead
@@ -210,14 +206,15 @@ step_sscalar_oooe(
         uint64_t op_b = prf[rs->pr_b];
         unsigned pwbr = rs->pr_wb;
         unsigned wbr  = rs->dec.dest_reg;
+	uint64_t msr_a= rs->dec.source_msr_a != ISA_NO_REG ?
+	    arch->read_msr(state, rs->dec.source_msr_a, &exc) : 0;
+	assert(!exc.raised);
 
         rs->issued  = true;
 
-        isa_result_t res = arch->insn_exec(rs->dec, op_a, op_b, 0);
+        isa_result_t res = arch->insn_exec(rs->dec, op_a, op_b, msr_a, &exc);
         res.result = CANONICALIZE(res.result);
 
-        if (res.fatal_error)
-            return true;
 
         switch (rs->dec.class) {
         case isa_insn_class_illegal:
@@ -228,20 +225,14 @@ step_sscalar_oooe(
             break;
 
         case isa_insn_class_load:
-            res.result = arch->load(state, res.result, rs->dec.loadstore_size, &error);
+            res.result = arch->load(state, res.result, rs->dec.loadstore_size, &exc);
             res.result = CANONICALIZE(res.result);
-
-            if (error != MEMORY_SUCCESS)
-                return (error == MEMORY_FATAL);
-
+	    assert(!exc.raised);
             break;
 
         case isa_insn_class_store:
-            arch->store(state, res.result, res.store_value, rs->dec.loadstore_size, &error);
-
-            if (error != MEMORY_SUCCESS)
-                return (error == MEMORY_FATAL);
-
+            arch->store(state, res.result, res.store_value, rs->dec.loadstore_size, &exc);
+	    assert(!exc.raised);
             break;
 
         case isa_insn_class_jump:
@@ -315,7 +306,7 @@ step_sscalar_oooe(
 }
 
 void
-run_sscalar_oooe(int num_images, char *images[], verbosity_t verbosity)
+run_ooo(int num_images, char *images[], verbosity_t verbosity)
 {
     cpu_state_t *state = state_create();
     cpu_state_t *costate = state_create();
@@ -351,7 +342,7 @@ run_sscalar_oooe(int num_images, char *images[], verbosity_t verbosity)
     for (cycle = 0;; ++cycle) {
         if (verbosity && (verbosity & VERBOSE_TRACE) == 0)
             printf("Cycle #%d (%d):\n", cycle, rs_size);
-        if (step_sscalar_oooe(arch, state, costate, verbosity))
+        if (step_ooo(arch, state, costate, verbosity))
             break;
     }
 

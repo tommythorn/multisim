@@ -24,7 +24,7 @@ FLAGS=
 #MORE_STUFF=run_sscalar.o run_sscalar_oooe.o
 MORE_STUFF=
 OBJS=main.o arch.o \
-	run_simple.o $(MORE_STUFF) \
+	run_simple.o run_ooo.o $(MORE_STUFF) \
 	memory.o loadelf.o riscv.o
 #VERB=-t
 VERB=-d

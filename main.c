@@ -39,8 +39,7 @@ static int run = '1';
 
 static struct option long_options[] = {
     {"simple",         0, NULL, '1'},
-    {"sscalar",        0, NULL, '2'},
-    {"ooo-sscalar",    0, NULL, '3'},
+    {"ooo",            0, NULL, '2'},
     {"help",           0, NULL, '?'},
     {0, 0, 0, 0}
 };
@@ -142,15 +141,9 @@ int main(int argc, char **argv)
         run_simple(num_images, images, verbosity);
         break;
 
-#if 0
     case '2':
-        run_sscalar(num_images, images, verbosity);
+        run_ooo(num_images, images, verbosity);
         break;
-
-    case '3':
-        run_sscalar_oooe(num_images, images, verbosity);
-        break;
-#endif
 
     default:
         printf("No XX-run option given\n");
