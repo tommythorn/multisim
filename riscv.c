@@ -494,10 +494,10 @@ decode(uint64_t insn_addr, uint32_t insn)
 
     case OP_IMM:
     case OP_IMM_32:
+        dec.source_reg_a = i.i.rs1;
     case AUIPC:
     case LUI:
         dec.dest_reg     = i.i.rd;
-        dec.source_reg_a = i.i.rs1;
         dec.class        = isa_insn_class_alu;
         break;
 
