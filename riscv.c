@@ -1519,6 +1519,8 @@ setup(cpu_state_t *state, elf_info_t *info, verbosity_t verbosity)
     memory_ensure_mapped_range(state->mem,
                                0x80000000, 0x80000000 + 32*1024-1);
 
+    state->r[2] = 0x80000000 + 32*1024-4;
+
     if (0)
     for (unsigned setslg2 = 5; setslg2 <= 12; setslg2 += 1)
         for (unsigned ways = 1; ways <= 4; ++ways)

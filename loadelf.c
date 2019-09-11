@@ -1,6 +1,6 @@
 /*
  * Multisim: a microprocessor architecture exploration framework
- * Copyright (C) 2014 Tommy Thorn
+ * Copyright (C) 2014,2019 Tommy Thorn
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -34,9 +34,7 @@ static void
 loadsection(FILE *f, unsigned f_offset, unsigned f_len,
             memory_t *m, uint64_t m_addr, uint64_t m_len, elf_info_t *info)
 {
-    assert(0x80000000 <= m_addr && m_addr + m_len < 0x80000000 + 32*1024);
-
-    //memory_ensure_mapped_range(m, m_addr, m_addr + m_len);
+    memory_ensure_mapped_range(m, m_addr, m_addr + m_len);
 
     info->section_start[info->nsections]  = m_addr;
     info->section_size[info->nsections++] = m_len;
