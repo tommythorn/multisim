@@ -33,6 +33,7 @@
 #include <getopt.h>
 #include <ctype.h>
 #include "sim.h"
+#include "run_vliw.h"
 
 static int run = '1';
 
@@ -41,6 +42,7 @@ static struct option long_options[] = {
     {"simple",         0, NULL, '1'},
     {"sscalar",        0, NULL, '2'},
     {"ooo-sscalar",    0, NULL, '3'},
+    {"vliw",           0, NULL, '4'},
     {"help",           0, NULL, '?'},
     {0, 0, 0, 0}
 };
@@ -88,7 +90,7 @@ int main(int argc, char **argv)
         int c;
         int option_index = 0;
 
-        c = getopt_long(argc, argv, "ctdf:i:o:123",
+        c = getopt_long(argc, argv, "ctdf:i:o:1234",
                         long_options, &option_index);
         if (c == -1)
             break;
@@ -151,6 +153,10 @@ int main(int argc, char **argv)
         run_sscalar_oooe(num_images, images, verbosity);
         break;
 #endif
+
+    case '4':
+        run_vliw(num_images, images, verbosity);
+        break;
 
     default:
         printf("No XX-run option given\n");

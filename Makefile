@@ -24,7 +24,7 @@ FLAGS=
 #MORE_STUFF=run_sscalar.o run_sscalar_oooe.o
 MORE_STUFF=
 OBJS=main.o arch.o \
-	run_simple.o $(MORE_STUFF) \
+	run_simple.o run_vliw.o $(MORE_STUFF) \
 	memory.o loadelf.o riscv.o
 #VERB=-t
 VERB=-d
@@ -65,5 +65,12 @@ regress: multisim
 	./multisim -1 ../workloads/sieve.alpha
 	./multisim -2 ../workloads/sieve.alpha
 	./multisim -3 ../workloads/sieve.alpha
+
+workloads/vliw-sieve.riscv: workloads/vliw-sieve.s Makefile
+	riscv64-unknown-elf-gcc -mabi=ilp32 -march=rv32g -nostdlib workloads/vliw-sieve.s -Wl,-Ttext=0x10000 -o workloads/vliw-sieve.riscv
+	riscv64-unknown-elf-objdump -d workloads/vliw-sieve.riscv > workloads/vliw-sieve.riscv.dis
+
+run_vliw: multisim workloads/vliw-sieve.riscv
+	./multisim -4 -dd workloads/vliw-sieve.riscv
 
 -include *.d

@@ -26,6 +26,7 @@
 #include <sys/types.h>
 #include "sim.h"
 #include "run_simple.h"
+#include "run_vliw.h"
 #include "loadelf.h"
 
 bool
@@ -167,7 +168,8 @@ void run_simple(int num_images, char *images[], verbosity_t verbosity)
 
     memory_ensure_mapped_range(state->mem,
                                0x80000000, 0x80000000 + 32*1024-1);
-
+    memory_ensure_mapped_range(state->mem,
+                               0x10000, 0x10000 + 32*1024-1);
 
     loadelfs(state->mem, num_images, images, &info);
 
@@ -182,7 +184,7 @@ void run_simple(int num_images, char *images[], verbosity_t verbosity)
         if (step_simple(arch, state))
             break;
 
-        if (verbosity & VERBOSE_COMPLIANCE)  {
+        if (verbosity & VERBOSE_COMPLIANCE && tohost != 0)  {
             uint32_t val = arch->load(state, tohost, 4, &exc);
             if (val) {
                 if (val != 1)
