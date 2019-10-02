@@ -154,11 +154,10 @@ typedef enum memory_exception_e {
 
 typedef enum verbosity_e {
     VERBOSE_CONSOLE    = 1 << 0,
-    VERBOSE_TRACE      = 1 << 1,
-    VERBOSE_DISASS     = 1 << 2,
-    VERBOSE_PIPE       = 1 << 3,
-    VERBOSE_CACHE      = 1 << 4,
-    VERBOSE_COMPLIANCE = 1 << 5,
+    VERBOSE_DISASS     = 1 << 1, // Trace with disassembly
+    VERBOSE_PIPE       = 1 << 2, // Pipe trace
+    VERBOSE_CACHE      = 1 << 3,
+    VERBOSE_COMPLIANCE = 1 << 4,
 } verbosity_t;
 
 typedef struct isa_st {

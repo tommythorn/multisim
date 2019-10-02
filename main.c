@@ -62,7 +62,6 @@ void usage(char *program)
             "\n"
             "  -i<diskimage>\n"
             "  -d   disassemble executed instructions\n"
-            "  -t   trace executed instructions\n"
             "  -c   compliance\n",
             program);
 
@@ -87,7 +86,7 @@ int main(int argc, char **argv)
         int c;
         int option_index = 0;
 
-        c = getopt_long(argc, argv, "ctdf:i:o:123",
+        c = getopt_long(argc, argv, "cdf:i:o:123",
                         long_options, &option_index);
         if (c == -1)
             break;
@@ -101,15 +100,11 @@ int main(int argc, char **argv)
 	    break;
 
         case 'd':
-            verbosity = verbosity*2 + 1;
+            verbosity |= VERBOSE_DISASS;
             break;
 
         case 'c':
-            verbosity = VERBOSE_COMPLIANCE;
-            break;
-
-        case 't':
-            verbosity |= VERBOSE_TRACE;
+            verbosity |= VERBOSE_COMPLIANCE;
             break;
 
         case '?':
@@ -127,9 +122,6 @@ int main(int argc, char **argv)
     if (optind >= argc) {
         usage(argv[0]);
     }
-
-    if (verbosity & VERBOSE_DISASS)
-        verbosity &= ~VERBOSE_TRACE;
 
     images = argv + optind;
     num_images = argc - optind;
