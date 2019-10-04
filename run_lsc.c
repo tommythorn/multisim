@@ -28,11 +28,27 @@
 #include "run_simple.h"
 #include "loadelf.h"
 
+//////// Configuration and magic numbers
+
+#define FETCH_BUFFER_SIZE       8
+#define FETCH_WIDTH             2
+#define ROB_SIZE              512
+#define PHYSICAL_REGS          64
+#define EX_BUFFER_SIZE          8
+
+
+// Two special physical registers: the constant zero and the sink for
+// for r0 destination (is never read)
+
+#define PR_ZERO                 0
+#define PR_SINK (PHYSICAL_REGS-1)
+
+//////// Types
 
 typedef struct fetch_parcel_st {
-    unsigned    seqno;
-    uint64_t    addr;
-    uint32_t    insn;
+    unsigned            seqno;
+    uint64_t            addr;
+    uint32_t            insn;
 } fetch_parcel_t;
 
 /* The essence of support for speculation is the register renaming and
@@ -53,30 +69,72 @@ typedef struct fetch_parcel_st {
  * Rolling back means traversing backwards from the head, undoing the
  * renames and freeing the registers.
  */
-
-static unsigned rat[32];
-
-#define ROB_SIZE 512
-
 typedef struct rob_entry_st {
-    int r;	/* Logical register written by this instruction */
-    int pr_old; /* Physical register that r was _previously_ mapped to */
-    bool committed;
+    int                 r;      /* Logical register written by this instruction */
+    int                 pr_old; /* Physical register that r was _previously_ mapped to */
+    bool                committed; /* The instruction is done executing and has written the result, if any, to the register file */
 
-    // For debugging (well, I do use the seqno, but we could avoid that)
-    fetch_parcel_t fp;
-    isa_decoded_t dec;
-    isa_result_t res;
+    // For debugging (XXX well, I do use the seqno, but we could avoid that)
+    int                 pr;     /* The physical register with the result */
+    fetch_parcel_t      fp;
+    isa_decoded_t       dec;
 } rob_entry_t;
 
-rob_entry_t rob[ROB_SIZE];
+typedef struct micro_op_st {
+    fetch_parcel_t      fetched; // XXX redundant?
+    isa_decoded_t       dec;
 
-static unsigned alloc_reg(void);
-static void free_reg(unsigned pr);
+    unsigned            pr_a;
+    unsigned            pr_b;
+    unsigned            pr_wb;
+    unsigned            rob_index;
+} micro_op_t;
 
-static unsigned rob_wp = 0, rob_rp = 0;
+//////// State
 
-static void show_rob(const char *msg)
+/* The arrays */
+static fetch_parcel_t   fb[FETCH_BUFFER_SIZE];
+static rob_entry_t      rob[ROB_SIZE];
+static unsigned         rat[32];
+static int64_t          prf[PHYSICAL_REGS];
+static bool             pr_ready[PHYSICAL_REGS]; // Scoreboard
+static unsigned         freelist[PHYSICAL_REGS];
+static micro_op_t       ex_buffer[EX_BUFFER_SIZE];
+
+static unsigned         fetch_seqno;
+static int              fb_head = 0, fb_tail = 0, fb_size = 0;
+static unsigned         rob_wp = 0, rob_rp = 0;
+static unsigned         freelist_wp = 0, freelist_rp = 0;
+static int              ex_size;
+
+///////////////////////////////////////////////////////
+
+static void
+free_reg(unsigned pr)
+{
+    if (pr != PR_ZERO && pr != PR_SINK) {
+        pr_ready[pr] = false;
+        freelist[freelist_wp++] = pr;
+        if (freelist_wp == sizeof freelist / sizeof *freelist)
+            freelist_wp = 0;
+        assert(freelist_rp != freelist_wp);
+    }
+}
+
+static unsigned
+alloc_reg(void)
+{
+    assert(freelist_rp != freelist_wp);
+
+    unsigned pr = freelist[freelist_rp++];
+    if (freelist_rp == sizeof freelist / sizeof *freelist)
+        freelist_rp = 0;
+
+    return pr;
+}
+
+static void
+show_rob(const char *msg)
 {
     unsigned p = rob_rp;
 
@@ -90,11 +148,16 @@ static void show_rob(const char *msg)
     }
 }
 
-static unsigned allocate_rob(int r, int pr, fetch_parcel_t fp)
+static unsigned
+allocate_rob(int r, int pr, fetch_parcel_t fp)
 {
     unsigned rob_index = rob_wp;
 
-    rob[rob_index] = (rob_entry_t) { r, pr, false, fp };
+    rob[rob_index] = (rob_entry_t) {
+        .r = r, .pr_old = pr, .committed = false,
+        .fp = fp
+    };
+
     if (++rob_wp == ROB_SIZE)
         rob_wp = 0;
     assert(rob_wp != rob_rp);
@@ -107,12 +170,12 @@ static unsigned allocate_rob(int r, int pr, fetch_parcel_t fp)
 /*
  * Example ROB:
  *
- * #0: J	<--- oldest uncommitted/rp
+ * #0: J        <--- oldest uncommitted/rp
  * #1: CSRR
  * #2: BEQ
  * #3: ADDI
- * #4: LW     	<--- most recent
- * #5: 		<--- wp
+ * #4: LW       <--- most recent
+ * #5:          <--- wp
  */
 
 static void
@@ -125,7 +188,7 @@ lsc_retire(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
         fprintf(stderr, "Retired rob[%02d] %5d %d ",
                 rob_rp,
                 fp.seqno, state->priv);
-        isa_disass(arch, rob[rob_rp].dec, rob[rob_rp].res);
+        isa_disass(arch, rob[rob_rp].dec, (isa_result_t) { .result = prf[rob[rob_rp].pr] });
 
         free_reg(rob[rob_rp].pr_old);
 
@@ -141,13 +204,14 @@ lsc_retire(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
  * we have to flush the pipe and roll ROB back to #2.  That means
  * undoing #4 and #3 in that order.
  *
- * #0: J	<--- oldest uncommitted/rp
+ * #0: J        <--- oldest uncommitted/rp
  * #1: CSRR
- * #2: BEQ   	<--- most recent
- * #3: 		<--- wp
+ * #2: BEQ      <--- most recent
+ * #3:          <--- wp
  */
 
-static void rollback_rob(unsigned keep_seqno)
+static void
+rollback_rob(unsigned keep_seqno)
 {
     while (rob_rp != rob_wp) {
         unsigned p = rob_wp;
@@ -165,60 +229,6 @@ static void rollback_rob(unsigned keep_seqno)
     }
 
     //show_rob(" after rollback");
-}
-
-typedef struct micro_op_st {
-    fetch_parcel_t fetched;
-    isa_decoded_t dec;
-
-    unsigned pr_a;
-    unsigned pr_b;
-    unsigned pr_wb;
-    unsigned rob_index;
-} micro_op_t;
-
-#define PHYSICAL_REGS 64
-#define PR_ZERO 0
-#define PR_SINK (PHYSICAL_REGS-1)
-static uint64_t prf[PHYSICAL_REGS];
-
-/* Fetch buffer */
-#define FETCH_BUFFER_SIZE 8
-#define FETCH_WIDTH       2 // Insns fetched per cycle
-
-static unsigned fetch_seqno;
-static fetch_parcel_t fb[FETCH_BUFFER_SIZE];
-static int fb_head = 0, fb_tail = 0, fb_size = 0;
-
-/* Execute window */
-#define EX_BUFFER_SIZE 8
-static int ex_size;
-static micro_op_t ex_buffer[EX_BUFFER_SIZE];
-
-static bool     pr_ready[PHYSICAL_REGS+1]; // The +1 is for r31
-static unsigned freelist[PHYSICAL_REGS];
-static unsigned freelist_wp, freelist_rp;
-
-static void free_reg(unsigned pr)
-{
-    if (pr != PR_ZERO && pr != PR_SINK) {
-        pr_ready[pr] = false;
-        freelist[freelist_wp++] = pr;
-        if (freelist_wp == sizeof freelist / sizeof *freelist)
-            freelist_wp = 0;
-        assert(freelist_rp != freelist_wp);
-    }
-}
-
-static unsigned alloc_reg(void)
-{
-    assert(freelist_rp != freelist_wp);
-
-    unsigned pr = freelist[freelist_rp++];
-    if (freelist_rp == sizeof freelist / sizeof *freelist)
-        freelist_rp = 0;
-
-    return pr;
 }
 
 static void
@@ -286,6 +296,7 @@ lsc_decode_rename(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
             .rob_index = rob_index
         };
         rob[rob_index].dec = dec;
+        rob[rob_index].pr = mop.pr_wb;
 
         ex_buffer[ex_size++] = mop;
     }
@@ -352,7 +363,6 @@ lsc_exec1(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity, micro_o
     else
         res = arch->insn_exec_system(state, mop.dec, op_a, op_b, msr_a, &exc);
     res.result = CANONICALIZE(res.result);
-    rob[mop.rob_index].res = res;
 
     if (exc.raised)
         goto exception;
