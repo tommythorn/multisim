@@ -179,16 +179,31 @@ allocate_rob(int r, int pr, fetch_parcel_t fp)
  */
 
 static void
-lsc_retire(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
+lsc_retire(const arch_t *arch, cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
 {
     while (rob_rp != rob_wp && rob[rob_rp].committed) {
         fetch_parcel_t fp = rob[rob_rp].fp;
+        isa_decoded_t dec = rob[rob_rp].dec;
+        int            pr = rob[rob_rp].pr;
 
         // retired_reg[rob[rob_rp].r] = rat[rob[rob_rp].r];
-        fprintf(stderr, "Retired rob[%02d] %5d %d ",
-                rob_rp,
-                fp.seqno, state->priv);
-        isa_disass(arch, rob[rob_rp].dec, (isa_result_t) { .result = prf[rob[rob_rp].pr] });
+
+        fprintf(stderr, "Retired rob[%02d] %5d %d ", rob_rp, fp.seqno, state->priv);
+        isa_disass(arch, dec, (isa_result_t) { .result = prf[pr] });
+
+        /* Co-simulate */
+
+        if (dec.insn_addr != costate->pc) {
+            printf("COSIM: REF PC %08"PRIx64" != LSC PC%08"PRIx64"\n", dec.insn_addr, costate->pc);
+            assert(0);
+        }
+
+        assert(!step_simple(arch, costate));
+
+        if (pr != PR_SINK && prf[pr] != costate->r[dec.dest_reg]) {
+            printf("COSIM: REF RES %08"PRIx64" != LSC RES %08"PRIx64"\n", prf[pr], costate->r[dec.dest_reg]);
+            assert(0);
+        }
 
         free_reg(rob[rob_rp].pr_old);
 
@@ -241,7 +256,7 @@ lsc_fetch(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
      * Fetch (branch prediction would happen here, eventually)
      */
     while (fb_size < FETCH_BUFFER_SIZE && n++ < FETCH_WIDTH) {
-        uint32_t addr = state->pc;
+        uint64_t addr = state->pc;
         uint32_t insn = (uint32_t)arch->load(state, addr, 0 /* = ifetch */, &exc);
         state->pc += 4;
         assert(!exc.raised);
@@ -257,7 +272,8 @@ static void
 show_fb(void)
 {
     unsigned p = fb_head;
-    fprintf(stderr, "FB:\n");
+    fprintf(stderr, "FB: %d\n", fb_size);
+    if (0)
     for (int i = 0; i < fb_size; ++i) {
         fetch_parcel_t fp = fb[p];
 
@@ -295,6 +311,9 @@ lsc_decode_rename(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
             .pr_wb   = dec.dest_reg == ISA_NO_REG ? PR_SINK : alloc_reg(),
             .rob_index = rob_index
         };
+
+        rat[dec.dest_reg] = mop.pr_wb;
+
         rob[rob_index].dec = dec;
         rob[rob_index].pr = mop.pr_wb;
 
@@ -304,7 +323,7 @@ lsc_decode_rename(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
 
 static void
 flush_and_redirect(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity,
-                   unsigned seqno, uint32_t new_pc)
+                   unsigned seqno, uint64_t new_pc)
 {
     // Flush
     fb_size = 0;
@@ -419,10 +438,8 @@ lsc_exec1(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity, micro_o
         break;
     }
 
-    if (mop.dec.dest_reg != ISA_NO_REG) {
-        prf[mop.pr_wb] = res.result;
-        pr_ready[mop.pr_wb] = true;
-    }
+    prf[mop.pr_wb] = res.result;
+    pr_ready[mop.pr_wb] = true;
 
     if (mop.dec.dest_msr != ISA_NO_REG)
         arch->write_msr(state, mop.dec.dest_msr, res.msr_result, &exc);
@@ -431,6 +448,9 @@ lsc_exec1(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity, micro_o
 
 exception:
     if (state->verbosity & VERBOSE_DISASS) {
+        fprintf(stderr, "EX:   %d pr%d=pr%d,pr%d  ", state->priv, mop.pr_wb, mop.pr_a, mop.pr_b);
+        isa_disass(arch, mop.dec, res);
+
 /*
         fprintf(stderr, "\t\t\t\t\tpr%d = %08"PRIx64" pr%d = %08"PRIx64" -> pr%d\n",
                 mop.pr_a, op_a,
@@ -466,7 +486,7 @@ step_lsc(
     const arch_t *arch, cpu_state_t *state, cpu_state_t *costate,
     verbosity_t verbosity)
 {
-    lsc_retire(arch, state, verbosity);
+    lsc_retire(arch, state, costate, verbosity);
     lsc_execute(arch, state, verbosity);
     lsc_decode_rename(arch, state, verbosity);
     lsc_fetch(arch, state, verbosity); // XXX execute affects pc in the same cycle

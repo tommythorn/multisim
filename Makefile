@@ -67,6 +67,6 @@ regress: multisim
 	./multisim -3 ../workloads/sieve.alpha
 
 test_lsc: multisim
-	./multisim -d --lsc workloads/riscv-tests/rv32ui-p-lw |& head -280
+	./multisim -d --lsc workloads/riscv-tests/rv32ui-p-lw
 
 -include *.d
