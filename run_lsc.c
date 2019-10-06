@@ -31,8 +31,8 @@
 //////// Configuration and magic numbers
 
 #define FETCH_BUFFER_SIZE       8
-#define FETCH_WIDTH             2
-#define ROB_SIZE              512
+#define FETCH_WIDTH             8
+#define ROB_SIZE               32
 #define PHYSICAL_REGS          64
 #define EX_BUFFER_SIZE          8
 
@@ -112,10 +112,21 @@ static int              ex_size;
 static void
 free_reg(unsigned pr)
 {
+    assert((unsigned) pr < PHYSICAL_REGS);
+    // DEBUG: Make sure pr isn't already on the freelist
+    {
+        int p = freelist_rp;
+        while (p != freelist_wp) {
+            assert(freelist[p] != pr);
+            if (++p == sizeof freelist / sizeof *freelist)
+                p = 0;
+        }
+    }
+
     if (pr != PR_ZERO && pr != PR_SINK) {
         pr_ready[pr] = false;
-        freelist[freelist_wp++] = pr;
-        if (freelist_wp == sizeof freelist / sizeof *freelist)
+        freelist[freelist_wp] = pr;
+        if (++freelist_wp == sizeof freelist / sizeof *freelist)
             freelist_wp = 0;
         assert(freelist_rp != freelist_wp);
     }
@@ -152,6 +163,9 @@ static unsigned
 allocate_rob(int r, int pr, fetch_parcel_t fp)
 {
     unsigned rob_index = rob_wp;
+
+    assert(r == ISA_NO_REG || (unsigned) r < 32);  // XXX should be part of the arch
+    assert((unsigned) pr < PHYSICAL_REGS);
 
     rob[rob_index] = (rob_entry_t) {
         .r = r, .pr_old = pr, .committed = false,
@@ -191,14 +205,19 @@ lsc_retire(const arch_t *arch, cpu_state_t *state, cpu_state_t *costate, verbosi
         fprintf(stderr, "Retired rob[%02d] %5d %d ", rob_rp, fp.seqno, state->priv);
         isa_disass(arch, dec, (isa_result_t) { .result = prf[pr] });
 
-        /* Co-simulate */
+        /* Co-simulate retired instructions.  A complication is that
+         * costate->pc might not be the next instuction retired (if
+         * the instruction traps, then the next retired instruction
+         * will be the first from the trap handler
+         */
 
-        if (dec.insn_addr != costate->pc) {
-            printf("COSIM: REF PC %08"PRIx64" != LSC PC%08"PRIx64"\n", dec.insn_addr, costate->pc);
+        uint64_t copc;
+        do copc = costate->pc; while (step_simple(arch, costate) == 0);
+
+        if (dec.insn_addr != copc) {
+            printf("COSIM: REF PC %08"PRIx64" != LSC PC%08"PRIx64"\n", dec.insn_addr, copc);
             assert(0);
         }
-
-        assert(!step_simple(arch, costate));
 
         if (pr != PR_SINK && prf[pr] != costate->r[dec.dest_reg]) {
             printf("COSIM: REF RES %08"PRIx64" != LSC RES %08"PRIx64"\n", prf[pr], costate->r[dec.dest_reg]);
@@ -230,8 +249,12 @@ rollback_rob(unsigned keep_seqno)
 {
     while (rob_rp != rob_wp) {
         unsigned p = rob_wp;
-        if (p-- == 0)
+        if (p == 0)
             p = ROB_SIZE - 1;
+        else
+            --p;
+
+        assert((unsigned)p < ROB_SIZE);
         if (rob[p].fp.seqno == keep_seqno)
             break;
         rob_wp = p;
@@ -239,8 +262,10 @@ rollback_rob(unsigned keep_seqno)
         fprintf(stderr, "Rollback #%d:%08" PRIx64 "now r%d -> pr%d\n",
                 rob[p].fp.seqno, rob[p].fp.addr,
                 rob[p].r, rob[p].pr_old);
-        free_reg(rat[rob[p].r]);
-        rat[rob[p].r] = rob[p].pr_old;
+        if (rob[p].r != ISA_NO_REG) {
+            free_reg(rat[rob[p].r]);
+            rat[rob[p].r] = rob[p].pr_old;
+        }
     }
 
     //show_rob(" after rollback");
@@ -298,9 +323,9 @@ lsc_decode_rename(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
             fb_head = 0;
         fb_size--;
 
-        isa_decoded_t dec = arch->decode(fetched.addr, fetched.insn);
-
-        unsigned rob_index = allocate_rob(dec.dest_reg, rat[dec.dest_reg], fetched);
+        isa_decoded_t dec       = arch->decode(fetched.addr, fetched.insn);
+        int           old_pr    = dec.dest_reg != ISA_NO_REG ? rat[dec.dest_reg] : PR_SINK;
+        unsigned      rob_index = allocate_rob(dec.dest_reg, old_pr, fetched);
 
         // Rename (XXX backpressure)
         micro_op_t mop = {
@@ -312,7 +337,8 @@ lsc_decode_rename(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
             .rob_index = rob_index
         };
 
-        rat[dec.dest_reg] = mop.pr_wb;
+        if (dec.dest_reg != ISA_NO_REG)
+            rat[dec.dest_reg] = mop.pr_wb;
 
         rob[rob_index].dec = dec;
         rob[rob_index].pr = mop.pr_wb;

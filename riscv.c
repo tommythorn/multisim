@@ -1097,6 +1097,7 @@ handle_exception(cpu_state_t *s, uint64_t insn_addr, isa_exception_t exc)
     BF_SET(s->msr[CSR_MSTATUS], CSR_STATUS_MIE_BF, 0);
     BF_SET(s->msr[CSR_MSTATUS], CSR_STATUS_MPP_BF, s->priv);
     s->priv = 3;
+
     return s->msr[CSR_MTVEC];
 }
 

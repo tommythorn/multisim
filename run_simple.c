@@ -28,7 +28,10 @@
 #include "run_simple.h"
 #include "loadelf.h"
 
-bool
+/*
+ * Step_simple returns the number of instructions executed
+ */
+int
 step_simple(const arch_t *arch, cpu_state_t *state)
 {
     isa_exception_t exc = { 0 };
@@ -156,7 +159,7 @@ exception:
 
     arch->tick(state, 1);
 
-    return false;
+    return exc.raised ? 0 : 1;
 }
 
 void run_simple(int num_images, char *images[], verbosity_t verbosity)
@@ -179,8 +182,8 @@ void run_simple(int num_images, char *images[], verbosity_t verbosity)
     getelfsym(&info, "tohost", &tohost);
 
     for (;;) {
-        if (step_simple(arch, state))
-            break;
+        if (step_simple(arch, state) == 0)
+            continue;
 
         if (verbosity & VERBOSE_COMPLIANCE)  {
             uint32_t val = arch->load(state, tohost, 4, &exc);
