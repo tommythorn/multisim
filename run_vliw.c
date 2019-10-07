@@ -34,6 +34,21 @@ is_nop(isa_decoded_t dec)
     return dec.class == isa_insn_class_alu && dec.dest_reg == ISA_NO_REG;
 }
 
+static uint8_t slot_class_mask[8] = {
+    1 << isa_insn_class_alu,
+    1 << isa_insn_class_alu,
+
+    1 << isa_insn_class_load,
+    1 << isa_insn_class_load,
+
+    1 << isa_insn_class_store,
+    1 << isa_insn_class_store,
+
+    1 << isa_insn_class_alu | 1 << isa_insn_class_branch,
+
+    1 << isa_insn_class_alu | 1 << isa_insn_class_branch | 1 << isa_insn_class_jump | 1 << isa_insn_class_compjump,
+};
+
 bool
 step_vliw(const arch_t *arch, cpu_state_t *state)
 {
@@ -42,8 +57,7 @@ step_vliw(const arch_t *arch, cpu_state_t *state)
     uint32_t insn[8];
 
     if (pc & 31) {
-        fprintf(stderr, "FATAL: pc %08" PRIx64 " insn't aligned to 32-bytes\n",
-                pc);
+        printf("FATAL: pc %08" PRIx64 " insn't aligned to 32-bytes\n", pc);
         exit(1);
     }
 
@@ -56,7 +70,7 @@ step_vliw(const arch_t *arch, cpu_state_t *state)
     for (int i = 0; i < 8; ++i) {
         dec[i] = arch->decode(pc + i * 4, insn[i]); // XXX This implies that jal can only be in the final slot
 
-        // Generic constraints
+        // Decoding sanity constraints
         assert(dec[i].source_reg_a == ISA_NO_REG || dec[i].source_reg_a < ISA_REGISTERS);
         assert(dec[i].source_reg_b == ISA_NO_REG || dec[i].source_reg_b < ISA_REGISTERS);
         assert(dec[i].dest_reg     == ISA_NO_REG || dec[i].dest_reg     < ISA_REGISTERS);
@@ -64,7 +78,14 @@ step_vliw(const arch_t *arch, cpu_state_t *state)
         assert(dec[i].source_msr_a == ISA_NO_REG || dec[i].source_msr_a < ISA_MSRS);
     }
 
-    // Slot constraints
+    // VLIW Slot constraints
+    for (int i = 0; i < 8; ++i)
+        if (!is_nop(dec[i]) && (1 << dec[i].class) & ~slot_class_mask[i]) {
+            printf("%08" PRIx64 ": slot %d can't have an instruction of class %s\n",
+                   state->pc + 4 * i, i, class_names[dec[i].class]);
+            exit(1);
+        }
+
     assert(is_nop(dec[0]) || dec[0].class == isa_insn_class_alu);
     assert(is_nop(dec[1]) || dec[1].class == isa_insn_class_alu);
 
@@ -168,9 +189,11 @@ step_vliw(const arch_t *arch, cpu_state_t *state)
             state->r[dec[i].dest_reg] = res[i].result;
 
     if (state->verbosity & VERBOSE_DISASS) {
-        fprintf(stderr, "\n%d ", state->priv);
+        //fprintf(stderr, "\n%d ", state->priv);
+        fprintf(stderr, "\n");
         for (int i = 0; i < 8; ++i)
-            isa_disass(arch, dec[i], res[i]);
+            if (!is_nop(dec[i]))
+                isa_disass(arch, dec[i], res[i]);
     }
 
     arch->tick(state, 1);

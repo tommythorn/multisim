@@ -7,12 +7,12 @@
 	.local	cand
 	.comm	cand,256,4
 	.text
-	.align	2
+	.align	5
 	.globl	_start
 	.type	_start, @function
 _start:
 	lui	sp,%hi(prime)
-	lui	gp,%hi(stack)
+        nop
         nop
         nop
         nop
@@ -20,8 +20,8 @@ _start:
         nop
         nop
 
+	addi	gp,sp,%lo(prime)
 	addi	sp,sp,%lo(prime)
-	addi	gp,gp,%lo(stack)
         nop
         nop
         nop
@@ -74,58 +74,270 @@ _start:
         li      a5,4
         nop
 
+	li	a3,255
         nop
-        nop
+	lw	a4,-20(s0)
         nop
         nop
         sw      a5,-24(s0)
         nop
         nop
-        j       .L2
+        nop
+
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+	ble	a4,a3,.L6
+	nop
+
+        nop
+        nop
+	lw	s0,28(sp)
+	nop
+	nop
+        nop
+        addi	sp,sp,32
+	jr	ra
 
 
         .align 5
 .L6:
-	lui	a5,%hi(cand)
-	addi	a4,a5,%lo(cand)
+	mv	a4,gp
+	nop
 	lw	a5,-20(s0)
+	nop
+        nop
+        nop
+	nop
+        nop
+
 	add	a5,a4,a5
+        nop
+        nop
+        nop
+        nop
+        nop
+	nop
+	nop
+
+	nop
+        nop
 	lbu	a5,0(a5)
+	nop
+        nop
+        nop
+        nop
+        nop
+
+	nop
+        nop
+	nop
+        nop
+        nop
+        nop
+        nop
 	bnez	a5,.L3
+
+	nop
+        nop
 	lw	a5,-28(s0)
+	nop
+        nop
+	nop
+	nop
+        nop
+
 	addi	a4,a5,4
+	nop
+        nop
+	nop
+	nop
+        nop
+        nop
+        nop
+
+	nop
+        nop
+	nop
+	lw	a7,-20(s0)
 	sw	a4,-28(s0)
-	lw	a4,-20(s0)
-	sw	a4,0(a5)
+        nop
+        nop
+        nop
+
+	nop
+        nop
 	lw	a4,-24(s0)
-	lui	a5,%hi(cand)
-	addi	a5,a5,%lo(cand)
+	nop
+	sw	a7,0(a5)
+        nop
+        mv	a5,gp
+        nop
+
 	add	a5,a4,a5
+	nop
+        nop
+	nop
+	nop
+        nop
+        nop
+        nop
+
+	nop
+        nop
+	lw	a4,-32(s0)
+	nop
 	sw	a5,-32(s0)
-	j	.L4
+        nop
+	mv	a5,gp
+	nop
+
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	bltu	a4,gp,.L5
+
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	j	.L3
+
+        .align 5
 .L5:
-	lw	a5,-32(s0)
 	li	a4,1
+        nop
+	lw	a5,-32(s0)
+	nop
+        nop
+	nop
+	nop
+        nop
+
+        nop
+        nop
+        nop
+        nop
 	sb	a4,0(a5)
+        nop
+        nop
+        nop
+
+
+        nop
+        nop
 	lw	a5,-20(s0)
 	lw	a4,-32(s0)
+        nop
+        nop
+        nop
+        nop
+
 	add	a5,a4,a5
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+
+        nop
+        nop
+        nop
+        nop
 	sw	a5,-32(s0)
+        nop
+        nop
+        nop
+
+        .align 5
 .L4:
-	lui	a5,%hi(cand+256)
-	addi	a5,a5,%lo(cand+256)
+	mv	a5,gp
+	nop
 	lw	a4,-32(s0)
+	nop
+	nop
+	nop
+	nop
+	nop
+
+.L44:
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
 	bltu	a4,a5,.L5
+
+        .align 5
 .L3:
+	li	a0,255
+	nop
 	lw	a5,-20(s0)
+	nop
+	nop
+	nop
+	nop
+	nop
+
+	addi	a6,a5,1
 	slli	a5,a5,1
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+
 	addi	a5,a5,1
+	nop
 	lw	a4,-24(s0)
+	nop
+	sw	a6,-20(s0)
+	nop
+	nop
+	nop
+
 	add	a5,a4,a5
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+
+	nop
+	nop
+	nop
+	nop
 	sw	a5,-24(s0)
-	lw	a5,-20(s0)
-	addi	a5,a5,1
-	sw	a5,-20(s0)
+	nop
+	nop
+	ble	a6,a0,.L6
+
+        nop
+        nop
+	lw	s0,28(sp)
+	nop
+	nop
+        nop
+        addi	sp,sp,32
+	jr	ra
+
 
         .align 5
 .L2:
@@ -150,7 +362,11 @@ _start:
         nop
         nop
 	lw	s0,28(sp)
-	addi	sp,sp,32
+	nop
+	nop
+        nop
+        addi	sp,sp,32
 	jr	ra
+
 	.size	_start, .-_start
 	.ident	"GCC: (GNU) 7.2.0"
