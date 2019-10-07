@@ -23,6 +23,17 @@
 #include <err.h>
 #include "arch.h"
 
+const char *class_names[] = {
+    "illegal",
+    "alu",
+    "load",
+    "store",
+    "jump",
+    "branch",
+    "compjump",
+    "atomic",
+};
+
 void
 isa_disass(const arch_t *arch, isa_decoded_t dec, isa_result_t res)
 {
