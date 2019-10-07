@@ -532,6 +532,12 @@ run_lsc(int num_images, char *images[], verbosity_t verbosity)
 
     int cycle;
 
+    memory_ensure_mapped_range(state->mem,
+                               0x80000000, 0x80000000 + 32*1024-1);
+
+    memory_ensure_mapped_range(costate->mem,
+                               0x80000000, 0x80000000 + 32*1024-1);
+
     loadelfs(state->mem, num_images, images, &info);
     loadelfs(costate->mem, num_images, images, &info);
 

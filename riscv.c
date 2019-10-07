@@ -1465,7 +1465,7 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, isa
     if ((address & 0xF0000000) == 0x40000000) {
         address &= 0xFFFFFFF;
         if (address < 0x10) {
-            fprintf(stderr, "Writing mtimereg %x <- %x\n", (uint32_t)address, (uint32_t)value);
+            //fprintf(stderr, "Writing mtimereg %x <- %x\n", (uint32_t)address, (uint32_t)value);
             p = ((void *) &s->mtimereg[0]) + address;
             s->msr[CSR_MIP] &= ~MIP_MTIP; } // writing the mtime clear the interrup pendning bit
         else if (address == 0x2000) {
