@@ -250,7 +250,10 @@ disass_insn(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
 
 //  case CUSTOM0:
     case OP_IMM:
-        if (i.i.funct3 == ADDI && N[i.i.rs1] == 0)
+        if (i.i.funct3 == ADDI && i.i.rs1 == 0 && i.i.rd == 0 && i.i.imm11_0 == 0)
+            // nop pseudo instruction
+            snprintf(buf, buf_size, "nop");
+        else if (i.i.funct3 == ADDI && N[i.i.rs1] == 0)
             // li pseudo instruction
             snprintf(buf, buf_size, "%-11s%s,%d",
                      "li", N[i.i.rd], i.i.imm11_0);
@@ -1097,7 +1100,6 @@ handle_exception(cpu_state_t *s, uint64_t insn_addr, isa_exception_t exc)
     BF_SET(s->msr[CSR_MSTATUS], CSR_STATUS_MIE_BF, 0);
     BF_SET(s->msr[CSR_MSTATUS], CSR_STATUS_MPP_BF, s->priv);
     s->priv = 3;
-
     return s->msr[CSR_MTVEC];
 }
 
