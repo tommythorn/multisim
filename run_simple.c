@@ -164,7 +164,7 @@ exception:
 
 bool simple_htif(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity, uint64_t tohost)
 {
-    if (verbosity & VERBOSE_TOHOST)  {
+    if (tohost && verbosity & VERBOSE_TOHOST)  {
 	isa_exception_t exc = { 0 };
 	uint32_t val = arch->load(state, tohost, 4, &exc);
 	if (val) {
