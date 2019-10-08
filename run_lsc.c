@@ -495,11 +495,10 @@ lsc_exec1(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity, micro_o
 
 exception:
     if (state->verbosity & VERBOSE_DISASS) {
-	fprintf(stderr, "%05d  exec %5d %d ", cycle, mop.fetched.seqno, state->priv);
+	char buf[20];
+	snprintf(buf, sizeof buf, "[pr%d=pr%d,pr%d]", mop.pr_wb, mop.pr_a, mop.pr_b);
+	fprintf(stderr, "%5d  EX %-16s %5d %d ", cycle, buf, mop.fetched.seqno, state->priv);
 	isa_disass(arch, mop.dec, (isa_result_t) { .result = prf[mop.pr_wb] });
-
-
-        fprintf(stderr, "                  pr%d=pr%d,pr%d\n", mop.pr_wb, mop.pr_a, mop.pr_b);
     }
 
     if (exc.raised) {
@@ -557,8 +556,6 @@ run_lsc(int num_images, char *images[], verbosity_t verbosity)
     cpu_state_t *costate = state_create();
     const arch_t *arch;
     elf_info_t info;
-
-    int cycle;
 
     memory_ensure_mapped_range(state->mem,
                                0x80000000, 0x80000000 + 32*1024-1);
