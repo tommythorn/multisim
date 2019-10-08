@@ -15,6 +15,5 @@ ulimit -t 1
 for x in $TESTS
 do
 #    printf "%-16s %s\n" $x "$(./multisim -d $RV32_ISA/$x $* 2>&1 |grep '\[0xffffffff80001000\]'|head -1)"
-    echo $x
-    ./multisim $* $RV32_ISA/$x 2>&1|head -100
+    printf "%-16s %s\n" $x `./multisim $* $RV32_ISA/$x 2>&1`
 done

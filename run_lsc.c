@@ -72,7 +72,8 @@ typedef struct fetch_parcel_st {
 typedef struct rob_entry_st {
     int                 r;      /* Logical register written by this instruction */
     int                 pr_old; /* Physical register that r was _previously_ mapped to */
-    bool                committed; /* The instruction is done executing and has written the result, if any, to the register file */
+    bool                committed; /* The instruction is done executing and has written the result, if any, to the
+                                    * register file */
 
     // For debugging (XXX well, I do use the seqno, but we could avoid that)
     int                 pr;     /* The physical register with the result */
@@ -106,6 +107,8 @@ static int              fb_head = 0, fb_tail = 0, fb_size = 0;
 static unsigned         rob_wp = 0, rob_rp = 0;
 static unsigned         freelist_wp = 0, freelist_rp = 0;
 static int              ex_size;
+
+static int              cycle;
 
 ///////////////////////////////////////////////////////
 
@@ -152,8 +155,8 @@ show_rob(const char *msg)
     fprintf(stderr, "ROB%s:\n", msg);
     while (p != rob_wp) {
         fetch_parcel_t fp = rob[p].fp;
-        fprintf(stderr, "  rob[%02d] = %c %d:%08" PRIx64 " %08x\n",
-                p, "UC"[rob[p].committed], fp.seqno, fp.addr, fp.insn);
+        fprintf(stderr, "  rob[%02d] = %c %d:%08x %08x\n",
+                p, "UC"[rob[p].committed], fp.seqno, (uint32_t)fp.addr, fp.insn);
         if (++p == ROB_SIZE)
             p = 0;
     }
@@ -202,8 +205,10 @@ lsc_retire(const arch_t *arch, cpu_state_t *state, cpu_state_t *costate, verbosi
 
         // retired_reg[rob[rob_rp].r] = rat[rob[rob_rp].r];
 
-        fprintf(stderr, "Retired rob[%02d] %5d %d ", rob_rp, fp.seqno, state->priv);
-        isa_disass(arch, dec, (isa_result_t) { .result = prf[pr] });
+	if (0) {
+	    fprintf(stderr, "%05d  Retired rob[%02d] %5d %d ", cycle, rob_rp, fp.seqno, state->priv);
+	    isa_disass(arch, dec, (isa_result_t) { .result = prf[pr] });
+	}
 
         /* Co-simulate retired instructions.  A complication is that
          * costate->pc might not be the next instuction retired (if
@@ -259,10 +264,10 @@ rollback_rob(unsigned keep_seqno)
             break;
         rob_wp = p;
 
-        fprintf(stderr, "Rollback #%d:%08" PRIx64 "now r%d -> pr%d\n",
-                rob[p].fp.seqno, rob[p].fp.addr,
-                rob[p].r, rob[p].pr_old);
         if (rob[p].r != ISA_NO_REG) {
+            if (0)
+		fprintf(stderr, "Rollback %d:%08x now r%d -> pr%d\n",
+			rob[p].fp.seqno, (uint32_t)rob[p].fp.addr, rob[p].r, rob[p].pr_old);
             free_reg(rat[rob[p].r]);
             rat[rob[p].r] = rob[p].pr_old;
         }
@@ -297,7 +302,8 @@ static void
 show_fb(void)
 {
     unsigned p = fb_head;
-    fprintf(stderr, "FB: %d\n", fb_size);
+    if (fb_size)
+        fprintf(stderr, "FB: %d\n", fb_size);
     if (0)
     for (int i = 0; i < fb_size; ++i) {
         fetch_parcel_t fp = fb[p];
@@ -316,14 +322,22 @@ lsc_decode_rename(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     /*
      * Decode and rename
      */
-    if (fb_size > 0 && ex_size < EX_BUFFER_SIZE) {
+    while (fb_size > 0 && ex_size < EX_BUFFER_SIZE) {
 
         fetch_parcel_t fetched = fb[fb_head];
+        isa_decoded_t dec       = arch->decode(fetched.addr, fetched.insn);
+
+        // Serialize system instruction; block issuing until all
+        // previous instructions have executed (really, retired) and then only allow a single one in
+
+        if (dec.system && ex_size > 0)
+            break;
+
         if (++fb_head == FETCH_BUFFER_SIZE)
             fb_head = 0;
         fb_size--;
 
-        isa_decoded_t dec       = arch->decode(fetched.addr, fetched.insn);
+
         int           old_pr    = dec.dest_reg != ISA_NO_REG ? rat[dec.dest_reg] : PR_SINK;
         unsigned      rob_index = allocate_rob(dec.dest_reg, old_pr, fetched);
 
@@ -367,15 +381,18 @@ flush_and_redirect(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity
 static void
 show_ex(void)
 {
-    fprintf(stderr, "EX:\n");
+    if (ex_size)
+        fprintf(stderr, "EX:\n");
     for (int i = 0; i < ex_size; ++i) {
         micro_op_t mop = ex_buffer[i];
         fetch_parcel_t fp = mop.fetched;
 
-        fprintf(stderr, "  rob[%02d] %d:%08" PRIx64 " %08x pr%d, pr%d -> pr%d\n",
+        fprintf(stderr, "  rob[%02d] %d:%08x %08x pr%d%c, pr%d%c -> pr%d %s\n",
                 mop.rob_index,
-                fp.seqno, fp.addr, fp.insn,
-                mop.pr_a, mop.pr_b, mop.pr_wb);
+                fp.seqno, (uint32_t)fp.addr, fp.insn,
+                mop.pr_a, "WR"[pr_ready[mop.pr_a]],
+                mop.pr_b, "WR"[pr_ready[mop.pr_b]],
+                mop.pr_wb, pr_ready[mop.pr_a] & pr_ready[mop.pr_b] ? "READY" : "");
     }
 }
 
@@ -472,17 +489,17 @@ lsc_exec1(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity, micro_o
 
     rob[mop.rob_index].committed = true;
 
+    if (mop.dec.system)
+        // Flush the pipe on system instructions
+        flush_and_redirect(arch, state, verbosity, mop.fetched.seqno, mop.dec.insn_addr + 4);
+
 exception:
     if (state->verbosity & VERBOSE_DISASS) {
-        fprintf(stderr, "EX:   %d pr%d=pr%d,pr%d  ", state->priv, mop.pr_wb, mop.pr_a, mop.pr_b);
-        isa_disass(arch, mop.dec, res);
+	fprintf(stderr, "%05d  exec %5d %d ", cycle, mop.fetched.seqno, state->priv);
+	isa_disass(arch, mop.dec, (isa_result_t) { .result = prf[mop.pr_wb] });
 
-/*
-        fprintf(stderr, "\t\t\t\t\tpr%d = %08"PRIx64" pr%d = %08"PRIx64" -> pr%d\n",
-                mop.pr_a, op_a,
-                mop.pr_b, op_b,
-                mop.pr_wb);
-*/
+
+        fprintf(stderr, "                  pr%d=pr%d,pr%d\n", mop.pr_wb, mop.pr_a, mop.pr_b);
     }
 
     if (exc.raised) {
@@ -501,10 +518,21 @@ exception:
 static void
 lsc_execute(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
 {
-    /* Execute */
+    bool ex_ready[EX_BUFFER_SIZE];
+    for (int i = 0; i < ex_size; ++i) {
+        micro_op_t mop = ex_buffer[i];
+        ex_ready[i] = pr_ready[mop.pr_a] & pr_ready[mop.pr_b];
+    }
+
+    /* Schedule and Execute */
+    int ex_size_next = 0;
     for (int i = 0; i < ex_size; ++i)
-        lsc_exec1(arch, state, verbosity, ex_buffer[i]);
-    ex_size = 0;
+        if (ex_ready[i])
+            lsc_exec1(arch, state, verbosity, ex_buffer[i]);
+        else
+            ex_buffer[ex_size_next++] = ex_buffer[i];
+
+    ex_size = ex_size_next;
 }
 
 static bool
@@ -543,8 +571,10 @@ run_lsc(int num_images, char *images[], verbosity_t verbosity)
 
     arch = get_arch(info.machine, info.is_64bit);
     arch->setup(state, &info, verbosity);
-    arch->setup(costate, &info, verbosity);
+    arch->setup(costate, &info, 0);
 
+    uint64_t tohost = 0;
+    getelfsym(&info, "tohost", &tohost);
 
     /* Pr_Ready and reservation station initialization */
     memset(pr_ready, 0, sizeof pr_ready);
@@ -564,14 +594,17 @@ run_lsc(int num_images, char *images[], verbosity_t verbosity)
 
     for (cycle = 0;; ++cycle) {
         if (verbosity) {
-            fprintf(stderr, "\nCycle #%d:\n", cycle);
-            show_fb();
-            show_ex();
-            show_rob("");
+            //fprintf(stderr, "\nCycle #%d:\n", cycle);
+            if (0) show_fb();
+            if (0) show_ex();
+            if (0) show_rob("");
         }
 
         if (step_lsc(arch, state, costate, verbosity))
             break;
+
+	if (simple_htif(arch, state, verbosity, tohost))
+	    break;
     }
 
     //printf("IPC = %.2f\n", (double) n_issue / cycle);

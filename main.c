@@ -81,7 +81,7 @@ int main(int argc, char **argv)
 {
     char **images;
     int num_images;
-    verbosity_t verbosity = VERBOSE_CONSOLE;
+    verbosity_t verbosity = VERBOSE_CONSOLE | VERBOSE_TOHOST;
 
     for (;;) {
         int c;

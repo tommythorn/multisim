@@ -81,6 +81,8 @@ state_destroy(cpu_state_t *state)
     free(state);
 }
 
+bool simple_htif(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity, uint64_t tohost);
+
 /* Enforce that 32-bit architectures keep the register file in a
    canonical form, that is int32_t sign extended to int64_t/uint64_t */
 #define CANONICALIZE(v) (arch->is_64bit ? (v) : (int32_t)  (v))

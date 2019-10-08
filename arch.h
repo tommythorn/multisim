@@ -158,6 +158,7 @@ typedef enum verbosity_e {
     VERBOSE_PIPE       = 1 << 2, // Pipe trace
     VERBOSE_CACHE      = 1 << 3,
     VERBOSE_COMPLIANCE = 1 << 4,
+    VERBOSE_TOHOST     = 1 << 5,
 } verbosity_t;
 
 typedef struct isa_st {

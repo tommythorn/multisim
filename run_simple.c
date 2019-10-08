@@ -162,15 +162,31 @@ exception:
     return exc.raised ? 0 : 1;
 }
 
+bool simple_htif(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity, uint64_t tohost)
+{
+    if (verbosity & VERBOSE_TOHOST)  {
+	isa_exception_t exc = { 0 };
+	uint32_t val = arch->load(state, tohost, 4, &exc);
+	if (val) {
+	    if (val != 1)
+		fprintf(stderr, "  FAILED with %d\n", val);
+	    else
+		fprintf(stderr, "  SUCCESS\n");
+	    return true;
+	}
+    }
+
+    return false;
+}
+
+
 void run_simple(int num_images, char *images[], verbosity_t verbosity)
 {
     cpu_state_t *state = state_create();
     const arch_t *arch;
     elf_info_t info;
 
-    memory_ensure_mapped_range(state->mem,
-                               0x80000000, 0x80000000 + 32*1024-1);
-
+    memory_ensure_mapped_range(state->mem, 0x80000000, 0x80000000 + 32*1024-1);
 
     loadelfs(state->mem, num_images, images, &info);
 
@@ -178,27 +194,21 @@ void run_simple(int num_images, char *images[], verbosity_t verbosity)
     arch->setup(state, &info, verbosity);
 
     uint64_t tohost = 0;
-    isa_exception_t exc = { 0 };
     getelfsym(&info, "tohost", &tohost);
 
     for (;;) {
         if (step_simple(arch, state) == 0)
             continue;
 
-        if (verbosity & VERBOSE_COMPLIANCE)  {
-            uint32_t val = arch->load(state, tohost, 4, &exc);
-            if (val) {
-                if (val != 1)
-                    fprintf(stderr, "  FAILED with %d\n", val);
-                break;
-            }
-        }
+	if (simple_htif(arch, state, verbosity, tohost))
+	    break;
     }
 
     if (verbosity & VERBOSE_DISASS)
         printf("IPC = %.2f\n", (double) state->n_issue / state->counter);
 
     if (verbosity & VERBOSE_COMPLIANCE) {
+	isa_exception_t exc = { 0 };
         uint64_t begin_signature;
         uint64_t end_signature;
 
