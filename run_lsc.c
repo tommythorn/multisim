@@ -16,6 +16,21 @@
  * License along with this library; if not, write to the
  * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
  * Boston, MA 02111-1307, USA.
+ *
+ *  ** TODO **
+ *
+ * Correctness:
+ * - serialize memory operations
+ * - move pipeline restarts (mispredicted branches and exceptions) to retirement
+ *
+ * Perf:
+ * - crack stores and introduce store buffers
+ * - branch prediction
+ * - LSC
+ *
+ * Cleanup:
+ * - Don't depend on seqno outside of self-checking and visualization
+ * - Review what's tracked in data structures
  */
 
 #include <stdio.h>
@@ -49,6 +64,14 @@ typedef struct fetch_parcel_st {
     unsigned            seqno;
     uint64_t            addr;
     uint32_t            insn;
+
+    // For visualization
+    uint64_t		fetch_ts;
+    uint64_t		decode_ts;
+    uint64_t		issue_ts;
+    uint64_t		execute_ts;
+    uint64_t		commit_ts;
+//  uint64_t		retire_ts; // This is implicit
 } fetch_parcel_t;
 
 /* The essence of support for speculation is the register renaming and
@@ -179,10 +202,34 @@ allocate_rob(int r, int pr, fetch_parcel_t fp)
         rob_wp = 0;
     assert(rob_wp != rob_rp);
 
-    //show_rob(" after allocate");
-
     return rob_index;
 }
+
+static void
+visualize_retirement(const arch_t *arch, cpu_state_t *state, rob_entry_t rob)
+{
+#define WIDTH 64
+
+    static int next_seqno = 0;
+    char line[WIDTH+1];
+    fetch_parcel_t fp = rob.fp;
+    isa_decoded_t dec = rob.dec;
+    int            pr = rob.pr;
+
+    memset(line, '.', WIDTH);
+    line[WIDTH] = '\0';
+
+    line[fp.fetch_ts   % WIDTH] = 'F';
+    line[fp.decode_ts  % WIDTH] = 'D';
+    //line[fp.issue_ts   % WIDTH] = 'I';
+    line[fp.execute_ts % WIDTH] = 'E';
+    line[fp.commit_ts  % WIDTH] = 'C';
+    line[cycle         % WIDTH] = 'R';
+
+    fprintf(stderr, "%6d %s ", next_seqno++, line);
+    isa_disass(arch, dec, (isa_result_t) { .result = prf[pr] });
+}
+
 
 /*
  * Example ROB:
@@ -199,15 +246,13 @@ static void
 lsc_retire(const arch_t *arch, cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
 {
     while (rob_rp != rob_wp && rob[rob_rp].committed) {
-        fetch_parcel_t fp = rob[rob_rp].fp;
         isa_decoded_t dec = rob[rob_rp].dec;
         int            pr = rob[rob_rp].pr;
 
         // retired_reg[rob[rob_rp].r] = rat[rob[rob_rp].r];
 
-	if (0) {
-	    fprintf(stderr, "%05d  Retired rob[%02d] %5d %d ", cycle, rob_rp, fp.seqno, state->priv);
-	    isa_disass(arch, dec, (isa_result_t) { .result = prf[pr] });
+	if (verbosity & VERBOSE_DISASS) {
+            visualize_retirement(arch, state, rob[rob_rp]);
 	}
 
         /* Co-simulate retired instructions.  A complication is that
@@ -234,8 +279,6 @@ lsc_retire(const arch_t *arch, cpu_state_t *state, cpu_state_t *costate, verbosi
         if (++rob_rp == ROB_SIZE)
             rob_rp = 0;
     }
-
-    //show_rob(" after retire");
 }
 
 /*
@@ -272,8 +315,6 @@ rollback_rob(unsigned keep_seqno)
             rat[rob[p].r] = rob[p].pr_old;
         }
     }
-
-    //show_rob(" after rollback");
 }
 
 static void
@@ -291,7 +332,13 @@ lsc_fetch(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
         state->pc += 4;
         assert(!exc.raised);
 
-        fb[fb_tail] = (fetch_parcel_t){ .seqno = fetch_seqno++, .addr = addr, .insn = insn };
+        fb[fb_tail] = (fetch_parcel_t){
+            .seqno = fetch_seqno++,
+            .addr = addr,
+            .insn = insn,
+            .fetch_ts = cycle
+        };
+
         if (++fb_tail == FETCH_BUFFER_SIZE)
             fb_tail = 0;
         fb_size++;
@@ -337,6 +384,7 @@ lsc_decode_rename(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
             fb_head = 0;
         fb_size--;
 
+        fetched.decode_ts = cycle;
 
         int           old_pr    = dec.dest_reg != ISA_NO_REG ? rat[dec.dest_reg] : PR_SINK;
         unsigned      rob_index = allocate_rob(dec.dest_reg, old_pr, fetched);
@@ -494,7 +542,7 @@ lsc_exec1(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity, micro_o
         flush_and_redirect(arch, state, verbosity, mop.fetched.seqno, mop.dec.insn_addr + 4);
 
 exception:
-    if (state->verbosity & VERBOSE_DISASS) {
+    if (0 && state->verbosity & VERBOSE_DISASS) {
 	char buf[20];
 	snprintf(buf, sizeof buf, "[pr%d=pr%d,pr%d]", mop.pr_wb, mop.pr_a, mop.pr_b);
 	fprintf(stderr, "%5d  EX %-16s %5d %d ", cycle, buf, mop.fetched.seqno, state->priv);
@@ -526,9 +574,11 @@ lsc_execute(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     /* Schedule and Execute */
     int ex_size_next = 0;
     for (int i = 0; i < ex_size; ++i)
-        if (ex_ready[i])
+        if (ex_ready[i]) {
             lsc_exec1(arch, state, verbosity, ex_buffer[i]);
-        else
+            rob[ex_buffer[i].rob_index].fp.execute_ts = cycle;
+            rob[ex_buffer[i].rob_index].fp.commit_ts = cycle;
+        } else
             ex_buffer[ex_size_next++] = ex_buffer[i];
 
     ex_size = ex_size_next;
