@@ -16,10 +16,12 @@
 # Free Software Foundation, Inc., 59 Temple Place - Suite 330,
 # Boston, MA 02111-1307, USA.
 
+ISA=
+#ISA=-m32
 WARN=-Wall -Werror -Wno-parentheses
-OPT=
+OPT=$(ISA)
 CFLAGS=-g -std=c99 $(WARN) -MD $(OPT) -g -I/opt/local/include
-LDFLAGS=-g
+LDFLAGS=-g $(ISA)
 FLAGS=
 #MORE_STUFF=run_sscalar.o run_sscalar_oooe.o
 MORE_STUFF=
