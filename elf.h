@@ -3779,6 +3779,4 @@ enum
 #define R_METAG_TLS_LE_HI16	60
 #define R_METAG_TLS_LE_LO16	61
 
-__END_DECLS
-
 #endif	/* elf.h */

@@ -89,7 +89,7 @@ typedef union riscv_instruction {
         unsigned   imm10_1  : 10;
         int        imm20    :  1;
     } uj;
-    u_int32_t raw;
+    uint32_t raw;
 } insn_t;
 
 typedef enum riscv_opcode_e {
