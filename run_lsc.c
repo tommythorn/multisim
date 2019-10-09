@@ -19,9 +19,6 @@
  *
  *  ** TODO **
  *
- * Correctness:
- * - serialize memory operations
- *
  * Perf:
  * - crack stores and introduce store buffers
  * - branch prediction
@@ -49,6 +46,7 @@
 #define ROB_SIZE               32
 #define PHYSICAL_REGS          64
 #define EX_BUFFER_SIZE          8
+#define ME_BUFFER_SIZE          8
 
 
 // Two special physical registers: the constant zero and the sink for
@@ -127,6 +125,7 @@ static int64_t          prf[PHYSICAL_REGS];
 static bool             pr_ready[PHYSICAL_REGS]; // Scoreboard
 static unsigned         freelist[PHYSICAL_REGS];
 static micro_op_t       ex_buffer[EX_BUFFER_SIZE];
+static micro_op_t       me_buffer[EX_BUFFER_SIZE];
 
 static const arch_t    *arch;
 static unsigned         fetch_seqno;
@@ -134,12 +133,18 @@ static int              fb_head = 0, fb_tail = 0, fb_size = 0;
 static unsigned         rob_wp = 0, rob_rp = 0;
 static unsigned         freelist_wp = 0, freelist_rp = 0;
 static int              ex_size;
+static int              me_size;
 static uint64_t         exception_seqno = ~0ULL;
 static isa_exception_t  exception_info;
-
 static int              cycle;
 
 ///////////////////////////////////////////////////////
+
+static bool
+is_rob_full(void)
+{
+    return (rob_wp + 1) % ROB_SIZE == rob_rp;
+}
 
 static void
 free_reg(unsigned pr)
@@ -173,6 +178,8 @@ alloc_reg(void)
     if (freelist_rp == sizeof freelist / sizeof *freelist)
         freelist_rp = 0;
 
+    pr_ready[pr] = false;
+
     return pr;
 }
 
@@ -191,6 +198,44 @@ show_rob(const char *msg)
     }
 }
 
+static void
+show_ex(void)
+{
+    if (ex_size)
+        fprintf(stderr, "EX:\n");
+    for (int i = 0; i < ex_size; ++i) {
+        micro_op_t mop = ex_buffer[i];
+        fetch_parcel_t fp = mop.fetched;
+
+        fprintf(stderr, "  rob[%02d] %d:%08x %08x pr%d%c, pr%d%c -> pr%d %s ",
+                mop.rob_index,
+                fp.seqno, (uint32_t)fp.addr, fp.insn,
+                mop.pr_a, "WR"[pr_ready[mop.pr_a]],
+                mop.pr_b, "WR"[pr_ready[mop.pr_b]],
+                mop.pr_wb, pr_ready[mop.pr_a] & pr_ready[mop.pr_b] ? "READY" : "     ");
+        isa_disass(arch, mop.dec, (isa_result_t) { .result = 0xEEEEEEEE });
+    }
+}
+
+static void
+show_me(void)
+{
+    if (me_size)
+        fprintf(stderr, "ME:\n");
+    for (int i = 0; i < me_size; ++i) {
+        micro_op_t mop = me_buffer[i];
+        fetch_parcel_t fp = mop.fetched;
+
+        fprintf(stderr, "  rob[%02d] %d:%08x %08x pr%d%c, pr%d%c -> pr%d %s ",
+                mop.rob_index,
+                fp.seqno, (uint32_t)fp.addr, fp.insn,
+                mop.pr_a, "WR"[pr_ready[mop.pr_a]],
+                mop.pr_b, "WR"[pr_ready[mop.pr_b]],
+                mop.pr_wb, pr_ready[mop.pr_a] & pr_ready[mop.pr_b] ? "READY" : "     ");
+        isa_disass(arch, mop.dec, (isa_result_t) { .result = 0xEEEEEEEE });
+    }
+}
+
 static unsigned
 allocate_rob(int r, int pr, fetch_parcel_t fp)
 {
@@ -204,8 +249,15 @@ allocate_rob(int r, int pr, fetch_parcel_t fp)
         .fp = fp
     };
 
+    if (is_rob_full()) {
+        show_rob(" full");
+        show_ex();
+        show_me();
+    }
+
     if (++rob_wp == ROB_SIZE)
         rob_wp = 0;
+
     assert(rob_wp != rob_rp);
 
     return rob_index;
@@ -281,6 +333,7 @@ flush_and_redirect(cpu_state_t *state, verbosity_t verbosity, unsigned seqno, ui
     fb_size = 0;
     fb_head = fb_tail;
     ex_size = 0;
+    me_size = 0;
 
     rollback_rob(seqno);
 
@@ -289,6 +342,7 @@ flush_and_redirect(cpu_state_t *state, verbosity_t verbosity, unsigned seqno, ui
     // mispredicted = true;
 
 }
+
 
 /*
  * The ReOrder Buffer holds instructions in fetch (= program) order.
@@ -414,21 +468,25 @@ show_fb(void)
     }
 }
 
+
 static void
 lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
 {
     /*
      * Decode and rename
      */
-    while (fb_size > 0 && ex_size < EX_BUFFER_SIZE) {
+    while (fb_size > 0 &&
+           ex_size < EX_BUFFER_SIZE &&
+           me_size < ME_BUFFER_SIZE &&
+           !is_rob_full()) {
 
         fetch_parcel_t fetched = fb[fb_head];
-        isa_decoded_t dec       = arch->decode(fetched.addr, fetched.insn);
+        isa_decoded_t dec      = arch->decode(fetched.addr, fetched.insn);
 
         // Serialize system instruction; block issuing until all
         // previous instructions have executed (really, retired) and then only allow a single one in
 
-        if (dec.system && ex_size > 0)
+        if (dec.system && (ex_size > 0 || me_size > 0))
             break;
 
         if (++fb_head == FETCH_BUFFER_SIZE)
@@ -456,31 +514,19 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
         rob[rob_index].dec = dec;
         rob[rob_index].pr = mop.pr_wb;
 
-        ex_buffer[ex_size++] = mop;
+        if (dec.class == isa_insn_class_load || dec.class == isa_insn_class_store)
+            me_buffer[me_size++] = mop;
+        else
+            ex_buffer[ex_size++] = mop;
     }
 }
 
-static void
-show_ex(void)
-{
-    if (ex_size)
-        fprintf(stderr, "EX:\n");
-    for (int i = 0; i < ex_size; ++i) {
-        micro_op_t mop = ex_buffer[i];
-        fetch_parcel_t fp = mop.fetched;
-
-        fprintf(stderr, "  rob[%02d] %d:%08x %08x pr%d%c, pr%d%c -> pr%d %s\n",
-                mop.rob_index,
-                fp.seqno, (uint32_t)fp.addr, fp.insn,
-                mop.pr_a, "WR"[pr_ready[mop.pr_a]],
-                mop.pr_b, "WR"[pr_ready[mop.pr_b]],
-                mop.pr_wb, pr_ready[mop.pr_a] & pr_ready[mop.pr_b] ? "READY" : "");
-    }
-}
 
 static void
 lsc_exec1(cpu_state_t *state, verbosity_t verbosity, micro_op_t mop)
 {
+    assert(mop.fetched.addr == mop.dec.insn_addr);
+
     isa_exception_t exc = { 0 };
     uint64_t op_a  = prf[mop.pr_a];
     uint64_t op_b  = prf[mop.pr_b];
@@ -605,9 +651,15 @@ static void
 lsc_execute(cpu_state_t *state, verbosity_t verbosity)
 {
     bool ex_ready[EX_BUFFER_SIZE];
+    bool me_ready[ME_BUFFER_SIZE];
     for (int i = 0; i < ex_size; ++i) {
         micro_op_t mop = ex_buffer[i];
         ex_ready[i] = pr_ready[mop.pr_a] & pr_ready[mop.pr_b];
+    }
+
+    for (int i = 0; i < me_size; ++i) {
+        micro_op_t mop = me_buffer[i];
+        me_ready[i] = pr_ready[mop.pr_a] & pr_ready[mop.pr_b];
     }
 
     /* Schedule and Execute */
@@ -621,6 +673,23 @@ lsc_execute(cpu_state_t *state, verbosity_t verbosity)
             ex_buffer[ex_size_next++] = ex_buffer[i];
 
     ex_size = ex_size_next;
+
+    // ME has to be in order
+    int p;
+    for (p = 0; p < me_size && me_ready[p]; ++p) {
+        lsc_exec1(state, verbosity, me_buffer[p]);
+        rob[me_buffer[p].rob_index].fp.execute_ts = cycle;
+        rob[me_buffer[p].rob_index].fp.commit_ts = cycle;
+    }
+
+    if (p == 0)
+        return;
+
+    // Compress out executed instructions
+
+    for (int j = 0; j + p < me_size; ++j)
+        me_buffer[j] = me_buffer[j + p];
+    me_size -= p;
 }
 
 static bool
