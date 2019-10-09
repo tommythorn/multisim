@@ -128,6 +128,7 @@ static bool             pr_ready[PHYSICAL_REGS]; // Scoreboard
 static unsigned         freelist[PHYSICAL_REGS];
 static micro_op_t       ex_buffer[EX_BUFFER_SIZE];
 
+static const arch_t    *arch;
 static unsigned         fetch_seqno;
 static int              fb_head = 0, fb_tail = 0, fb_size = 0;
 static unsigned         rob_wp = 0, rob_rp = 0;
@@ -211,7 +212,7 @@ allocate_rob(int r, int pr, fetch_parcel_t fp)
 }
 
 static void
-visualize_retirement(const arch_t *arch, cpu_state_t *state, rob_entry_t rob)
+visualize_retirement(cpu_state_t *state, rob_entry_t rob)
 {
 #define WIDTH 64
 
@@ -274,8 +275,7 @@ rollback_rob(unsigned keep_seqno)
 
 
 static void
-flush_and_redirect(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity,
-                   unsigned seqno, uint64_t new_pc)
+flush_and_redirect(cpu_state_t *state, verbosity_t verbosity, unsigned seqno, uint64_t new_pc)
 {
     // Flush
     fb_size = 0;
@@ -318,13 +318,13 @@ flush_and_redirect(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity
  * #7:          <--- wp
  */
 static void
-lsc_retire(const arch_t *arch, cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
+lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
 {
     while (rob_rp != rob_wp && rob[rob_rp].committed) {
         rob_entry_t re = rob[rob_rp];
 
         if (verbosity & VERBOSE_DISASS) {
-            visualize_retirement(arch, state, re);
+            visualize_retirement(state, re);
         }
 
         if (re.exception) {
@@ -333,13 +333,13 @@ lsc_retire(const arch_t *arch, cpu_state_t *state, cpu_state_t *costate, verbosi
                         "                  EXCEPTION %"PRId64" (%08"PRId64") RAISED\n",
                         exception_info.code, exception_info.info);
 
-            flush_and_redirect(arch, state, verbosity, re.fp.seqno - 1,
+            flush_and_redirect(state, verbosity, re.fp.seqno - 1,
                                arch->handle_exception(state, re.dec.insn_addr, exception_info));
             return;
         }
 
         if (re.restart) {
-            flush_and_redirect(arch, state, verbosity, re.fp.seqno, re.restart_pc);
+            flush_and_redirect(state, verbosity, re.fp.seqno, re.restart_pc);
         }
 
         /* Co-simulate retired instructions.  A complication is that
@@ -369,7 +369,7 @@ lsc_retire(const arch_t *arch, cpu_state_t *state, cpu_state_t *costate, verbosi
 }
 
 static void
-lsc_fetch(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
+lsc_fetch(cpu_state_t *state, verbosity_t verbosity)
 {
     isa_exception_t exc = { 0 };
     int n = 0;
@@ -415,7 +415,7 @@ show_fb(void)
 }
 
 static void
-lsc_decode_rename(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
+lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
 {
     /*
      * Decode and rename
@@ -479,7 +479,7 @@ show_ex(void)
 }
 
 static void
-lsc_exec1(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity, micro_op_t mop)
+lsc_exec1(cpu_state_t *state, verbosity_t verbosity, micro_op_t mop)
 {
     isa_exception_t exc = { 0 };
     uint64_t op_a  = prf[mop.pr_a];
@@ -602,7 +602,7 @@ exception:
 }
 
 static void
-lsc_execute(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
+lsc_execute(cpu_state_t *state, verbosity_t verbosity)
 {
     bool ex_ready[EX_BUFFER_SIZE];
     for (int i = 0; i < ex_size; ++i) {
@@ -614,7 +614,7 @@ lsc_execute(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
     int ex_size_next = 0;
     for (int i = 0; i < ex_size; ++i)
         if (ex_ready[i]) {
-            lsc_exec1(arch, state, verbosity, ex_buffer[i]);
+            lsc_exec1(state, verbosity, ex_buffer[i]);
             rob[ex_buffer[i].rob_index].fp.execute_ts = cycle;
             rob[ex_buffer[i].rob_index].fp.commit_ts = cycle;
         } else
@@ -625,13 +625,13 @@ lsc_execute(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
 
 static bool
 step_lsc(
-    const arch_t *arch, cpu_state_t *state, cpu_state_t *costate,
+    cpu_state_t *state, cpu_state_t *costate,
     verbosity_t verbosity)
 {
-    lsc_retire(arch, state, costate, verbosity);
-    lsc_execute(arch, state, verbosity);
-    lsc_decode_rename(arch, state, verbosity);
-    lsc_fetch(arch, state, verbosity); // XXX execute affects pc in the same cycle
+    lsc_retire(state, costate, verbosity);
+    lsc_execute(state, verbosity);
+    lsc_decode_rename(state, verbosity);
+    lsc_fetch(state, verbosity); // XXX execute affects pc in the same cycle
 
     arch->tick(state, 1);
 
@@ -643,7 +643,6 @@ run_lsc(int num_images, char *images[], verbosity_t verbosity)
 {
     cpu_state_t *state = state_create();
     cpu_state_t *costate = state_create();
-    const arch_t *arch;
     elf_info_t info;
 
     memory_ensure_mapped_range(state->mem,
@@ -686,7 +685,7 @@ run_lsc(int num_images, char *images[], verbosity_t verbosity)
             if (0) show_rob("");
         }
 
-        if (step_lsc(arch, state, costate, verbosity))
+        if (step_lsc(state, costate, verbosity))
             break;
 
         if (simple_htif(arch, state, verbosity, tohost))
