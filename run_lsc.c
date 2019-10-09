@@ -21,7 +21,6 @@
  *
  * Correctness:
  * - serialize memory operations
- * - move pipeline restarts (mispredicted branches and exceptions) to retirement
  *
  * Perf:
  * - crack stores and introduce store buffers
@@ -66,12 +65,12 @@ typedef struct fetch_parcel_st {
     uint32_t            insn;
 
     // For visualization
-    uint64_t		fetch_ts;
-    uint64_t		decode_ts;
-    uint64_t		issue_ts;
-    uint64_t		execute_ts;
-    uint64_t		commit_ts;
-//  uint64_t		retire_ts; // This is implicit
+    uint64_t            fetch_ts;
+    uint64_t            decode_ts;
+    uint64_t            issue_ts;
+    uint64_t            execute_ts;
+    uint64_t            commit_ts;
+//  uint64_t            retire_ts; // This is implicit
 } fetch_parcel_t;
 
 /* The essence of support for speculation is the register renaming and
@@ -97,6 +96,10 @@ typedef struct rob_entry_st {
     int                 pr_old; /* Physical register that r was _previously_ mapped to */
     bool                committed; /* The instruction is done executing and has written the result, if any, to the
                                     * register file */
+
+    bool                restart;
+    uint64_t            restart_pc;
+    bool                exception;
 
     // For debugging (XXX well, I do use the seqno, but we could avoid that)
     int                 pr;     /* The physical register with the result */
@@ -130,6 +133,8 @@ static int              fb_head = 0, fb_tail = 0, fb_size = 0;
 static unsigned         rob_wp = 0, rob_rp = 0;
 static unsigned         freelist_wp = 0, freelist_rp = 0;
 static int              ex_size;
+static uint64_t         exception_seqno = ~0ULL;
+static isa_exception_t  exception_info;
 
 static int              cycle;
 
@@ -232,56 +237,6 @@ visualize_retirement(const arch_t *arch, cpu_state_t *state, rob_entry_t rob)
 
 
 /*
- * Example ROB:
- *
- * #0: J        <--- oldest uncommitted/rp
- * #1: CSRR
- * #2: BEQ
- * #3: ADDI
- * #4: LW       <--- most recent
- * #5:          <--- wp
- */
-
-static void
-lsc_retire(const arch_t *arch, cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
-{
-    while (rob_rp != rob_wp && rob[rob_rp].committed) {
-        isa_decoded_t dec = rob[rob_rp].dec;
-        int            pr = rob[rob_rp].pr;
-
-        // retired_reg[rob[rob_rp].r] = rat[rob[rob_rp].r];
-
-	if (verbosity & VERBOSE_DISASS) {
-            visualize_retirement(arch, state, rob[rob_rp]);
-	}
-
-        /* Co-simulate retired instructions.  A complication is that
-         * costate->pc might not be the next instuction retired (if
-         * the instruction traps, then the next retired instruction
-         * will be the first from the trap handler
-         */
-
-        uint64_t copc;
-        do copc = costate->pc; while (step_simple(arch, costate) == 0);
-
-        if (dec.insn_addr != copc) {
-            printf("COSIM: REF PC %08"PRIx64" != LSC PC%08"PRIx64"\n", dec.insn_addr, copc);
-            assert(0);
-        }
-
-        if (pr != PR_SINK && prf[pr] != costate->r[dec.dest_reg]) {
-            printf("COSIM: REF RES %08"PRIx64" != LSC RES %08"PRIx64"\n", prf[pr], costate->r[dec.dest_reg]);
-            assert(0);
-        }
-
-        free_reg(rob[rob_rp].pr_old);
-
-        if (++rob_rp == ROB_SIZE)
-            rob_rp = 0;
-    }
-}
-
-/*
  * Example roll-back: we determine that the #2:BEQ was mispredicted so
  * we have to flush the pipe and roll ROB back to #2.  That means
  * undoing #4 and #3 in that order.
@@ -309,11 +264,107 @@ rollback_rob(unsigned keep_seqno)
 
         if (rob[p].r != ISA_NO_REG) {
             if (0)
-		fprintf(stderr, "Rollback %d:%08x now r%d -> pr%d\n",
-			rob[p].fp.seqno, (uint32_t)rob[p].fp.addr, rob[p].r, rob[p].pr_old);
+                fprintf(stderr, "Rollback %d:%08x now r%d -> pr%d\n",
+                        rob[p].fp.seqno, (uint32_t)rob[p].fp.addr, rob[p].r, rob[p].pr_old);
             free_reg(rat[rob[p].r]);
             rat[rob[p].r] = rob[p].pr_old;
         }
+    }
+}
+
+
+static void
+flush_and_redirect(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity,
+                   unsigned seqno, uint64_t new_pc)
+{
+    // Flush
+    fb_size = 0;
+    fb_head = fb_tail;
+    ex_size = 0;
+
+    rollback_rob(seqno);
+
+    state->pc = new_pc;
+    fetch_seqno = seqno + 1;
+    // mispredicted = true;
+
+}
+
+/*
+ * The ReOrder Buffer holds instructions in fetch (= program) order.
+ * Its purpose is to enable the illusion of sequential instruction
+ * semantics.  We do this by traversing the ROB in order and
+ * "retiring" committed instructions.  Retired instructions are
+ * irrevokably done and will never be restarted, thus we can release
+ * any resources that was held in case we needed to revert it, eg. the
+ * physical register previously mapped to our target register.
+ *
+ * There are two special cases to consider: branch mispredicted and
+ * exceptions.  Both require flushing the pipeline, undoing all
+ * instructions in the ROB, and restarting the pipeline.  In case of
+ * an exception, the excepting instruction is undone as well, instead
+ * of being retired.
+ *
+ *
+ * Example ROB:
+ *
+ * #0: XOR      <--- rp
+ * #1: AND
+ * #2: J        <--- oldest uncommitted
+ * #3: CSRR
+ * #4: BEQ
+ * #5: ADDI
+ * #6: LW       <--- most recent
+ * #7:          <--- wp
+ */
+static void
+lsc_retire(const arch_t *arch, cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
+{
+    while (rob_rp != rob_wp && rob[rob_rp].committed) {
+        rob_entry_t re = rob[rob_rp];
+
+        if (verbosity & VERBOSE_DISASS) {
+            visualize_retirement(arch, state, re);
+        }
+
+        if (re.exception) {
+            if (state->verbosity & VERBOSE_DISASS)
+                fprintf(stderr,
+                        "                  EXCEPTION %"PRId64" (%08"PRId64") RAISED\n",
+                        exception_info.code, exception_info.info);
+
+            flush_and_redirect(arch, state, verbosity, re.fp.seqno - 1,
+                               arch->handle_exception(state, re.dec.insn_addr, exception_info));
+            return;
+        }
+
+        if (re.restart) {
+            flush_and_redirect(arch, state, verbosity, re.fp.seqno, re.restart_pc);
+        }
+
+        /* Co-simulate retired instructions.  A complication is that
+         * costate->pc might not be the next instuction retired (if
+         * the instruction traps, then the next retired instruction
+         * will be the first from the trap handler
+         */
+
+        uint64_t copc;
+        do copc = costate->pc; while (step_simple(arch, costate) == 0);
+
+        if (re.dec.insn_addr != copc) {
+            printf("COSIM: REF PC %08"PRIx64" != LSC PC%08"PRIx64"\n", re.dec.insn_addr, copc);
+            assert(0);
+        }
+
+        if (re.pr != PR_SINK && prf[re.pr] != costate->r[re.r]) {
+            printf("COSIM: REF RES %08"PRIx64" != LSC RES %08"PRIx64"\n", prf[re.pr], costate->r[re.r]);
+            assert(0);
+        }
+
+        free_reg(re.pr_old);
+
+        if (++rob_rp == ROB_SIZE)
+            rob_rp = 0;
     }
 }
 
@@ -410,23 +461,6 @@ lsc_decode_rename(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity)
 }
 
 static void
-flush_and_redirect(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity,
-                   unsigned seqno, uint64_t new_pc)
-{
-    // Flush
-    fb_size = 0;
-    fb_head = fb_tail;
-    ex_size = 0;
-
-    rollback_rob(seqno);
-
-    state->pc = new_pc;
-    fetch_seqno = seqno + 1;
-    // mispredicted = true;
-
-}
-
-static void
 show_ex(void)
 {
     if (ex_size)
@@ -516,16 +550,22 @@ lsc_exec1(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity, micro_o
         break;
 
     case isa_insn_class_branch:
-        if (res.branch_taken)
-            flush_and_redirect(arch, state, verbosity, mop.fetched.seqno, mop.dec.jumpbranch_target);
+        if (res.branch_taken) {
+            rob[mop.rob_index].restart = true;
+            rob[mop.rob_index].restart_pc = mop.dec.jumpbranch_target;
+        }
         break;
 
-    case isa_insn_class_jump:
-        flush_and_redirect(arch, state, verbosity, mop.fetched.seqno, mop.dec.jumpbranch_target);
+    case isa_insn_class_jump: {
+            rob[mop.rob_index].restart = true;
+            rob[mop.rob_index].restart_pc = mop.dec.jumpbranch_target;
+        }
         break;
 
-    case isa_insn_class_compjump:
-        flush_and_redirect(arch, state, verbosity, mop.fetched.seqno, res.compjump_target);
+    case isa_insn_class_compjump: {
+            rob[mop.rob_index].restart = true;
+            rob[mop.rob_index].restart_pc = res.compjump_target;
+        }
         break;
     }
 
@@ -535,30 +575,29 @@ lsc_exec1(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity, micro_o
     if (mop.dec.dest_msr != ISA_NO_REG)
         arch->write_msr(state, mop.dec.dest_msr, res.msr_result, &exc);
 
-    rob[mop.rob_index].committed = true;
-
-    if (mop.dec.system)
-        // Flush the pipe on system instructions
-        flush_and_redirect(arch, state, verbosity, mop.fetched.seqno, mop.dec.insn_addr + 4);
+    // Flush the pipe on system instructions
+    if (mop.dec.system) {
+        rob[mop.rob_index].restart = true;
+        rob[mop.rob_index].restart_pc = mop.dec.insn_addr + 4;
+    }
 
 exception:
+    rob[mop.rob_index].committed = true;
+
     if (0 && state->verbosity & VERBOSE_DISASS) {
-	char buf[20];
-	snprintf(buf, sizeof buf, "[pr%d=pr%d,pr%d]", mop.pr_wb, mop.pr_a, mop.pr_b);
-	fprintf(stderr, "%5d  EX %-16s %5d %d ", cycle, buf, mop.fetched.seqno, state->priv);
-	isa_disass(arch, mop.dec, (isa_result_t) { .result = prf[mop.pr_wb] });
+        char buf[20];
+        snprintf(buf, sizeof buf, "[pr%d=pr%d,pr%d]", mop.pr_wb, mop.pr_a, mop.pr_b);
+        fprintf(stderr, "%5d  EX %-16s %5d %d ", cycle, buf, mop.fetched.seqno, state->priv);
+        isa_disass(arch, mop.dec, (isa_result_t) { .result = prf[mop.pr_wb] });
     }
 
     if (exc.raised) {
-        if (state->verbosity & VERBOSE_DISASS)
-            fprintf(stderr,
-                    "                  EXCEPTION %"PRId64" (%08"PRId64") RAISED\n",
-                    exc.code, exc.info);
+        rob[mop.rob_index].exception = true;
 
-        // XXX do this at retirement
-        flush_and_redirect(arch, state, verbosity,
-                           mop.fetched.seqno - 1, // Do _not_ keep instruction with exception
-                           arch->handle_exception(state, mop.dec.insn_addr, exc));
+        if (mop.fetched.seqno < exception_seqno) {
+            exception_seqno = mop.fetched.seqno;
+            exception_info  = exc;
+        }
     }
 }
 
@@ -650,8 +689,8 @@ run_lsc(int num_images, char *images[], verbosity_t verbosity)
         if (step_lsc(arch, state, costate, verbosity))
             break;
 
-	if (simple_htif(arch, state, verbosity, tohost))
-	    break;
+        if (simple_htif(arch, state, verbosity, tohost))
+            break;
     }
 
     //printf("IPC = %.2f\n", (double) n_issue / cycle);
