@@ -1,6 +1,6 @@
 -*- text -*-
 
-Copyright (c) 2013 Tommy Thorn
+Copyright (c) 2013,2019 Tommy Thorn
 
 
 MultiSim
@@ -20,13 +20,13 @@ Assumptions
 ~~~~~~~~~~~
 
 MultiSim is intended to support the simulation of RISC-like
-achitecture, such as Alpha, MIPS, and LM32.  It assumes that with the
-exception of loads, all instructions can be modelled as taking two
-operands [and an immediate] and as producing an output to be stored in
-a register, or in the case of a store, an address, a result, and a
-byte mask.  Note, that _all_ internal state must fit into this model
-and machine state is simulated with a special Machine Specific
-Register file (msr).
+achitecture, such as Alpha, MIPS, and LM32 (currently only RISC-V
+RV32IS is maintained).  It assumes that all instructions can be
+modelled as taking two operands [and an immediate] and as producing an
+output to be stored in a register, or in the case of a store, an
+address, a result, and a byte mask.  Note, that _all_ internal state
+must fit into this model and machine state is simulated with a special
+Machine Specific Register file (msr).
 
 To allow Alpha (64-bit) and avoid to much configuration noise,
 everything is 64-bit everywhere, except simulated memory which only

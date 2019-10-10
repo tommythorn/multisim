@@ -1,6 +1,6 @@
 /*
  * Multisim: a microprocessor architecture exploration framework
- * Copyright (C) 2014 Tommy Thorn
+ * Copyright (C) 2014,2019 Tommy Thorn
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -40,7 +40,6 @@ static int run = '1';
 static struct option long_options[] = {
     {"simple",         0, NULL, '1'},
     {"lsc",            0, NULL, '2'},
-    {"ooo",            0, NULL, '3'},
     {"help",           0, NULL, '?'},
     {0, 0, 0, 0}
 };
@@ -87,7 +86,7 @@ int main(int argc, char **argv)
         int c;
         int option_index = 0;
 
-        c = getopt_long(argc, argv, "cdf:i:o:123",
+        c = getopt_long(argc, argv, "cdf:i:o:12",
                         long_options, &option_index);
         if (c == -1)
             break;
@@ -136,10 +135,6 @@ int main(int argc, char **argv)
 
     case '2':
         run_lsc(num_images, images, verbosity);
-        break;
-
-    case '3':
-        run_ooo(num_images, images, verbosity);
         break;
 
     default:

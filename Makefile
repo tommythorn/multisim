@@ -1,5 +1,5 @@
 # Multisim: a microprocessor architecture exploration framework
-# Copyright (C) 2014 Tommy Thorn
+# Copyright (C) 2014,2019 Tommy Thorn
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -26,7 +26,7 @@ FLAGS=
 #MORE_STUFF=run_sscalar.o run_sscalar_oooe.o
 MORE_STUFF=
 OBJS=main.o arch.o \
-	run_simple.o run_lsc.o run_ooo.o $(MORE_STUFF) \
+	run_simple.o run_lsc.o $(MORE_STUFF) \
 	memory.o loadelf.o riscv.o
 #VERB=-t
 VERB=-d

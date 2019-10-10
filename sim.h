@@ -1,6 +1,6 @@
 /*
  * Multisim: a microprocessor architecture exploration framework
- * Copyright (C) 2012,2018 Tommy Thorn
+ * Copyright (C) 2012,2018,2019 Tommy Thorn
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -63,7 +63,6 @@ struct cpu_state_st {
 void exception(char *kind);
 void run_simple(int, char **, verbosity_t);
 void run_lsc(int, char **, verbosity_t);
-void run_ooo(int, char **, verbosity_t);
 
 static inline cpu_state_t *
 state_create(void)
