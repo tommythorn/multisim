@@ -19,12 +19,24 @@
  *
  *  ** TODO **
  *
+ * Correctness:
+ *
+ * - Don't commit stores and csr writes to memory until retirement
+ * - Force cosim match on IO memory locations (pick one to do IO and
+ *   let the other follow)
+ *
  * Perf:
+ *
+ * - Predict branches
+ * - Reclaim physical registers a simpler way (push them to the tail
+ *   of the freelist as soon as they are reallocated and roll back the
+ *   tail on rollbacks)
+ *
  * - crack stores and introduce store buffers
- * - branch prediction
  * - LSC
  *
  * Cleanup:
+ *
  * - Don't depend on seqno outside of self-checking and visualization
  * - Review what's tracked in data structures
  */

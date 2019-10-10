@@ -1150,7 +1150,6 @@ static void tick(cpu_state_t *s, int instret)
 static uint64_t read_msr(cpu_state_t *s, unsigned csrno, isa_exception_t *exc)
 {
     if (s->priv < ((csrno >> 8) & 3)) {
-        ERROR("  Illegal Read of CSR %3x\n", csrno);
         raise_exception(EXCP_INSN_ILLEGAL, 0, exc); // XXX is that legal?
         return 0;
     }
@@ -1425,7 +1424,6 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, isa_exception_t *exc
         p = memory_physical(s->mem, address, abs(mem_access_size));
 
     if (!p) {
-        ERROR("  load from illegal physical address %08"PRIx32"\n", (uint32_t)address);
         raise_exception(EXCP_LOAD_ACCESS_FAULT, address, exc);
         return 0;
     }

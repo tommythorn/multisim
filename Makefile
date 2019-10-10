@@ -71,6 +71,9 @@ regress: multisim
 test_lsc: multisim
 	./multisim -d --lsc workloads/riscv-tests/rv32ui-p-lw
 
+test_philo: multisim
+	./multisim -d --lsc workloads/zephyr/philosophers.elf
+
 arewethereyet:
 	@bash -c 'printf "We are %3.1f%% there\n" $$(echo `./regress-rv32.sh --lsc|grep SUCCESS|wc -l` / 0.39|bc -l)'
 
