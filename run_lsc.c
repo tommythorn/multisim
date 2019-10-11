@@ -60,6 +60,11 @@
 #define EX_BUFFER_SIZE          8
 #define ME_BUFFER_SIZE          8
 
+/*
+ * Enable an alternative register scheme that is slightly simpler for
+ * the rollback.
+ */
+#define EARLY_RELEASE           1
 
 // Two special physical registers: the constant zero and the sink for
 // for r0 destination (is never read)
@@ -173,7 +178,6 @@ free_reg(unsigned pr)
     }
 
     if (pr != PR_ZERO && pr != PR_SINK) {
-        pr_ready[pr] = false;
         freelist[freelist_wp] = pr;
         if (++freelist_wp == sizeof freelist / sizeof *freelist)
             freelist_wp = 0;
@@ -331,7 +335,17 @@ rollback_rob(unsigned keep_seqno)
             if (0)
                 fprintf(stderr, "Rollback %d:%08x now r%d -> pr%d\n",
                         rob[p].fp.seqno, (uint32_t)rob[p].fp.addr, rob[p].r, rob[p].pr_old);
+
+#ifdef EARLY_RELEASE
+            // Undo the free'd register and the allocation
+	    assert(freelist_wp != freelist_rp);
+            if (freelist_wp-- == 0)
+                freelist_wp = sizeof freelist / sizeof *freelist - 1;
+            if (freelist_rp-- == 0)
+                freelist_rp = sizeof freelist / sizeof *freelist - 1;
+#else
             free_reg(rat[rob[p].r]);
+#endif	    
             rat[rob[p].r] = rob[p].pr_old;
         }
     }
@@ -427,7 +441,9 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
             assert(0);
         }
 
+#ifndef EARLY_RELEASE
         free_reg(re.pr_old);
+#endif
 
         if (++rob_rp == ROB_SIZE)
             rob_rp = 0;
@@ -519,6 +535,10 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
             .pr_wb   = dec.dest_reg == ISA_NO_REG ? PR_SINK : alloc_reg(),
             .rob_index = rob_index
         };
+
+#ifdef EARLY_RELEASE
+        free_reg(old_pr);
+#endif
 
         if (dec.dest_reg != ISA_NO_REG)
             rat[dec.dest_reg] = mop.pr_wb;
