@@ -21,18 +21,17 @@
  *
  * Correctness:
  *
- * - Don't commit stores and csr writes to memory until retirement
+ * - Introduce store buffers and only write store data to memory at retirement
  * - Force cosim match on IO memory locations (pick one to do IO and
  *   let the other follow)
  *
  * Perf:
  *
- * - Predict branches
- * - Reclaim physical registers a simpler way (push them to the tail
- *   of the freelist as soon as they are reallocated and roll back the
- *   tail on rollbacks)
+ * - Allow loads to execute in the prescence of unretired, but non-overlapping stores
+ * - .... Further, allow loads to execute as long as all earlier stores have committed (and forward as needed)
+ * - crack stores into store data and store address
  *
- * - crack stores and introduce store buffers
+ * - Predict branches
  * - LSC
  *
  * Cleanup:
