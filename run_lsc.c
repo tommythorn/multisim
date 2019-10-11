@@ -317,43 +317,39 @@ visualize_retirement(cpu_state_t *state, rob_entry_t rob)
  */
 
 static void
-rollback_rob(unsigned keep_seqno)
+rollback_rob(int keep_rob_index)
 {
-    while (rob_rp != rob_wp) {
+    do {
         unsigned p = rob_wp;
-        if (p == 0)
+        if (p-- == 0)
             p = ROB_SIZE - 1;
-        else
-            --p;
 
         assert((unsigned)p < ROB_SIZE);
-        if (rob[p].fp.seqno == keep_seqno)
+        if (p == keep_rob_index)
             break;
         rob_wp = p;
 
-        if (rob[p].r != ISA_NO_REG) {
-            if (0)
-                fprintf(stderr, "Rollback %d:%08x now r%d -> pr%d\n",
-                        rob[p].fp.seqno, (uint32_t)rob[p].fp.addr, rob[p].r, rob[p].pr_old);
+        if (rob[p].r == ISA_NO_REG)
+	    continue;
+
 
 #ifdef EARLY_RELEASE
-            // Undo the free'd register and the allocation
-	    assert(freelist_wp != freelist_rp);
-            if (freelist_wp-- == 0)
-                freelist_wp = sizeof freelist / sizeof *freelist - 1;
-            if (freelist_rp-- == 0)
-                freelist_rp = sizeof freelist / sizeof *freelist - 1;
+	// Undo the free'd register and the allocation
+	assert(freelist_wp != freelist_rp);
+	if (freelist_wp-- == 0)
+	    freelist_wp = sizeof freelist / sizeof *freelist - 1;
+	if (freelist_rp-- == 0)
+	    freelist_rp = sizeof freelist / sizeof *freelist - 1;
 #else
-            free_reg(rat[rob[p].r]);
+	free_reg(rat[rob[p].r]);
 #endif	    
-            rat[rob[p].r] = rob[p].pr_old;
-        }
-    }
+	rat[rob[p].r] = rob[p].pr_old;
+    } while (rob_rp != rob_wp);
 }
 
 
 static void
-flush_and_redirect(cpu_state_t *state, verbosity_t verbosity, unsigned seqno, uint64_t new_pc)
+flush_and_redirect(cpu_state_t *state, verbosity_t verbosity, int rob_index, unsigned seqno, uint64_t new_pc)
 {
     // Flush
     fb_size = 0;
@@ -361,7 +357,7 @@ flush_and_redirect(cpu_state_t *state, verbosity_t verbosity, unsigned seqno, ui
     ex_size = 0;
     me_size = 0;
 
-    rollback_rob(seqno);
+    rollback_rob(rob_index);
 
     state->pc = new_pc;
     fetch_seqno = seqno + 1;
@@ -413,13 +409,14 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
                         "                  EXCEPTION %"PRId64" (%08"PRId64") RAISED\n",
                         exception_info.code, exception_info.info);
 
-            flush_and_redirect(state, verbosity, re.fp.seqno - 1,
+	    int prev_rob_pr = rob_rp == 0 ? ROB_SIZE - 1 : rob_rp - 1;
+            flush_and_redirect(state, verbosity, prev_rob_pr, re.fp.seqno - 1,
                                arch->handle_exception(state, re.dec.insn_addr, exception_info));
             return;
         }
 
         if (re.restart) {
-            flush_and_redirect(state, verbosity, re.fp.seqno, re.restart_pc);
+            flush_and_redirect(state, verbosity, rob_rp, re.fp.seqno, re.restart_pc);
         }
 
         /* Co-simulate retired instructions.  A complication is that
