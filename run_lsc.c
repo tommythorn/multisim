@@ -107,6 +107,7 @@ typedef struct fetch_parcel_st {
  */
 typedef struct rob_entry_st {
     int                 r;      /* Logical register written by this instruction */
+    int                 pr;     /* Physical register that r is mapped to */
     int                 pr_old; /* Physical register that r was _previously_ mapped to */
     bool                committed; /* The instruction is done executing and has written the result, if any, to the
                                     * register file */
@@ -116,7 +117,6 @@ typedef struct rob_entry_st {
     bool                exception;
 
     // For debugging (XXX well, I do use the seqno, but we could avoid that)
-    int                 pr;     /* The physical register with the result */
     fetch_parcel_t      fp;
     isa_decoded_t       dec;
 } rob_entry_t;
@@ -252,7 +252,7 @@ show_me(void)
 }
 
 static unsigned
-allocate_rob(int r, int pr, fetch_parcel_t fp)
+allocate_rob(int r, int pr, int pr_old, fetch_parcel_t fp)
 {
     unsigned rob_index = rob_wp;
 
@@ -260,7 +260,7 @@ allocate_rob(int r, int pr, fetch_parcel_t fp)
     assert((unsigned) pr < PHYSICAL_REGS);
 
     rob[rob_index] = (rob_entry_t) {
-        .r = r, .pr_old = pr, .committed = false,
+        .r = r, .pr = pr, .pr_old = pr_old, .committed = false,
         .fp = fp
     };
 
@@ -342,7 +342,11 @@ rollback_rob(int keep_rob_index)
 #else
 	free_reg(rat[rob[p].r]);
 #endif	    
-	rat[rob[p].r] = rob[p].pr_old;
+
+        if (rob[p].r != ISA_NO_REG) {
+            //fprintf(stderr, "%5d:rat[%d]: %d <- %d\n", rob[p].fp.seqno, rob[p].r, rob[p].pr_old, rat[rob[p].r]);
+            rat[rob[p].r] = rob[p].pr_old;
+        }
     } while (rob_rp != rob_wp);
 }
 
@@ -432,7 +436,7 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
             assert(0);
         }
 
-        if (re.pr != PR_SINK && prf[re.pr] != costate->r[re.r]) {
+        if (re.r != ISA_NO_REG && prf[re.pr] != costate->r[re.r]) {
             printf("COSIM: REF RES %08"PRIx64" != LSC RES %08"PRIx64"\n", prf[re.pr], costate->r[re.r]);
             assert(0);
         }
@@ -520,7 +524,8 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
         fetched.decode_ts = cycle;
 
         int           old_pr    = dec.dest_reg != ISA_NO_REG ? rat[dec.dest_reg] : PR_SINK;
-        unsigned      rob_index = allocate_rob(dec.dest_reg, old_pr, fetched);
+        int           pr        = dec.dest_reg != ISA_NO_REG ? alloc_reg()       : PR_SINK;
+        unsigned      rob_index = allocate_rob(dec.dest_reg, pr, old_pr, fetched);
 
         // Rename (XXX backpressure)
         micro_op_t mop = {
@@ -528,7 +533,7 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
             .dec     = dec,
             .pr_a    = rat[dec.source_reg_a],
             .pr_b    = rat[dec.source_reg_b],
-            .pr_wb   = dec.dest_reg == ISA_NO_REG ? PR_SINK : alloc_reg(),
+            .pr_wb   = pr,
             .rob_index = rob_index
         };
 
@@ -536,8 +541,10 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
         free_reg(old_pr);
 #endif
 
-        if (dec.dest_reg != ISA_NO_REG)
+        if (dec.dest_reg != ISA_NO_REG) {
+            //fprintf(stderr, "%5d:rat[%d]: %d -> %d\n", fetched.seqno, dec.dest_reg, rat[dec.dest_reg], mop.pr_wb);
             rat[dec.dest_reg] = mop.pr_wb;
+        }
 
         rob[rob_index].dec = dec;
         rob[rob_index].pr = mop.pr_wb;
