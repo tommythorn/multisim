@@ -27,6 +27,7 @@
  *
  * Perf:
  *
+ * - add an ART and flash restore the RAT on roll-back
  * - Allow loads to execute in the prescence of unretired, but non-overlapping stores
  * - .... Further, allow loads to execute as long as all earlier stores have committed (and forward as needed)
  * - crack stores into store data and store address
@@ -60,8 +61,8 @@
 #define ME_BUFFER_SIZE          8
 
 /*
- * Enable an alternative register scheme that is slightly simpler for
- * the rollback.
+ * Early release frees the old physical register at allocation time
+ * and roll-back then have to undo that (but this is cheap).
  */
 #define EARLY_RELEASE           1
 
@@ -137,6 +138,7 @@ typedef struct micro_op_st {
 static fetch_parcel_t   fb[FETCH_BUFFER_SIZE];
 static rob_entry_t      rob[ROB_SIZE];
 static unsigned         rat[32];
+static unsigned         art[32];
 static int64_t          prf[PHYSICAL_REGS];
 static bool             pr_ready[PHYSICAL_REGS]; // Scoreboard
 static unsigned         freelist[PHYSICAL_REGS];
@@ -170,7 +172,7 @@ free_reg(unsigned pr)
     {
         int p = freelist_rp;
         while (p != freelist_wp) {
-            assert(freelist[p] != pr);
+            //assert(freelist[p] != pr);
             if (++p == sizeof freelist / sizeof *freelist)
                 p = 0;
         }
@@ -281,7 +283,7 @@ allocate_rob(int r, int pr, int pr_old, fetch_parcel_t fp)
 static void
 visualize_retirement(cpu_state_t *state, rob_entry_t rob)
 {
-#define WIDTH 64
+#define WIDTH 32
 
     static int next_seqno = 0;
     char line[WIDTH+1];
@@ -329,25 +331,33 @@ rollback_rob(int keep_rob_index)
         rob_wp = p;
 
         if (rob[p].r == ISA_NO_REG)
-	    continue;
+            continue;
 
 
 #ifdef EARLY_RELEASE
-	// Undo the free'd register and the allocation
-	assert(freelist_wp != freelist_rp);
-	if (freelist_wp-- == 0)
-	    freelist_wp = sizeof freelist / sizeof *freelist - 1;
-	if (freelist_rp-- == 0)
-	    freelist_rp = sizeof freelist / sizeof *freelist - 1;
+        // Undo the free'd register and the allocation
+        assert(freelist_wp != freelist_rp);
+        if (freelist_wp-- == 0)
+            freelist_wp = sizeof freelist / sizeof *freelist - 1;
+        if (freelist_rp-- == 0)
+            freelist_rp = sizeof freelist / sizeof *freelist - 1;
 #else
-	free_reg(rat[rob[p].r]);
-#endif	    
+        free_reg(rat[rob[p].r]);
+#endif
 
         if (rob[p].r != ISA_NO_REG) {
             //fprintf(stderr, "%5d:rat[%d]: %d <- %d\n", rob[p].fp.seqno, rob[p].r, rob[p].pr_old, rat[rob[p].r]);
             rat[rob[p].r] = rob[p].pr_old;
         }
     } while (rob_rp != rob_wp);
+
+    if (memcmp(rat, art, sizeof rat) != 0) {
+        fprintf(stderr, "Uh oh:\n");
+        for (int i = 0; i < 32; ++i)
+            if (rat[i] != art[i])
+                fprintf(stderr, "  rat[%d] = %d, but art[%d] = %d\n", i, rat[i], i, art[i]);
+    }
+    assert(memcmp(rat, art, sizeof rat) == 0);
 }
 
 
@@ -412,10 +422,14 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
                         "                  EXCEPTION %"PRId64" (%08"PRId64") RAISED\n",
                         exception_info.code, exception_info.info);
 
-	    int prev_rob_pr = rob_rp == 0 ? ROB_SIZE - 1 : rob_rp - 1;
+            int prev_rob_pr = rob_rp == 0 ? ROB_SIZE - 1 : rob_rp - 1;
             flush_and_redirect(state, verbosity, prev_rob_pr, re.fp.seqno - 1,
                                arch->handle_exception(state, re.dec.insn_addr, exception_info));
             return;
+        }
+
+        if (re.r != ISA_NO_REG) {
+            art[re.r] = re.pr;
         }
 
         if (re.restart) {
@@ -781,6 +795,7 @@ run_lsc(int num_images, char *images[], verbosity_t verbosity)
         pr_ready[pr] = true;
     }
 
+    memcpy(art, rat, sizeof art);
     for (cycle = 0;; ++cycle) {
         if (verbosity) {
             //fprintf(stderr, "\nCycle #%d:\n", cycle);
