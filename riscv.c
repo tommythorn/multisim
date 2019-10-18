@@ -658,8 +658,10 @@ decode(uint64_t insn_addr, uint32_t insn)
 
     default:
     unhandled:
+        /*
         warn("Opcode %s not decoded, insn %08"PRIx32":%08x\n",
              opcode_name[i.r.opcode], (uint32_t)insn_addr, i.raw);
+        */
         break;
     }
 

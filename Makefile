@@ -31,6 +31,8 @@ OBJS=main.o arch.o \
 #VERB=-t
 VERB=-d
 
+regress: test_philo
+
 all: multisim
 
 boot: multisim

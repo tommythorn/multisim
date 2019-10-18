@@ -117,6 +117,10 @@ typedef struct rob_entry_st {
     uint64_t            restart_pc;
     bool                exception;
 
+
+    // For cosim
+    bool                mmio; // force reference model to follow us
+
     // For debugging (XXX well, I do use the seqno, but we could avoid that)
     fetch_parcel_t      fp;
     isa_decoded_t       dec;
@@ -358,6 +362,8 @@ rollback_rob(int keep_rob_index)
                 fprintf(stderr, "  rat[%d] = %d, but art[%d] = %d\n", i, rat[i], i, art[i]);
     }
     assert(memcmp(rat, art, sizeof rat) == 0);
+
+    exception_seqno = ~0ULL;
 }
 
 
@@ -445,13 +451,18 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
         uint64_t copc;
         do copc = costate->pc; while (step_simple(arch, costate) == 0);
 
+        bool override = re.mmio;
+
+        if (override && re.r != ISA_NO_REG)
+            costate->r[re.r] = prf[re.pr];
+
         if (re.dec.insn_addr != copc) {
-            printf("COSIM: REF PC %08"PRIx64" != LSC PC%08"PRIx64"\n", re.dec.insn_addr, copc);
+            printf("COSIM: REF PC %08"PRIx64" != LSC PC%08"PRIx64"\n", copc, re.dec.insn_addr);
             assert(0);
         }
 
         if (re.r != ISA_NO_REG && prf[re.pr] != costate->r[re.r]) {
-            printf("COSIM: REF RES %08"PRIx64" != LSC RES %08"PRIx64"\n", prf[re.pr], costate->r[re.r]);
+            printf("COSIM: REF RES %08"PRIx64" != LSC RES %08"PRIx64"\n", costate->r[re.r], prf[re.pr]);
             assert(0);
         }
 
@@ -571,6 +582,13 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
 }
 
 
+// XXX This should be architecture and platform specfic
+static bool
+is_mmio_space(cpu_state_t *state, uint64_t addr)
+{
+    return addr < 0x80000000;
+}
+
 static void
 lsc_exec1(cpu_state_t *state, verbosity_t verbosity, micro_op_t mop)
 {
@@ -585,6 +603,7 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, micro_op_t mop)
         : 0;
 
     uint64_t atomic_load_addr = op_a;
+    bool mmio = false;
 
     if (exc.raised)
         goto exception;
@@ -611,6 +630,7 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, micro_op_t mop)
         res.load_addr = CANONICALIZE(res.load_addr);
         res.result = arch->load(state, res.load_addr, mop.dec.loadstore_size, &exc);
         res.result = CANONICALIZE(res.result);
+        mmio = is_mmio_space(state, res.load_addr);
 
         if (exc.raised)
             goto exception;
@@ -678,6 +698,7 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, micro_op_t mop)
 
 exception:
     rob[mop.rob_index].committed = true;
+    rob[mop.rob_index].mmio = mmio;
 
     if (0 && state->verbosity & VERBOSE_DISASS) {
         char buf[20];
