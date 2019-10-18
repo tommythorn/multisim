@@ -118,6 +118,9 @@ typedef struct rob_entry_st {
     bool                exception;
 
 
+    uint64_t		store_addr;
+    uint64_t		store_data;
+    uint64_t		store_mask;
     // For cosim
     bool                mmio; // force reference model to follow us
 
@@ -337,7 +340,11 @@ rollback_rob(int keep_rob_index)
         if (rob[p].r == ISA_NO_REG)
             continue;
 
-
+	if (rob[p].dec.class == isa_insn_class_store)
+	    fprintf(stderr, "Rolling back store %08llx to address %08llx\n",
+		    rob[p].fp.addr,
+		    rob[p].store_addr);
+	
 #ifdef EARLY_RELEASE
         // Undo the free'd register and the allocation
         assert(freelist_wp != freelist_rp);
@@ -640,6 +647,9 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, micro_op_t mop)
     case isa_insn_class_store:
         res.store_addr = CANONICALIZE(res.store_addr);
         res.store_value = CANONICALIZE(res.store_value);
+	rob[mop.rob_index].store_addr = res.store_addr;
+	rob[mop.rob_index].store_data = res.store_value;
+	rob[mop.rob_index].store_mask = 0; // Xxx need this
         arch->store(state, res.store_addr, res.store_value, mop.dec.loadstore_size, &exc);
 
         if (exc.raised)
