@@ -507,9 +507,16 @@ decode(uint64_t insn_addr, uint32_t insn)
     case STORE:
         dec.class        = isa_insn_class_store;
         dec.loadstore_size = 1 << (i.s.funct3 & 3);
+	if (i.s.funct3 > 3)
+	    goto illegal;
         dec.source_reg_a = i.s.rs1;
         dec.source_reg_b = i.s.rs2;
         break;
+
+    illegal:
+      dec.system = true;
+      dec.class = isa_insn_class_compjump;
+      break;
 
     case STORE_FP:
         dec.class        = isa_insn_class_alu; // nop
@@ -596,7 +603,7 @@ decode(uint64_t insn_addr, uint32_t insn)
     }
 
     case SYSTEM:
-      dec.system = true;;
+      dec.system = true;
       switch (i.r.funct3) {
       case ECALLEBREAK:
           switch (i.i.imm11_0) {
@@ -980,7 +987,8 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
         return res;
 
     default:
-        warn("Opcode %s exec not implemented, insn %08"PRIx32":%08x "
+        if (0)
+	warn("Opcode %s exec not implemented, insn %08"PRIx32":%08x "
              "i{%x,%s,%x,%s,%s,%x}\n",
              opcode_name[i.r.opcode], (uint32_t)dec.insn_addr, i.raw,
              i.i.imm11_0, reg_name[i.r.rs1], i.r.funct3,

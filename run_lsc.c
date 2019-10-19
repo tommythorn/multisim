@@ -53,18 +53,18 @@
 
 //////// Configuration and magic numbers
 
-#define FETCH_BUFFER_SIZE       8
-#define FETCH_WIDTH             8
-#define ROB_SIZE               32
-#define PHYSICAL_REGS          64
-#define EX_BUFFER_SIZE          8
-#define ME_BUFFER_SIZE          8
+#define FETCH_BUFFER_SIZE       2
+#define FETCH_WIDTH             1
+#define ROB_SIZE              128
+#define PHYSICAL_REGS         128
+#define EX_BUFFER_SIZE          1
+#define ME_BUFFER_SIZE          1
 
 /*
  * Early release frees the old physical register at allocation time
  * and roll-back then have to undo that (but this is cheap).
  */
-#define EARLY_RELEASE           1
+//#define EARLY_RELEASE           1
 
 // Two special physical registers: the constant zero and the sink for
 // for r0 destination (is never read)
@@ -120,7 +120,7 @@ typedef struct rob_entry_st {
 
     uint64_t		store_addr;
     uint64_t		store_data;
-    uint64_t		store_mask;
+    uint8_t		store_size;
     // For cosim
     bool                mmio; // force reference model to follow us
 
@@ -162,6 +162,13 @@ static int              me_size;
 static uint64_t         exception_seqno = ~0ULL;
 static isa_exception_t  exception_info;
 static int              cycle;
+
+static char             letter_size[256] = {
+    [1] = 'B',
+    [2] = 'H',
+    [4] = 'W',
+    [8] = 'D',
+};
 
 ///////////////////////////////////////////////////////
 
@@ -337,14 +344,18 @@ rollback_rob(int keep_rob_index)
             break;
         rob_wp = p;
 
+	if (rob[p].dec.class == isa_insn_class_store && rob[p].store_size) {
+	    fprintf(stderr,
+		    "Rolling back %08"PRIx64" S%c (%08"PRIx64") = %08"PRIx64"\n",
+		    rob[p].fp.addr & 0xFFFFFFFF,
+		    letter_size[rob[p].store_size],
+		    rob[p].store_addr & 0xFFFFFFFF,
+		    rob[p].store_data & 0xFFFFFFFF);
+	}
+	
         if (rob[p].r == ISA_NO_REG)
             continue;
 
-	if (rob[p].dec.class == isa_insn_class_store)
-	    fprintf(stderr, "Rolling back store %08llx to address %08llx\n",
-		    rob[p].fp.addr,
-		    rob[p].store_addr);
-	
 #ifdef EARLY_RELEASE
         // Undo the free'd register and the allocation
         assert(freelist_wp != freelist_rp);
@@ -464,12 +475,14 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
             costate->r[re.r] = prf[re.pr];
 
         if (re.dec.insn_addr != copc) {
-            printf("COSIM: REF PC %08"PRIx64" != LSC PC%08"PRIx64"\n", copc, re.dec.insn_addr);
+            printf("COSIM: REF PC %08"PRIx64" != LSC PC %08"PRIx64"\n",
+		   copc & 0xFFFFFFFF, re.dec.insn_addr & 0xFFFFFFFF);
             assert(0);
         }
 
         if (re.r != ISA_NO_REG && prf[re.pr] != costate->r[re.r]) {
-            printf("COSIM: REF RES %08"PRIx64" != LSC RES %08"PRIx64"\n", costate->r[re.r], prf[re.pr]);
+            printf("COSIM: REF RES %08"PRIx64" != LSC RES %08"PRIx64"\n",
+		   costate->r[re.r] & 0xFFFFFFFF, prf[re.pr] & 0xFFFFFFFF);
             assert(0);
         }
 
@@ -649,7 +662,20 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, micro_op_t mop)
         res.store_value = CANONICALIZE(res.store_value);
 	rob[mop.rob_index].store_addr = res.store_addr;
 	rob[mop.rob_index].store_data = res.store_value;
-	rob[mop.rob_index].store_mask = 0; // Xxx need this
+	rob[mop.rob_index].store_size = mop.dec.loadstore_size;
+	assert(mop.dec.loadstore_size);
+	assert(rob[mop.rob_index].store_size);
+
+	int p = mop.rob_index;
+
+	fprintf(stderr,
+		"%08"PRIx64" S%c (%08"PRIx64") = %08"PRIx64"\n",
+		rob[p].fp.addr & 0xFFFFFFFF,
+		letter_size[rob[p].store_size],
+		rob[p].store_addr & 0xFFFFFFFF,
+		rob[p].store_data & 0xFFFFFFFF);
+
+	// XXX Obviously we can't do this here ... unless we can undo it later?
         arch->store(state, res.store_addr, res.store_value, mop.dec.loadstore_size, &exc);
 
         if (exc.raised)
