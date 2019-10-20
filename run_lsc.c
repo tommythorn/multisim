@@ -125,8 +125,7 @@ typedef struct rob_entry_st {
 
 
     uint64_t            store_addr;
-    uint64_t            store_data;
-    uint8_t             store_size;
+    int                 store_data_pr;
     // For cosim
     bool                mmio; // force reference model to follow us
 
@@ -168,6 +167,7 @@ static int              me_size;
 static uint64_t         exception_seqno = ~0ULL;
 static isa_exception_t  exception_info;
 static int              cycle;
+static int              pending_stores;
 
 static char             letter_size[256] = {
     [1] = 'B',
@@ -350,16 +350,6 @@ rollback_rob(int keep_rob_index, verbosity_t verbosity)
             break;
         rob_wp = p;
 
-        if (verbosity & VERBOSE_DISASS)
-            if (rob[p].dec.class == isa_insn_class_store && rob[p].store_size) {
-                fprintf(stderr,
-                        "Rolling back %08"PRIx64" S%c (%08"PRIx64") = %08"PRIx64"\n",
-                        rob[p].fp.addr & 0xFFFFFFFF,
-                        letter_size[rob[p].store_size],
-                        rob[p].store_addr & 0xFFFFFFFF,
-                        rob[p].store_data & 0xFFFFFFFF);
-            }
-
         if (rob[p].r == ISA_NO_REG)
             continue;
 
@@ -387,6 +377,7 @@ rollback_rob(int keep_rob_index, verbosity_t verbosity)
     assert(memcmp(rat, art, sizeof rat) == 0);
 
     exception_seqno = ~0ULL;
+    pending_stores = 0;
 }
 
 
@@ -443,6 +434,30 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
 
         if (verbosity & VERBOSE_DISASS) {
             visualize_retirement(state, re);
+        }
+
+        if (re.dec.class == isa_insn_class_store && !re.exception) {
+
+            assert(pr_ready[re.store_data_pr]);
+            assert(0 < pending_stores);
+
+            if (verbosity & VERBOSE_DISASS)
+                fprintf(stderr,
+                        "%08"PRIx64" S%c (%08"PRIx64") = %08"PRIx64"\n",
+                        re.fp.addr        & 0xFFFFFFFF,
+                        letter_size[re.dec.loadstore_size],
+                        re.store_addr     & 0xFFFFFFFF,
+                        prf[re.store_data_pr] & 0xFFFFFFFF);
+
+            isa_exception_t exc = { 0 };
+            arch->store(state, re.store_addr, prf[re.store_data_pr],
+                        re.dec.loadstore_size, &exc);
+            --pending_stores;
+
+            if (exc.raised) {
+                re.exception = true;
+                exception_info = exc;
+            }
         }
 
         if (re.exception) {
@@ -663,30 +678,7 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, micro_op_t mop)
         break;
 
     case isa_insn_class_store:
-        res.store_addr = CANONICALIZE(res.store_addr);
-        res.store_value = CANONICALIZE(res.store_value);
-        rob[mop.rob_index].store_addr = res.store_addr;
-        rob[mop.rob_index].store_data = res.store_value;
-        rob[mop.rob_index].store_size = mop.dec.loadstore_size;
-        assert(mop.dec.loadstore_size);
-        assert(rob[mop.rob_index].store_size);
-
-        int p = mop.rob_index;
-
-        if (verbosity & VERBOSE_DISASS)
-            fprintf(stderr,
-                    "%08"PRIx64" S%c (%08"PRIx64") = %08"PRIx64"\n",
-                    rob[p].fp.addr & 0xFFFFFFFF,
-                    letter_size[rob[p].store_size],
-                    rob[p].store_addr & 0xFFFFFFFF,
-                    rob[p].store_data & 0xFFFFFFFF);
-
-        // XXX Obviously we can't do this here ... unless we can undo it later?
-        arch->store(state, res.store_addr, res.store_value, mop.dec.loadstore_size, &exc);
-
-        if (exc.raised)
-            goto exception;
-
+        assert(0);
         break;
 
     case isa_insn_class_atomic:
@@ -756,15 +748,9 @@ static void
 lsc_execute(cpu_state_t *state, verbosity_t verbosity)
 {
     bool ex_ready[EX_BUFFER_SIZE];
-    bool me_ready[ME_BUFFER_SIZE];
     for (int i = 0; i < ex_size; ++i) {
         micro_op_t mop = ex_buffer[i];
         ex_ready[i] = pr_ready[mop.pr_a] & pr_ready[mop.pr_b];
-    }
-
-    for (int i = 0; i < me_size; ++i) {
-        micro_op_t mop = me_buffer[i];
-        me_ready[i] = pr_ready[mop.pr_a] & pr_ready[mop.pr_b];
     }
 
     /* Schedule and Execute */
@@ -781,10 +767,53 @@ lsc_execute(cpu_state_t *state, verbosity_t verbosity)
 
     // ME has to be in order
     int p;
-    for (p = 0; p < me_size && me_ready[p]; ++p) {
+    for (p = 0; p < me_size; ++p) {
+        micro_op_t mop = me_buffer[p];
+
+        if (mop.dec.class == isa_insn_class_store) {
+            if (!pr_ready[mop.pr_a])
+                break;
+
+            uint64_t op_a = prf[mop.pr_a];
+            isa_exception_t exc = { 0 };
+            isa_result_t res = arch->insn_exec(mop.dec, op_a, 0, 0, &exc);
+
+            // Don't actually perform the store until retirement
+            rob[mop.rob_index].store_addr = CANONICALIZE(res.store_addr);
+            rob[mop.rob_index].store_data_pr = mop.pr_b;
+            rob[mop.rob_index].fp.execute_ts = cycle;
+            rob[mop.rob_index].fp.commit_ts = cycle;
+            rob[mop.rob_index].committed = true;
+
+            if (exc.raised) {
+                rob[mop.rob_index].exception = true;
+
+                if (mop.fetched.seqno < exception_seqno) {
+                    exception_seqno = mop.fetched.seqno;
+                    exception_info  = exc;
+                }
+            }
+
+            ++pending_stores;
+            continue;
+        }
+
+        if (mop.dec.class == isa_insn_class_load && 0 < pending_stores) {
+            if (verbosity & VERBOSE_DISASS)
+                fprintf(stderr,
+                        "%08x L%c blocked by %d pending stores\n",
+                        (uint32_t) mop.fetched.addr,
+                        letter_size[mop.dec.loadstore_size],
+                        pending_stores);
+            break;
+        }
+
+        if (!pr_ready[mop.pr_a] | !pr_ready[mop.pr_b])
+            break;
+
         lsc_exec1(state, verbosity, me_buffer[p]);
-        rob[me_buffer[p].rob_index].fp.execute_ts = cycle;
-        rob[me_buffer[p].rob_index].fp.commit_ts = cycle;
+        rob[mop.rob_index].fp.execute_ts = cycle;
+        rob[mop.rob_index].fp.commit_ts = cycle;
     }
 
     if (p == 0)
