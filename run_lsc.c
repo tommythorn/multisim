@@ -29,7 +29,8 @@
  *
  * - add an ART and flash restore the RAT on roll-back
  * - Allow loads to execute in the prescence of unretired, but non-overlapping stores
- * - .... Further, allow loads to execute as long as all earlier stores have committed (and forward as needed)
+ * - .... Further, allow loads to execute as long as all earlier stores have committed
+ *   (and forward as needed)
  * - crack stores into store data and store address
  *
  * - Predict branches
@@ -332,7 +333,7 @@ visualize_retirement(cpu_state_t *state, rob_entry_t rob)
  */
 
 static void
-rollback_rob(int keep_rob_index)
+rollback_rob(int keep_rob_index, verbosity_t verbosity)
 {
     do {
         unsigned p = rob_wp;
@@ -344,15 +345,16 @@ rollback_rob(int keep_rob_index)
             break;
         rob_wp = p;
 
-	if (rob[p].dec.class == isa_insn_class_store && rob[p].store_size) {
-	    fprintf(stderr,
-		    "Rolling back %08"PRIx64" S%c (%08"PRIx64") = %08"PRIx64"\n",
-		    rob[p].fp.addr & 0xFFFFFFFF,
-		    letter_size[rob[p].store_size],
-		    rob[p].store_addr & 0xFFFFFFFF,
-		    rob[p].store_data & 0xFFFFFFFF);
-	}
-	
+        if (verbosity & VERBOSE_DISASS)
+            if (rob[p].dec.class == isa_insn_class_store && rob[p].store_size) {
+                fprintf(stderr,
+                        "Rolling back %08"PRIx64" S%c (%08"PRIx64") = %08"PRIx64"\n",
+                        rob[p].fp.addr & 0xFFFFFFFF,
+                        letter_size[rob[p].store_size],
+                        rob[p].store_addr & 0xFFFFFFFF,
+                        rob[p].store_data & 0xFFFFFFFF);
+            }
+
         if (rob[p].r == ISA_NO_REG)
             continue;
 
@@ -394,7 +396,7 @@ flush_and_redirect(cpu_state_t *state, verbosity_t verbosity, int rob_index, uns
     ex_size = 0;
     me_size = 0;
 
-    rollback_rob(rob_index);
+    rollback_rob(rob_index, verbosity);
 
     state->pc = new_pc;
     fetch_seqno = seqno + 1;
@@ -668,12 +670,13 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, micro_op_t mop)
 
 	int p = mop.rob_index;
 
-	fprintf(stderr,
-		"%08"PRIx64" S%c (%08"PRIx64") = %08"PRIx64"\n",
-		rob[p].fp.addr & 0xFFFFFFFF,
-		letter_size[rob[p].store_size],
-		rob[p].store_addr & 0xFFFFFFFF,
-		rob[p].store_data & 0xFFFFFFFF);
+        if (verbosity & VERBOSE_DISASS)
+            fprintf(stderr,
+                    "%08"PRIx64" S%c (%08"PRIx64") = %08"PRIx64"\n",
+                    rob[p].fp.addr & 0xFFFFFFFF,
+                    letter_size[rob[p].store_size],
+                    rob[p].store_addr & 0xFFFFFFFF,
+                    rob[p].store_data & 0xFFFFFFFF);
 
 	// XXX Obviously we can't do this here ... unless we can undo it later?
         arch->store(state, res.store_addr, res.store_value, mop.dec.loadstore_size, &exc);
