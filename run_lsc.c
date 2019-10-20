@@ -21,13 +21,16 @@
  *
  * Correctness:
  *
- * - Introduce store buffers and only write store data to memory at retirement
- * - Force cosim match on IO memory locations (pick one to do IO and
- *   let the other follow)
+ * - Misspeculated stores corrupt the memory.  Solutions from simplest to most advanced:
+ *   0. block stores until retirement.  Block loads if there are any pending stores.
+ *   1. Same but, block loads only if there are overlapping stores.
+ *   2. Same but, forward completely overlapping stores with known data.
+ *   ...
+ *   ?. Track unresolved stores
+ *   ?. ... and loads (full OOO)
  *
  * Perf:
  *
- * - add an ART and flash restore the RAT on roll-back
  * - Allow loads to execute in the prescence of unretired, but non-overlapping stores
  * - .... Further, allow loads to execute as long as all earlier stores have committed
  *   (and forward as needed)
@@ -40,6 +43,8 @@
  *
  * - Don't depend on seqno outside of self-checking and visualization
  * - Review what's tracked in data structures
+ * - wp/rp vs head/tail
+ * - fp vs fetched
  */
 
 #include <stdio.h>
