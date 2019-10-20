@@ -374,10 +374,8 @@ rollback_rob(int keep_rob_index, verbosity_t verbosity)
         free_reg(rat[rob[p].r]);
 #endif
 
-        if (rob[p].r != ISA_NO_REG) {
-            //fprintf(stderr, "%5d:rat[%d]: %d <- %d\n", rob[p].fp.seqno, rob[p].r, rob[p].pr_old, rat[rob[p].r]);
+        if (rob[p].r != ISA_NO_REG)
             rat[rob[p].r] = rob[p].pr_old;
-        }
     } while (rob_rp != rob_wp);
 
     if (memcmp(rat, art, sizeof rat) != 0) {
@@ -743,13 +741,6 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, micro_op_t mop)
 exception:
     rob[mop.rob_index].committed = true;
     rob[mop.rob_index].mmio = mmio;
-
-    if (0 && state->verbosity & VERBOSE_DISASS) {
-        char buf[20];
-        snprintf(buf, sizeof buf, "[pr%d=pr%d,pr%d]", mop.pr_wb, mop.pr_a, mop.pr_b);
-        fprintf(stderr, "%5d  EX %-16s %5d %d ", cycle, buf, mop.fetched.seqno, state->priv);
-        isa_disass(arch, mop.dec, (isa_result_t) { .result = prf[mop.pr_wb] });
-    }
 
     if (exc.raised) {
         rob[mop.rob_index].exception = true;
