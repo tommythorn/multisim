@@ -729,8 +729,8 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, micro_op_t mop)
     if (mop.dec.dest_msr != ISA_NO_REG)
         arch->write_msr(state, mop.dec.dest_msr, res.msr_result, &exc);
 
-    // Flush the pipe on system instructions
-    if (mop.dec.system) {
+    // Flush the pipe on system instructions unless is a compjump
+    if (mop.dec.system && mop.dec.class != isa_insn_class_compjump) {
         rob[mop.rob_index].restart = true;
         rob[mop.rob_index].restart_pc = mop.dec.insn_addr + 4;
     }
