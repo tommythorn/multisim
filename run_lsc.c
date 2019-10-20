@@ -124,9 +124,9 @@ typedef struct rob_entry_st {
     bool                exception;
 
 
-    uint64_t		store_addr;
-    uint64_t		store_data;
-    uint8_t		store_size;
+    uint64_t            store_addr;
+    uint64_t            store_data;
+    uint8_t             store_size;
     // For cosim
     bool                mmio; // force reference model to follow us
 
@@ -483,13 +483,13 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
 
         if (re.dec.insn_addr != copc) {
             printf("COSIM: REF PC %08"PRIx64" != LSC PC %08"PRIx64"\n",
-		   copc & 0xFFFFFFFF, re.dec.insn_addr & 0xFFFFFFFF);
+                   copc & 0xFFFFFFFF, re.dec.insn_addr & 0xFFFFFFFF);
             assert(0);
         }
 
         if (re.r != ISA_NO_REG && prf[re.pr] != costate->r[re.r]) {
             printf("COSIM: REF RES %08"PRIx64" != LSC RES %08"PRIx64"\n",
-		   costate->r[re.r] & 0xFFFFFFFF, prf[re.pr] & 0xFFFFFFFF);
+                   costate->r[re.r] & 0xFFFFFFFF, prf[re.pr] & 0xFFFFFFFF);
             assert(0);
         }
 
@@ -667,13 +667,13 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, micro_op_t mop)
     case isa_insn_class_store:
         res.store_addr = CANONICALIZE(res.store_addr);
         res.store_value = CANONICALIZE(res.store_value);
-	rob[mop.rob_index].store_addr = res.store_addr;
-	rob[mop.rob_index].store_data = res.store_value;
-	rob[mop.rob_index].store_size = mop.dec.loadstore_size;
-	assert(mop.dec.loadstore_size);
-	assert(rob[mop.rob_index].store_size);
+        rob[mop.rob_index].store_addr = res.store_addr;
+        rob[mop.rob_index].store_data = res.store_value;
+        rob[mop.rob_index].store_size = mop.dec.loadstore_size;
+        assert(mop.dec.loadstore_size);
+        assert(rob[mop.rob_index].store_size);
 
-	int p = mop.rob_index;
+        int p = mop.rob_index;
 
         if (verbosity & VERBOSE_DISASS)
             fprintf(stderr,
@@ -683,7 +683,7 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, micro_op_t mop)
                     rob[p].store_addr & 0xFFFFFFFF,
                     rob[p].store_data & 0xFFFFFFFF);
 
-	// XXX Obviously we can't do this here ... unless we can undo it later?
+        // XXX Obviously we can't do this here ... unless we can undo it later?
         arch->store(state, res.store_addr, res.store_value, mop.dec.loadstore_size, &exc);
 
         if (exc.raised)
