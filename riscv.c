@@ -492,6 +492,7 @@ decode(uint64_t insn_addr, uint32_t insn)
         break;
 
     case MISC_MEM:
+        dec.system       = true;
         dec.class        = isa_insn_class_branch;
         break;
 
@@ -943,9 +944,6 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
         res.result = i.u.imm31_12 << 12;
         return res;
 
-    case MISC_MEM:
-        break;
-
     case BRANCH:
         switch (i.sb.funct3) {
         case BEQ:
@@ -1075,6 +1073,9 @@ insn_exec_system(cpu_state_t *s, isa_decoded_t dec, uint64_t op_a_u, uint64_t op
         default:
             assert(0);
         }
+        break;
+
+    case MISC_MEM:
         break;
 
     default:
