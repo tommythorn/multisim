@@ -156,6 +156,9 @@ static unsigned         freelist[PHYSICAL_REGS];
 static micro_op_t       ex_buffer[EX_BUFFER_SIZE];
 static micro_op_t       me_buffer[ME_BUFFER_SIZE];
 
+static unsigned         tar[PHYSICAL_REGS];  // XXX for debug, a reverse rat
+
+
 static const arch_t    *arch;
 static unsigned         fetch_seqno;
 static int              fb_rp = 0, fb_wp = 0, fb_size = 0;
@@ -221,6 +224,8 @@ alloc_reg(void)
     pr_ready[pr] = false;
     --n_free_regs;
 
+    assert(tar[pr] == ISA_NO_REG);
+
     return pr;
 }
 
@@ -284,6 +289,9 @@ allocate_rob(int r, int pr, int pr_old, fetch_parcel_t fp)
 
     assert(r == ISA_NO_REG || (unsigned) r < 32);  // XXX should be part of the arch
     assert((unsigned) pr < PHYSICAL_REGS);
+
+    if (r != ISA_NO_REG)
+        assert(tar[pr_old] != ISA_NO_REG); // <<< This fires!
 
     rob[rob_index] = (rob_entry_t) {
         .r = r, .pr = pr, .pr_old = pr_old, .committed = false,
@@ -374,6 +382,7 @@ rollback_rob(int keep_rob_index, verbosity_t verbosity)
         if (rob[p].r == ISA_NO_REG)
             continue;
 
+        tar[rob[p].pr] = ISA_NO_REG;
 #ifdef EARLY_RELEASE
         // Undo the free'd register and the allocation
         assert(freelist_wp != freelist_rp);
@@ -386,8 +395,11 @@ rollback_rob(int keep_rob_index, verbosity_t verbosity)
         free_reg(rat[rob[p].r]);
 #endif
 
-        if (rob[p].r != ISA_NO_REG)
+        if (rob[p].r != ISA_NO_REG) {
             rat[rob[p].r] = rob[p].pr_old;
+            assert(tar[rob[p].pr_old] != ISA_NO_REG); // <<< This fires!
+            tar[rob[p].pr_old] += 32; // Mark as architectural
+        }
     } while (rob_rp != rob_wp);
 
     if (memcmp(rat, art, sizeof rat) != 0) {
@@ -490,14 +502,15 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
                         "                  EXCEPTION %"PRId64" (%08"PRId64") RAISED\n",
                         exception_info.code, exception_info.info);
 
-            int prev_rob_pr = rob_rp == 0 ? ROB_SIZE - 1 : rob_rp - 1;
-            flush_and_redirect(state, verbosity, prev_rob_pr, re.fp.seqno - 1,
+            int prev_rob_rp = rob_rp == 0 ? ROB_SIZE - 1 : rob_rp - 1;
+            flush_and_redirect(state, verbosity, prev_rob_rp, re.fp.seqno - 1,
                                arch->handle_exception(state, re.dec.insn_addr, exception_info));
             break;
         }
 
         if (re.r != ISA_NO_REG) {
             art[re.r] = re.pr;
+            tar[re.pr_old] = ISA_NO_REG;
         }
 
         if (re.restart) {
@@ -621,6 +634,9 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
 
         fetched.decode_ts = n_cycles;
 
+        if (dec.dest_reg != ISA_NO_REG)
+            assert(tar[rat[dec.dest_reg]] != ISA_NO_REG); // <<< This fires!
+
         int           old_pr    = dec.dest_reg != ISA_NO_REG ? rat[dec.dest_reg] : PR_SINK;
         int           pr        = dec.dest_reg != ISA_NO_REG ? alloc_reg()       : PR_SINK;
         unsigned      rob_index = allocate_rob(dec.dest_reg, pr, old_pr, fetched);
@@ -637,12 +653,18 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
 
 #ifdef EARLY_RELEASE
         free_reg(old_pr);
-        if (old_pr != PR_SINK && old_pr != PR_ZERO)
+        if (old_pr != PR_SINK && old_pr != PR_ZERO) {
             --n_free_regs;
+            assert(tar[old_pr] != ISA_NO_REG);
+            // tar[old_pr] = ISA_NO_REG; No, that's exactly wrong.  The register is still alive
+        }
 #endif
 
-        if (dec.dest_reg != ISA_NO_REG)
+        if (dec.dest_reg != ISA_NO_REG) {
             rat[dec.dest_reg] = mop.pr_wb;
+            assert(tar[mop.pr_wb] == ISA_NO_REG);
+            tar[mop.pr_wb] = dec.dest_reg;
+        }
 
         rob[rob_index].dec = dec;
         rob[rob_index].pr = mop.pr_wb;
@@ -900,13 +922,19 @@ run_lsc(int num_images, char *images[], verbosity_t verbosity)
     pr_ready[PR_ZERO] = true;
 
     freelist_wp = freelist_rp = n_free_regs = 0;
-    for (unsigned pr = 0; pr < PHYSICAL_REGS; ++pr)
+    for (unsigned pr = 0; pr < PHYSICAL_REGS; ++pr) {
         free_reg(pr);
+        tar[pr] = ISA_NO_REG;
+    }
+    tar[PR_ZERO] = 0;
+    tar[PR_SINK] = -2;
 
     rat[0] = PR_ZERO;
     for (int i = 1; i < 32; ++i) {
         int pr       = alloc_reg();
         rat[i]       = pr;
+        tar[pr]      = i;
+
         prf[pr]      = state->r[i];
         pr_ready[pr] = true;
     }
