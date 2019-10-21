@@ -50,7 +50,6 @@ static const bool debug_cache = false;
 
 static const int debug   = 0;
 static const int info    = 0;
-static const int error   = 1;
 
 #define DEBUG(...)   ({ if (debug)  fprintf(stderr, __VA_ARGS__); })
 #define INFO(...)    ({ if (info)   fprintf(stderr, __VA_ARGS__); })
@@ -1190,13 +1189,13 @@ static uint64_t read_msr(cpu_state_t *s, unsigned csrno, isa_exception_t *exc)
 static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value, isa_exception_t *exc)
 {
     if (s->priv < ((csrno >> 8) & 3) || (csrno & 0xc00) == 0xc00) {
-        ERROR("  Illegal Write of CSR %3x\n", csrno);
         raise_exception(EXCP_INSN_ILLEGAL, 0, exc); // XXX is that legal?
         return;
     }
 
     s->msr[csrno] = value & csr_mask[csrno] | s->msr[csrno] & ~csr_mask[csrno];
 
+/*
     DEBUG("  Write CSR %s <- %"PRIx64"\n", csr_name[csrno], s->msr[csrno]);
 
     if (csrno == CSR_CYCLE)
@@ -1204,6 +1203,7 @@ static void write_msr(cpu_state_t *s, unsigned csrno, uint64_t value, isa_except
 
     if (value & ~s->msr[csrno])
         DEBUG("    NB: bits %"PRIx64" are masked off\n", value & ~s->msr[csrno]);
+*/
 
     switch (csrno) {
     default:
@@ -1395,7 +1395,6 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, isa_exception_t *exc
         mem_access_size = 4, ifetch = true;
 
     if (address & (abs(mem_access_size) - 1)) {
-        ERROR("  load from unaligned physical address %08"PRIx32"\n", (uint32_t)address);
         raise_exception(EXCP_LOAD_MISALIGN, address, exc);
         return 0;
     }
@@ -1467,7 +1466,6 @@ static void
 store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, isa_exception_t *exc)
 {
     if (address & (mem_access_size - 1)) {
-        ERROR("  store to unaligned physical address %08"PRIx32"\n", (uint32_t)address);
         raise_exception(EXCP_STORE_MISALIGN, address, exc);
         return;
     }
@@ -1499,7 +1497,6 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, isa
         p = memory_physical(s->mem, address, mem_access_size);
 
     if (!p) {
-        ERROR("  store to illegal physical memory %08"PRIx32"\n", (uint32_t)address);
         raise_exception(EXCP_STORE_ACCESS_FAULT, address, exc);
         return;
     }
