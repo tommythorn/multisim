@@ -61,8 +61,9 @@ void usage(char *program)
             "  where options can be one or more of\n"
             "\n"
             "  -i<diskimage>\n"
-            "  -d   disassemble executed instructions\n"
-            "  -c   compliance\n",
+            "  -d      disassemble executed instructions\n"
+            "  -o=$X   options\n"
+            "  -c      compliance\n",
             program);
 
     for (i = 0; long_options[i].name; ++i) {
@@ -94,6 +95,12 @@ int main(int argc, char **argv)
         switch (c) {
         case 0:
             break;
+
+	case 'o': {
+	    int arg = atoi(optarg);
+            CONFIG_EARLY_RELEASE = (arg & 1) == 1;
+	    break;
+        }
 
 	case 'i':
 	    disk_image = optarg;

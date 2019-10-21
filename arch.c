@@ -35,46 +35,46 @@ const char *class_names[] = {
 };
 
 void
-isa_disass(const arch_t *arch, isa_decoded_t dec, isa_result_t res)
+isa_disass(FILE *out, const arch_t *arch, isa_decoded_t dec, isa_result_t res)
 {
     char dis_buf[99];
 
-    fprintf(stderr, "%08x %08x ", (uint32_t) dec.insn_addr, dec.insn);
+    fprintf(out, "%08x %08x ", (uint32_t) dec.insn_addr, dec.insn);
 
     if (dec.dest_reg == ISA_NO_REG)
-        fprintf(stderr, "%8s ", "");
+        fprintf(out, "%8s ", "");
     else
-        fprintf(stderr, "%08x ", (uint32_t)res.result);
+        fprintf(out, "%08x ", (uint32_t)res.result);
 
     arch->disass_insn(dec.insn_addr, dec.insn, dis_buf, sizeof dis_buf);
-    fprintf(stderr, "%s\n", dis_buf);
+    fprintf(out, "%s\n", dis_buf);
 
     if (0)
     switch (dec.class) {
     case isa_insn_class_load:
         if (dec.dest_reg != ISA_NO_REG)
-            fprintf(stderr, "%-36s %s <~ 0x%08x [0x%08x]",
+            fprintf(out, "%-36s %s <~ 0x%08x [0x%08x]",
                     dis_buf, arch->reg_name[dec.dest_reg], (uint32_t)res.result, (uint32_t)res.load_addr);
         else
-            fprintf(stderr, "%-36s  <~ 0x%08x [0x%08x]",
+            fprintf(out, "%-36s  <~ 0x%08x [0x%08x]",
                     dis_buf, (uint32_t)res.result, (uint32_t)res.load_addr);
         break;
 
     case isa_insn_class_store:
-        fprintf(stderr, "%-36s [0x%08x] <- 0x%08x", dis_buf, (uint32_t)res.store_addr, (uint32_t)res.store_value);
+        fprintf(out, "%-36s [0x%08x] <- 0x%08x", dis_buf, (uint32_t)res.store_addr, (uint32_t)res.store_value);
         break;
 
     default:
         if (dec.dest_reg != ISA_NO_REG || dec.dest_msr != ISA_NO_REG)
-            fprintf(stderr, "%-36s", dis_buf);
+            fprintf(out, "%-36s", dis_buf);
         else
-            fprintf(stderr, "%s", dis_buf);
+            fprintf(out, "%s", dis_buf);
 
         if (dec.dest_reg != ISA_NO_REG)
-            fprintf(stderr, " %s <- 0x%08x", arch->reg_name[dec.dest_reg], (uint32_t)res.result);
+            fprintf(out, " %s <- 0x%08x", arch->reg_name[dec.dest_reg], (uint32_t)res.result);
 
         if (dec.dest_msr != ISA_NO_REG)
-            fprintf(stderr, " MSR%04x <- 0x%08x", dec.dest_msr, (uint32_t)res.msr_result);
+            fprintf(out, " MSR%04x <- 0x%08x", dec.dest_msr, (uint32_t)res.msr_result);
         break;
     }
 

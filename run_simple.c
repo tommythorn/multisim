@@ -32,7 +32,7 @@
  * Step_simple returns the number of instructions executed
  */
 int
-step_simple(const arch_t *arch, cpu_state_t *state)
+step_simple(const arch_t *arch, cpu_state_t *state, cpu_state_t *cosimstate)
 {
     isa_exception_t exc = { 0 };
     uint64_t pc = state->pc;
@@ -145,7 +145,7 @@ step_simple(const arch_t *arch, cpu_state_t *state)
 exception:
     if (state->verbosity & VERBOSE_DISASS) {
         fprintf(stderr, "%d ", state->priv);
-        isa_disass(arch, dec, res);
+        isa_disass(stderr, arch, dec, res);
     }
 
     if (exc.raised) {
@@ -157,7 +157,7 @@ exception:
         state->pc = arch->handle_exception(state, dec.insn_addr, exc);
     }
 
-    arch->tick(state, 1);
+    arch->tick(state, 1, cosimstate);
 
     return exc.raised ? 0 : 1;
 }
@@ -197,7 +197,7 @@ void run_simple(int num_images, char *images[], verbosity_t verbosity)
     getelfsym(&info, "tohost", &tohost);
 
     for (;;) {
-        if (step_simple(arch, state) == 0)
+        if (step_simple(arch, state, false) == 0)
             continue;
 
 	if (simple_htif(arch, state, verbosity, tohost))

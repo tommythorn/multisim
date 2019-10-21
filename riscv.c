@@ -1145,18 +1145,24 @@ static void check_for_interrupts(cpu_state_t *s) {
 
 
 /* executed every cycle */
-static void tick(cpu_state_t *s, int instret)
+static void tick(cpu_state_t *s, int instret, cpu_state_t *cosimstate)
 {
-    s->counter += 1;
-    // XXX for now, an instruction per tick
-    s->msr[CSR_MINSTRET] = (uint32_t) (s->msr[CSR_MINSTRET] + instret);
-    s->msr[CSR_MCYCLE]   = (uint32_t) (s->msr[CSR_MCYCLE]   + 1);
+    if (cosimstate) {
+        s->msr[CSR_MINSTRET] = cosimstate->msr[CSR_MINSTRET];
+        s->msr[CSR_MCYCLE]   = cosimstate->msr[CSR_MCYCLE];
+        s->msr[CSR_MIP]      = cosimstate->msr[CSR_MIP];
+    } else {
+        s->counter += 1;
+        // XXX for now, an instruction per tick
+        s->msr[CSR_MINSTRET] = (uint32_t) (s->msr[CSR_MINSTRET] + instret);
+        s->msr[CSR_MCYCLE]   = (uint32_t) (s->msr[CSR_MCYCLE]   + 1);
 
-    // mtime on QEMU runs at 10 MHz.  Let's pretend our processors runs at 1 MHz
-    if ((s->counter & 0) == 0) {
-        s->mtimereg[0] += 10;
-        if (s->mtimereg[0] >= s->mtimereg[1])
-            s->msr[CSR_MIP] |= MIP_MTIP;}
+        // mtime on QEMU runs at 10 MHz.  Let's pretend our processors runs at 1 MHz
+        if ((s->counter & 0) == 0) {
+            s->mtimereg[0] += 10;
+            if (s->mtimereg[0] >= s->mtimereg[1])
+                s->msr[CSR_MIP] |= MIP_MTIP;}
+    }
 
     check_for_interrupts(s);}
 

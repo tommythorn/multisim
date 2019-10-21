@@ -191,9 +191,11 @@ typedef struct isa_st {
     /*
      * tick() advances the state of any devices that run
      * asynchronously with the CPU.  Provide it with the number of
-     * instruction retired this cycle.
+     * instruction retired this cycle.  If cosimstate is non-null, it
+     * overrides the asynchronous part of the state (which can't be
+     * cosimulated).
      */
-    void (*tick)(cpu_state_t *state, int instret);
+    void (*tick)(cpu_state_t *state, int instret, cpu_state_t *cosimstate);
 
     /*
      * read_msr() is the MSR equivalent of the register read.  However
@@ -220,7 +222,7 @@ typedef struct isa_st {
 
 const arch_t *get_arch(uint16_t machine, bool is_64bit);
 
-void isa_disass(const arch_t *, isa_decoded_t, isa_result_t);
+void isa_disass(FILE *out, const arch_t *, isa_decoded_t, isa_result_t);
 
 #endif
 
