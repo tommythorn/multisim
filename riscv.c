@@ -612,8 +612,11 @@ decode(uint64_t insn_addr, uint32_t insn)
           case EBREAK:
           case SRET:
           case MRET:
-              // XXX but it has a speculation barrier not accounted for
               dec.class = isa_insn_class_compjump;
+              break;
+
+          case WFI:
+              dec.class = isa_insn_class_alu;
               break;
           }
           break;
