@@ -31,27 +31,9 @@ OBJS=main.o arch.o \
 #VERB=-t
 VERB=-d
 
-regress: test_philo
+regress: test_hello
 
 all: multisim
-
-boot: multisim
-	./multisim ~/BTSync/RISCV/vmlinux
-
-boot_linux: multisim
-	./multisim $(VERB) ../workloads/vmlinux.lm32
-
-sieve_lm32: multisim
-	./multisim $(VERB) ../workloads/sieve.lm32
-
-sieve_alpha: multisim
-	./multisim $(VERB) ../workloads/sieve.alpha
-
-sieve_riscv: multisim
-	./multisim $(VERB) ../workloads/sieve.riscv
-
-install: multisim
-	cp multisim $(PREFIX)/bin
 
 multisim: $(OBJS)
 	$(CC) $(LDFLAGS) $^ -o $@
@@ -65,10 +47,8 @@ realclean: clean
 TAGS:
 	etags *.[hc]
 
-regress: multisim
-	./multisim -1 ../workloads/sieve.alpha
-	./multisim -2 ../workloads/sieve.alpha
-	./multisim -3 ../workloads/sieve.alpha
+test_hello: multisim
+	./multisim -d --lsc workloads/zephyr/hello_world.elf
 
 test_lsc: multisim
 	./multisim -d --lsc workloads/riscv-tests/rv32ui-p-lw

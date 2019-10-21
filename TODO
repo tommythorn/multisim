@@ -4,7 +4,7 @@
    neccessary to break up the monolit into a library (which like would
    also make this cleaner).
 
- - RV64GC, eventually? 
+ - RV64GC, eventually?
 
  - Rust rewrite?
 
