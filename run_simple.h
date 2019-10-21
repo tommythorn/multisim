@@ -1,6 +1,6 @@
 /*
  * Multisim: a microprocessor architecture exploration framework
- * Copyright (C) 2012 Tommy Thorn
+ * Copyright (C) 2012,2019 Tommy Thorn
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -23,7 +23,7 @@
 
 #include "arch.h"
 
-int step_simple(const arch_t *arch, cpu_state_t *state);
+int step_simple(const arch_t *arch, cpu_state_t *state, cpu_state_t *cosimstate);
 void run_simple(int, char **, verbosity_t);
 
 #endif

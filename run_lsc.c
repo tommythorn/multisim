@@ -58,12 +58,12 @@
 
 //////// Configuration and magic numbers
 
-#define FETCH_BUFFER_SIZE       2
-#define FETCH_WIDTH             1
-#define ROB_SIZE              128
-#define PHYSICAL_REGS         128
-#define EX_BUFFER_SIZE          1
-#define ME_BUFFER_SIZE          1
+#define FETCH_BUFFER_SIZE      16
+#define FETCH_WIDTH            16
+#define ROB_SIZE               61
+#define PHYSICAL_REGS          73
+#define EX_BUFFER_SIZE         15
+#define ME_BUFFER_SIZE         28
 
 /*
  * Early release frees the old physical register at allocation time
@@ -154,7 +154,7 @@ static int64_t          prf[PHYSICAL_REGS];
 static bool             pr_ready[PHYSICAL_REGS]; // Scoreboard
 static unsigned         freelist[PHYSICAL_REGS];
 static micro_op_t       ex_buffer[EX_BUFFER_SIZE];
-static micro_op_t       me_buffer[EX_BUFFER_SIZE];
+static micro_op_t       me_buffer[ME_BUFFER_SIZE];
 
 static const arch_t    *arch;
 static unsigned         fetch_seqno;
@@ -328,7 +328,22 @@ visualize_retirement(cpu_state_t *state, rob_entry_t rob)
     fprintf(stderr, "%6d ", n_cycles);
 
     fprintf(stderr, "%6d %s ", next_seqno++, line);
+
+#if 1
+    if (pr != PR_SINK)
+        fprintf(stderr, "r%02d/P%03d (P%03d) ", dec.dest_reg, pr, rob.pr_old);
+    else
+        fprintf(stderr, "                ");
+#endif
     isa_disass(arch, dec, (isa_result_t) { .result = prf[pr] });
+
+#if 0
+    for (int p = freelist_rp; p != freelist_wp;) {
+        fprintf(stderr, " %d", freelist[p]);
+        if (++p == sizeof freelist / sizeof *freelist) p = 0;
+    }
+    fprintf(stderr, "\n");
+#endif
 }
 
 
@@ -498,7 +513,7 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
          */
 
         uint64_t copc;
-        do copc = costate->pc; while (step_simple(arch, costate) == 0);
+        do copc = costate->pc; while (step_simple(arch, costate, state) == 0);
 
         bool override = re.mmio;
 
@@ -527,6 +542,9 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
         if (++rob_rp == ROB_SIZE)
             rob_rp = 0;
     }
+
+    arch->tick(state, n_retired, NULL);
+    assert((state->msr[0x342] & (1 << 31)) == 0);
 }
 
 static void
@@ -849,9 +867,7 @@ step_lsc(
     lsc_retire(state, costate, verbosity);
     lsc_execute(state, verbosity);
     lsc_decode_rename(state, verbosity);
-    lsc_fetch(state, verbosity); // XXX execute affects pc in the same cycle
-
-    arch->tick(state, 1);
+    lsc_fetch(state, verbosity); // XXX execute affects pc in the same n_cycles
 
     return false;
 }
