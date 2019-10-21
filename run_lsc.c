@@ -210,11 +210,15 @@ free_reg(unsigned pr)
         assert(freelist_rp != freelist_wp);
         ++n_free_regs;
     }
+
+    show_freelist("at exit of free_reg");
 }
 
 static unsigned
 alloc_reg(void)
 {
+    show_freelist("at entry to alloc_reg");
+
     assert(freelist_rp != freelist_wp);
 
     unsigned pr = freelist[freelist_rp++];
