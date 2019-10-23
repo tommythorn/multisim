@@ -190,14 +190,37 @@ is_rob_full(void)
 }
 
 static void
+show_freelist(char *s)
+{
+    printf("%s", s);
+    int p = freelist_rp;
+    while (p != freelist_wp) {
+	printf(" %d", freelist[p]);
+	int pr = freelist[p];
+        if (tar[pr] != -1)
+	    printf("tar[P%d] = r%d\n",
+		   pr, tar[pr]);
+        assert(tar[pr] == -1);
+    
+	if (++p == sizeof freelist / sizeof *freelist)
+	    p = 0;
+    }
+    printf("\n");
+}
+
+static void
 free_reg(unsigned pr)
 {
+    if (pr == PR_ZERO || pr == PR_SINK)
+	return;
+    printf("free_reg(P%d): ", pr);
+    show_freelist("");
     assert((unsigned) pr < PHYSICAL_REGS);
     // DEBUG: Make sure pr isn't already on the freelist
     {
         int p = freelist_rp;
         while (p != freelist_wp) {
-            //assert(freelist[p] != pr);
+            assert(freelist[p] != pr);
             if (++p == sizeof freelist / sizeof *freelist)
                 p = 0;
         }
@@ -228,7 +251,10 @@ alloc_reg(void)
     pr_ready[pr] = false;
     --n_free_regs;
 
-    assert(tar[pr] == ISA_NO_REG);
+    if (tar[pr] != -1)
+	printf("tar[P%d] = r%d\n",
+		pr, tar[pr]);
+    assert(tar[pr] == -1);
 
     return pr;
 }
@@ -238,10 +264,10 @@ show_rob(const char *msg)
 {
     unsigned p = rob_rp;
 
-    fprintf(stderr, "ROB%s:\n", msg);
+    printf("ROB%s:\n", msg);
     while (p != rob_wp) {
         fetch_parcel_t fp = rob[p].fp;
-        fprintf(stderr, "  rob[%02d] = %c %d:%08x %08x\n",
+        printf("  rob[%02d] = %c %d:%08x %08x\n",
                 p, "UC"[rob[p].committed], fp.seqno, (uint32_t)fp.addr, fp.insn);
         if (++p == ROB_SIZE)
             p = 0;
@@ -252,12 +278,12 @@ static void
 show_ex(void)
 {
     if (ex_size)
-        fprintf(stderr, "EX:\n");
+        printf("EX:\n");
     for (int i = 0; i < ex_size; ++i) {
         micro_op_t mop = ex_buffer[i];
         fetch_parcel_t fp = mop.fetched;
 
-        fprintf(stderr, "  rob[%02d] %d:%08x %08x pr%d%c, pr%d%c -> pr%d %s ",
+        printf("  rob[%02d] %d:%08x %08x pr%d%c, pr%d%c -> pr%d %s ",
                 mop.rob_index,
                 fp.seqno, (uint32_t)fp.addr, fp.insn,
                 mop.pr_a, "WR"[pr_ready[mop.pr_a]],
@@ -271,12 +297,12 @@ static void
 show_me(void)
 {
     if (me_size)
-        fprintf(stderr, "ME:\n");
+        printf("ME:\n");
     for (int i = 0; i < me_size; ++i) {
         micro_op_t mop = me_buffer[i];
         fetch_parcel_t fp = mop.fetched;
 
-        fprintf(stderr, "  rob[%02d] %d:%08x %08x pr%d%c, pr%d%c -> pr%d %s ",
+        printf("  rob[%02d] %d:%08x %08x pr%d%c, pr%d%c -> pr%d %s ",
                 mop.rob_index,
                 fp.seqno, (uint32_t)fp.addr, fp.insn,
                 mop.pr_a, "WR"[pr_ready[mop.pr_a]],
@@ -337,24 +363,24 @@ visualize_retirement(cpu_state_t *state, rob_entry_t rob)
     line[fp.commit_ts  % WIDTH] = 'C';
     line[n_cycles         % WIDTH] = 'R';
 
-    fprintf(stderr, "%6d ", n_cycles);
+    printf("%6d ", n_cycles);
 
-    fprintf(stderr, "%6d %s ", next_seqno++, line);
+    printf("%6d %s ", next_seqno++, line);
 
 #if 1
     if (pr != PR_SINK)
-        fprintf(stderr, "r%02d/P%03d (P%03d) ", dec.dest_reg, pr, rob.pr_old);
+        printf("r%02d/P%03d (P%03d) ", dec.dest_reg, pr, rob.pr_old);
     else
-        fprintf(stderr, "                ");
+        printf("                ");
 #endif
     isa_disass(arch, dec, (isa_result_t) { .result = prf[pr] });
 
 #if 0
     for (int p = freelist_rp; p != freelist_wp;) {
-        fprintf(stderr, " %d", freelist[p]);
+        printf(" %d", freelist[p]);
         if (++p == sizeof freelist / sizeof *freelist) p = 0;
     }
-    fprintf(stderr, "\n");
+    printf("\n");
 #endif
 }
 
@@ -396,21 +422,26 @@ rollback_rob(int keep_rob_index, verbosity_t verbosity)
             freelist_rp = sizeof freelist / sizeof *freelist - 1;
         ++n_free_regs;
 #else
+	assert(tar[rat[rob[p].r]] == -1);
         free_reg(rat[rob[p].r]);
 #endif
 
         if (rob[p].r != ISA_NO_REG) {
             rat[rob[p].r] = rob[p].pr_old;
-            assert(tar[rob[p].pr_old] != ISA_NO_REG); // <<< This fires!
+            if (tar[rob[p].pr_old] == ISA_NO_REG)
+		printf("pr_old P%d -> r%d\n",
+		       rob[p].pr_old,
+		       tar[rob[p].pr_old]);
+	    assert(tar[rob[p].pr_old] != ISA_NO_REG); // <<< This fires!
             tar[rob[p].pr_old] += 32; // Mark as architectural
         }
     } while (rob_rp != rob_wp);
 
     if (memcmp(rat, art, sizeof rat) != 0) {
-        fprintf(stderr, "Uh oh:\n");
+        printf("Uh oh:\n");
         for (int i = 0; i < 32; ++i)
             if (rat[i] != art[i])
-                fprintf(stderr, "  rat[%d] = %d, but art[%d] = %d\n", i, rat[i], i, art[i]);
+                printf("  rat[%d] = %d, but art[%d] = %d\n", i, rat[i], i, art[i]);
     }
     assert(memcmp(rat, art, sizeof rat) == 0);
 
@@ -597,12 +628,12 @@ show_fb(void)
 {
     unsigned p = fb_rp;
     if (fb_size)
-        fprintf(stderr, "FB: %d\n", fb_size);
+        printf("FB: %d\n", fb_size);
     if (0)
     for (int i = 0; i < fb_size; ++i) {
         fetch_parcel_t fp = fb[p];
 
-        fprintf(stderr, "  %d:%08" PRIx64 " %08x\n",
+        printf("  %d:%08" PRIx64 " %08x\n",
                 fp.seqno, fp.addr, fp.insn);
 
         if (++p == FETCH_BUFFER_SIZE)
@@ -656,16 +687,23 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
         };
 
 #ifdef EARLY_RELEASE
-        free_reg(old_pr);
         if (old_pr != PR_SINK && old_pr != PR_ZERO) {
-            --n_free_regs;
             assert(tar[old_pr] != ISA_NO_REG);
+	    tar[old_pr] = ISA_NO_REG;
+	    free_reg(old_pr);
+            --n_free_regs;
             // tar[old_pr] = ISA_NO_REG; No, that's exactly wrong.  The register is still alive
         }
 #endif
 
         if (dec.dest_reg != ISA_NO_REG) {
             rat[dec.dest_reg] = mop.pr_wb;
+	    if (tar[mop.pr_wb] != ISA_NO_REG) {
+		printf("r%d, P%d, tar%d",
+			dec.dest_reg,
+			mop.pr_wb,
+			tar[mop.pr_wb]);
+	    }
             assert(tar[mop.pr_wb] == ISA_NO_REG);
             tar[mop.pr_wb] = dec.dest_reg;
         }
@@ -926,10 +964,12 @@ run_lsc(int num_images, char *images[], verbosity_t verbosity)
     pr_ready[PR_ZERO] = true;
 
     freelist_wp = freelist_rp = n_free_regs = 0;
-    for (unsigned pr = 0; pr < PHYSICAL_REGS; ++pr) {
-        free_reg(pr);
+    for (unsigned pr = 1; pr < PR_SINK; ++pr) {
         tar[pr] = ISA_NO_REG;
+        free_reg(pr);
     }
+
+    memset(tar, 255, sizeof tar);
     tar[PR_ZERO] = 0;
     tar[PR_SINK] = -2;
 
@@ -946,7 +986,7 @@ run_lsc(int num_images, char *images[], verbosity_t verbosity)
     memcpy(art, rat, sizeof art);
     for (n_cycles = 0;; ++n_cycles) {
         if (verbosity) {
-            //fprintf(stderr, "\nN_Cycles #%d:\n", n_cycles);
+            //printf("\nN_Cycles #%d:\n", n_cycles);
             if (0) show_fb();
             if (0) show_ex();
             if (0) show_rob("");
