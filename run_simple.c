@@ -145,7 +145,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, cpu_state_t *cosimstate)
 exception:
     if (state->verbosity & VERBOSE_DISASS) {
         fprintf(stderr, "%d ", state->priv);
-        isa_disass(arch, dec, res);
+        isa_disass(stderr, arch, dec, res);
     }
 
     if (exc.raised) {

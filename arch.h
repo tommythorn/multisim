@@ -222,7 +222,7 @@ typedef struct isa_st {
 
 const arch_t *get_arch(uint16_t machine, bool is_64bit);
 
-void isa_disass(const arch_t *, isa_decoded_t, isa_result_t);
+void isa_disass(FILE *out, const arch_t *, isa_decoded_t, isa_result_t);
 
 #endif
 

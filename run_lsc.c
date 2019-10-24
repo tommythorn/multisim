@@ -148,7 +148,7 @@ typedef struct micro_op_st {
 /* The arrays */
 static fetch_parcel_t   fb[FETCH_BUFFER_SIZE];
 static rob_entry_t      rob[ROB_SIZE];
-static unsigned         rat[32];
+static unsigned         map[32];
 static unsigned         art[32];
 static int64_t          prf[PHYSICAL_REGS];
 static bool             pr_ready[PHYSICAL_REGS]; // Scoreboard
@@ -156,7 +156,9 @@ static unsigned         freelist[PHYSICAL_REGS];
 static micro_op_t       ex_buffer[EX_BUFFER_SIZE];
 static micro_op_t       me_buffer[ME_BUFFER_SIZE];
 
-static unsigned         tar[PHYSICAL_REGS];  // XXX for debug, a reverse rat
+// XXX for debug: maps physical registers to the logical registers
+// they are or were mapped from, but is -1 when the register is free.
+static int              pam[PHYSICAL_REGS];
 
 
 static const arch_t    *arch;
@@ -189,23 +191,25 @@ is_rob_full(void)
     return (rob_wp + 1) % ROB_SIZE == rob_rp;
 }
 
-static void
+void
 show_freelist(char *s)
 {
-    printf("%s", s);
+    fprintf(stderr, "%s", s);
+
     int p = freelist_rp;
+
     while (p != freelist_wp) {
-	printf(" %d", freelist[p]);
+	fprintf(stderr, " %d", freelist[p]);
 	int pr = freelist[p];
-        if (tar[pr] != -1)
-	    printf("tar[P%d] = r%d\n",
-		   pr, tar[pr]);
-        assert(tar[pr] == -1);
-    
+        if (pam[pr] != ISA_NO_REG)
+	    fprintf(stderr, "pam[P%02d] = r%d\n", pr, pam[pr]);
+        assert(pam[pr] == ISA_NO_REG);
+
 	if (++p == sizeof freelist / sizeof *freelist)
 	    p = 0;
     }
-    printf("\n");
+
+    fprintf(stderr, "\n");
 }
 
 static void
@@ -213,34 +217,35 @@ free_reg(unsigned pr)
 {
     if (pr == PR_ZERO || pr == PR_SINK)
 	return;
-    printf("free_reg(P%d): ", pr);
-    show_freelist("");
+
+    fprintf(stderr, "[free  P%02d; %d]\n", pr, n_free_regs);
+    //show_freelist("");
     assert((unsigned) pr < PHYSICAL_REGS);
     // DEBUG: Make sure pr isn't already on the freelist
-    {
-        int p = freelist_rp;
-        while (p != freelist_wp) {
-            assert(freelist[p] != pr);
-            if (++p == sizeof freelist / sizeof *freelist)
-                p = 0;
-        }
+
+    int p = freelist_rp;
+    while (p != freelist_wp) {
+        assert(freelist[p] != pr);
+        if (++p == sizeof freelist / sizeof *freelist)
+            p = 0;
     }
 
-    if (pr != PR_ZERO && pr != PR_SINK) {
-        freelist[freelist_wp] = pr;
-        if (++freelist_wp == sizeof freelist / sizeof *freelist)
-            freelist_wp = 0;
-        assert(freelist_rp != freelist_wp);
-        ++n_free_regs;
-    }
+    freelist[freelist_wp] = pr;
+    if (++freelist_wp == sizeof freelist / sizeof *freelist)
+        freelist_wp = 0;
+    assert(freelist_rp != freelist_wp);
+#ifndef EARLY_RELEASE
+    ++n_free_regs;
+    assert(0 <= n_free_regs && n_free_regs <= PHYSICAL_REGS - 32);
+#endif
 
-    show_freelist("at exit of free_reg");
+    //show_freelist("at exit of free_reg");
 }
 
 static unsigned
 alloc_reg(void)
 {
-    show_freelist("at entry to alloc_reg");
+    //show_freelist("entry to alloc_reg ");
 
     assert(freelist_rp != freelist_wp);
 
@@ -249,12 +254,16 @@ alloc_reg(void)
         freelist_rp = 0;
 
     pr_ready[pr] = false;
+#ifndef EARLY_RELEASE
     --n_free_regs;
+    assert(0 <= n_free_regs && n_free_regs <= PHYSICAL_REGS - 32);
+#endif
 
-    if (tar[pr] != -1)
-	printf("tar[P%d] = r%d\n",
-		pr, tar[pr]);
-    assert(tar[pr] == -1);
+    if (pam[pr] != ISA_NO_REG)
+	fprintf(stderr, "pam[P%02d] = r%d\n", pr, pam[pr]);
+    assert(pam[pr] == ISA_NO_REG);
+
+    fprintf(stderr, "[alloc P%02d; %d]\n", pr, n_free_regs);
 
     return pr;
 }
@@ -264,11 +273,11 @@ show_rob(const char *msg)
 {
     unsigned p = rob_rp;
 
-    printf("ROB%s:\n", msg);
+    fprintf(stderr, "ROB%s:\n", msg);
     while (p != rob_wp) {
         fetch_parcel_t fp = rob[p].fp;
-        printf("  rob[%02d] = %c %d:%08x %08x\n",
-                p, "UC"[rob[p].committed], fp.seqno, (uint32_t)fp.addr, fp.insn);
+        fprintf(stderr, "  rob[%02d] = %c %d:%08x %08x\n",
+               p, "UC"[rob[p].committed], fp.seqno, (uint32_t)fp.addr, fp.insn);
         if (++p == ROB_SIZE)
             p = 0;
     }
@@ -278,18 +287,18 @@ static void
 show_ex(void)
 {
     if (ex_size)
-        printf("EX:\n");
+        fprintf(stderr, "EX:\n");
     for (int i = 0; i < ex_size; ++i) {
         micro_op_t mop = ex_buffer[i];
         fetch_parcel_t fp = mop.fetched;
 
-        printf("  rob[%02d] %d:%08x %08x pr%d%c, pr%d%c -> pr%d %s ",
+        fprintf(stderr, "  rob[%02d] %d:%08x %08x pr%d%c, pr%d%c -> pr%d %s ",
                 mop.rob_index,
                 fp.seqno, (uint32_t)fp.addr, fp.insn,
                 mop.pr_a, "WR"[pr_ready[mop.pr_a]],
                 mop.pr_b, "WR"[pr_ready[mop.pr_b]],
                 mop.pr_wb, pr_ready[mop.pr_a] & pr_ready[mop.pr_b] ? "READY" : "     ");
-        isa_disass(arch, mop.dec, (isa_result_t) { .result = 0xEEEEEEEE });
+        isa_disass(stderr, arch, mop.dec, (isa_result_t) { .result = 0xEEEEEEEE });
     }
 }
 
@@ -297,18 +306,18 @@ static void
 show_me(void)
 {
     if (me_size)
-        printf("ME:\n");
+        fprintf(stderr, "ME:\n");
     for (int i = 0; i < me_size; ++i) {
         micro_op_t mop = me_buffer[i];
         fetch_parcel_t fp = mop.fetched;
 
-        printf("  rob[%02d] %d:%08x %08x pr%d%c, pr%d%c -> pr%d %s ",
+        fprintf(stderr, "  rob[%02d] %d:%08x %08x pr%d%c, pr%d%c -> pr%d %s ",
                 mop.rob_index,
                 fp.seqno, (uint32_t)fp.addr, fp.insn,
                 mop.pr_a, "WR"[pr_ready[mop.pr_a]],
                 mop.pr_b, "WR"[pr_ready[mop.pr_b]],
                 mop.pr_wb, pr_ready[mop.pr_a] & pr_ready[mop.pr_b] ? "READY" : "     ");
-        isa_disass(arch, mop.dec, (isa_result_t) { .result = 0xEEEEEEEE });
+        isa_disass(stderr, arch, mop.dec, (isa_result_t) { .result = 0xEEEEEEEE });
     }
 }
 
@@ -320,8 +329,9 @@ allocate_rob(int r, int pr, int pr_old, fetch_parcel_t fp)
     assert(r == ISA_NO_REG || (unsigned) r < 32);  // XXX should be part of the arch
     assert((unsigned) pr < PHYSICAL_REGS);
 
-    if (r != ISA_NO_REG)
-        assert(tar[pr_old] != ISA_NO_REG); // <<< This fires!
+    if (r != ISA_NO_REG) {
+        assert(pam[pr_old] != ISA_NO_REG);
+    }
 
     rob[rob_index] = (rob_entry_t) {
         .r = r, .pr = pr, .pr_old = pr_old, .committed = false,
@@ -373,7 +383,7 @@ visualize_retirement(cpu_state_t *state, rob_entry_t rob)
     else
         printf("                ");
 #endif
-    isa_disass(arch, dec, (isa_result_t) { .result = prf[pr] });
+    isa_disass(stdout, arch, dec, (isa_result_t) { .result = prf[pr] });
 
 #if 0
     for (int p = freelist_rp; p != freelist_wp;) {
@@ -412,7 +422,7 @@ rollback_rob(int keep_rob_index, verbosity_t verbosity)
         if (rob[p].r == ISA_NO_REG)
             continue;
 
-        tar[rob[p].pr] = ISA_NO_REG;
+        pam[rob[p].pr] = ISA_NO_REG;
 #ifdef EARLY_RELEASE
         // Undo the free'd register and the allocation
         assert(freelist_wp != freelist_rp);
@@ -421,29 +431,33 @@ rollback_rob(int keep_rob_index, verbosity_t verbosity)
         if (freelist_rp-- == 0)
             freelist_rp = sizeof freelist / sizeof *freelist - 1;
         ++n_free_regs;
+        assert(0 <= n_free_regs && n_free_regs <= PHYSICAL_REGS - 32);
+
+        fprintf(stderr, "[rollback: unalloc P%02d/unfree P%02d; %d]\n",
+                freelist[freelist_rp],
+                freelist[freelist_wp],
+            n_free_regs);
 #else
-	assert(tar[rat[rob[p].r]] == -1);
-        free_reg(rat[rob[p].r]);
+	assert(pam[map[rob[p].r]] == ISA_NO_REG);
+        free_reg(map[rob[p].r]);
 #endif
 
         if (rob[p].r != ISA_NO_REG) {
-            rat[rob[p].r] = rob[p].pr_old;
-            if (tar[rob[p].pr_old] == ISA_NO_REG)
-		printf("pr_old P%d -> r%d\n",
-		       rob[p].pr_old,
-		       tar[rob[p].pr_old]);
-	    assert(tar[rob[p].pr_old] != ISA_NO_REG); // <<< This fires!
-            tar[rob[p].pr_old] += 32; // Mark as architectural
+            map[rob[p].r] = rob[p].pr_old;
+            if (pam[rob[p].pr_old] == ISA_NO_REG)
+		fprintf(stderr, "pr_old P%02d -> r%d\n", rob[p].pr_old, pam[rob[p].pr_old]);
+	    assert(pam[rob[p].pr_old] != ISA_NO_REG); // <<< This fires!
+            pam[rob[p].pr_old] += 32; // Mark as architectural
         }
     } while (rob_rp != rob_wp);
 
-    if (memcmp(rat, art, sizeof rat) != 0) {
-        printf("Uh oh:\n");
+    if (memcmp(map, art, sizeof map) != 0) {
+        fprintf(stderr, "Uh oh:\n");
         for (int i = 0; i < 32; ++i)
-            if (rat[i] != art[i])
-                printf("  rat[%d] = %d, but art[%d] = %d\n", i, rat[i], i, art[i]);
+            if (map[i] != art[i])
+                fprintf(stderr, "  map[%d] = %d, but art[%d] = %d\n", i, map[i], i, art[i]);
     }
-    assert(memcmp(rat, art, sizeof rat) == 0);
+    assert(memcmp(map, art, sizeof map) == 0);
 
     exception_seqno = ~0ULL;
     n_pending_stores = 0;
@@ -513,8 +527,7 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
             assert(0 < n_pending_stores);
 
             if (0 & verbosity & VERBOSE_DISASS)
-                fprintf(stderr,
-                        "%08"PRIx64" S%c (%08"PRIx64") = %08"PRIx64"\n",
+                fprintf(stderr, "%08"PRIx64" S%c (%08"PRIx64") = %08"PRIx64"\n",
                         re.fp.addr        & 0xFFFFFFFF,
                         letter_size[re.dec.loadstore_size],
                         re.store_addr     & 0xFFFFFFFF,
@@ -533,8 +546,7 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
 
         if (re.exception) {
             if (state->verbosity & VERBOSE_DISASS)
-                fprintf(stderr,
-                        "                  EXCEPTION %"PRId64" (%08"PRId64") RAISED\n",
+                fprintf(stderr, "                  EXCEPTION %"PRId64" (%08"PRId64") RAISED\n",
                         exception_info.code, exception_info.info);
 
             int prev_rob_rp = rob_rp == 0 ? ROB_SIZE - 1 : rob_rp - 1;
@@ -545,7 +557,7 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
 
         if (re.r != ISA_NO_REG) {
             art[re.r] = re.pr;
-            tar[re.pr_old] = ISA_NO_REG;
+            pam[re.pr_old] = ISA_NO_REG;
         }
 
         if (re.restart) {
@@ -569,13 +581,13 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
             costate->r[re.r] = prf[re.pr];
 
         if (re.dec.insn_addr != copc) {
-            printf("COSIM: REF PC %08"PRIx64" != LSC PC %08"PRIx64"\n",
+            fprintf(stderr, "COSIM: REF PC %08"PRIx64" != LSC PC %08"PRIx64"\n",
                    copc & 0xFFFFFFFF, re.dec.insn_addr & 0xFFFFFFFF);
             assert(0);
         }
 
         if (re.r != ISA_NO_REG && prf[re.pr] != costate->r[re.r]) {
-            printf("COSIM: REF RES %08"PRIx64" != LSC RES %08"PRIx64"\n",
+            fprintf(stderr, "COSIM: REF RES %08"PRIx64" != LSC RES %08"PRIx64"\n",
                    costate->r[re.r] & 0xFFFFFFFF, prf[re.pr] & 0xFFFFFFFF);
             assert(0);
         }
@@ -583,8 +595,10 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
 #ifndef EARLY_RELEASE
         free_reg(re.pr_old);
 #else
-        if (re.r != ISA_NO_REG)
+        if (re.r != ISA_NO_REG) {
             ++n_free_regs;
+            assert(0 <= n_free_regs && n_free_regs <= PHYSICAL_REGS - 32);
+        }
 #endif
 
         if (++rob_rp == ROB_SIZE)
@@ -628,12 +642,12 @@ show_fb(void)
 {
     unsigned p = fb_rp;
     if (fb_size)
-        printf("FB: %d\n", fb_size);
+        fprintf(stderr, "FB: %d\n", fb_size);
     if (0)
     for (int i = 0; i < fb_size; ++i) {
         fetch_parcel_t fp = fb[p];
 
-        printf("  %d:%08" PRIx64 " %08x\n",
+        fprintf(stderr, "  %d:%08" PRIx64 " %08x\n",
                 fp.seqno, fp.addr, fp.insn);
 
         if (++p == FETCH_BUFFER_SIZE)
@@ -670,9 +684,9 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
         fetched.decode_ts = n_cycles;
 
         if (dec.dest_reg != ISA_NO_REG)
-            assert(tar[rat[dec.dest_reg]] != ISA_NO_REG); // <<< This fires!
+            assert(pam[map[dec.dest_reg]] != ISA_NO_REG);
 
-        int           old_pr    = dec.dest_reg != ISA_NO_REG ? rat[dec.dest_reg] : PR_SINK;
+        int           old_pr    = dec.dest_reg != ISA_NO_REG ? map[dec.dest_reg] : PR_SINK;
         int           pr        = dec.dest_reg != ISA_NO_REG ? alloc_reg()       : PR_SINK;
         unsigned      rob_index = allocate_rob(dec.dest_reg, pr, old_pr, fetched);
 
@@ -680,32 +694,27 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
         micro_op_t mop = {
             .fetched = fetched,
             .dec     = dec,
-            .pr_a    = rat[dec.source_reg_a],
-            .pr_b    = rat[dec.source_reg_b],
+            .pr_a    = map[dec.source_reg_a],
+            .pr_b    = map[dec.source_reg_b],
             .pr_wb   = pr,
             .rob_index = rob_index
         };
 
 #ifdef EARLY_RELEASE
         if (old_pr != PR_SINK && old_pr != PR_ZERO) {
-            assert(tar[old_pr] != ISA_NO_REG);
-	    tar[old_pr] = ISA_NO_REG;
+            assert(pam[old_pr] != ISA_NO_REG);
 	    free_reg(old_pr);
-            --n_free_regs;
-            // tar[old_pr] = ISA_NO_REG; No, that's exactly wrong.  The register is still alive
+            // pam[old_pr] = ISA_NO_REG; No, that's exactly wrong.  The register is still alive
         }
 #endif
 
         if (dec.dest_reg != ISA_NO_REG) {
-            rat[dec.dest_reg] = mop.pr_wb;
-	    if (tar[mop.pr_wb] != ISA_NO_REG) {
-		printf("r%d, P%d, tar%d",
-			dec.dest_reg,
-			mop.pr_wb,
-			tar[mop.pr_wb]);
+            map[dec.dest_reg] = mop.pr_wb;
+	    if (pam[mop.pr_wb] != ISA_NO_REG) {
+		fprintf(stderr, "r%d, P%02d, tar%d", dec.dest_reg, mop.pr_wb, pam[mop.pr_wb]);
 	    }
-            assert(tar[mop.pr_wb] == ISA_NO_REG);
-            tar[mop.pr_wb] = dec.dest_reg;
+            assert(pam[mop.pr_wb] == ISA_NO_REG);
+            pam[mop.pr_wb] = dec.dest_reg;
         }
 
         rob[rob_index].dec = dec;
@@ -897,11 +906,10 @@ lsc_execute(cpu_state_t *state, verbosity_t verbosity)
 
         if (mop.dec.class == isa_insn_class_load && 0 < n_pending_stores) {
             if (0 & verbosity & VERBOSE_DISASS)
-                fprintf(stderr,
-                        "%08x L%c blocked by %d pending stores\n",
-                        (uint32_t) mop.fetched.addr,
-                        letter_size[mop.dec.loadstore_size],
-                        n_pending_stores);
+                fprintf(stderr, "%08x L%c blocked by %d pending stores\n",
+                       (uint32_t) mop.fetched.addr,
+                       letter_size[mop.dec.loadstore_size],
+                       n_pending_stores);
             break;
         }
 
@@ -964,29 +972,38 @@ run_lsc(int num_images, char *images[], verbosity_t verbosity)
     pr_ready[PR_ZERO] = true;
 
     freelist_wp = freelist_rp = n_free_regs = 0;
+    memset(pam, 255, sizeof pam);
+
     for (unsigned pr = 1; pr < PR_SINK; ++pr) {
-        tar[pr] = ISA_NO_REG;
+#ifdef EARLY_RELEASE
+        ++n_free_regs;
+        assert(0 <= n_free_regs && n_free_regs <= PHYSICAL_REGS);
+#endif
         free_reg(pr);
     }
 
-    memset(tar, 255, sizeof tar);
-    tar[PR_ZERO] = 0;
-    tar[PR_SINK] = -2;
+    pam[PR_ZERO] = 0;
+    pam[PR_SINK] = 0;
 
-    rat[0] = PR_ZERO;
+    map[0] = PR_ZERO;
     for (int i = 1; i < 32; ++i) {
         int pr       = alloc_reg();
-        rat[i]       = pr;
-        tar[pr]      = i;
+#ifdef EARLY_RELEASE
+        --n_free_regs;
+        assert(0 <= n_free_regs && n_free_regs <= PHYSICAL_REGS);
+#endif
+
+        map[i]       = pr;
+        pam[pr]      = i;
 
         prf[pr]      = state->r[i];
         pr_ready[pr] = true;
     }
 
-    memcpy(art, rat, sizeof art);
+    memcpy(art, map, sizeof art);
     for (n_cycles = 0;; ++n_cycles) {
         if (verbosity) {
-            //printf("\nN_Cycles #%d:\n", n_cycles);
+            //fprintf(stderr, "\nN_Cycles #%d:\n", n_cycles);
             if (0) show_fb();
             if (0) show_ex();
             if (0) show_rob("");
@@ -999,7 +1016,7 @@ run_lsc(int num_images, char *images[], verbosity_t verbosity)
             break;
     }
 
-    //printf("IPC = %.2f\n", (double) n_issue / n_cycles);
+    //fprintf(stderr, "IPC = %.2f\n", (double) n_issue / n_cycles);
 
     state_destroy(state);
     state_destroy(costate);
