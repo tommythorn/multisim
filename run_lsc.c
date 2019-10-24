@@ -175,6 +175,7 @@ static isa_exception_t  exception_info;
 static int              n_cycles;
 static int              n_pending_stores;
 static int              n_free_regs;
+static int              n_regs_in_flight;
 
 static char             letter_size[256] = {
     [1] = 'B',
@@ -218,7 +219,7 @@ free_reg(unsigned pr)
     if (pr == PR_ZERO || pr == PR_SINK)
 	return;
 
-    fprintf(stderr, "[free  P%02d; %d]\n", pr, n_free_regs);
+    fprintf(stderr, "[free  P%02d; %d/%d]\n", pr, n_free_regs, n_regs_in_flight);
     //show_freelist("");
     assert((unsigned) pr < PHYSICAL_REGS);
     // DEBUG: Make sure pr isn't already on the freelist
@@ -234,10 +235,9 @@ free_reg(unsigned pr)
     if (++freelist_wp == sizeof freelist / sizeof *freelist)
         freelist_wp = 0;
     assert(freelist_rp != freelist_wp);
-#ifndef EARLY_RELEASE
+
     ++n_free_regs;
     assert(0 <= n_free_regs && n_free_regs <= PHYSICAL_REGS - 32);
-#endif
 
     //show_freelist("at exit of free_reg");
 }
@@ -254,16 +254,15 @@ alloc_reg(void)
         freelist_rp = 0;
 
     pr_ready[pr] = false;
-#ifndef EARLY_RELEASE
+
     --n_free_regs;
     assert(0 <= n_free_regs && n_free_regs <= PHYSICAL_REGS - 32);
-#endif
 
     if (pam[pr] != ISA_NO_REG)
 	fprintf(stderr, "pam[P%02d] = r%d\n", pr, pam[pr]);
     assert(pam[pr] == ISA_NO_REG);
 
-    fprintf(stderr, "[alloc P%02d; %d]\n", pr, n_free_regs);
+    fprintf(stderr, "[alloc P%02d; %d/%d]\n", pr, n_free_regs, n_regs_in_flight);
 
     return pr;
 }
@@ -430,13 +429,13 @@ rollback_rob(int keep_rob_index, verbosity_t verbosity)
             freelist_wp = sizeof freelist / sizeof *freelist - 1;
         if (freelist_rp-- == 0)
             freelist_rp = sizeof freelist / sizeof *freelist - 1;
-        ++n_free_regs;
-        assert(0 <= n_free_regs && n_free_regs <= PHYSICAL_REGS - 32);
+        --n_regs_in_flight;
+        assert(0 <= n_regs_in_flight && n_free_regs - n_regs_in_flight <= PHYSICAL_REGS - 32);
 
-        fprintf(stderr, "[rollback: unalloc P%02d/unfree P%02d; %d]\n",
+        fprintf(stderr, "[rollback: unalloc P%02d/unfree P%02d; %d/%d]\n",
                 freelist[freelist_rp],
                 freelist[freelist_wp],
-            n_free_regs);
+                n_free_regs, n_regs_in_flight);
 #else
 	assert(pam[map[rob[p].r]] == ISA_NO_REG);
         free_reg(map[rob[p].r]);
@@ -592,13 +591,13 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
             assert(0);
         }
 
-#ifndef EARLY_RELEASE
-        free_reg(re.pr_old);
-#else
+#ifdef EARLY_RELEASE
         if (re.r != ISA_NO_REG) {
-            ++n_free_regs;
-            assert(0 <= n_free_regs && n_free_regs <= PHYSICAL_REGS - 32);
+            --n_regs_in_flight;
+            assert(0 <= n_regs_in_flight && n_free_regs - n_regs_in_flight <= PHYSICAL_REGS - 32);
         }
+#else
+        free_reg(re.pr_old);
 #endif
 
         if (++rob_rp == ROB_SIZE)
@@ -666,7 +665,7 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
            ex_size < EX_BUFFER_SIZE &&
            me_size < ME_BUFFER_SIZE &&
            !is_rob_full() &&
-           0 < n_free_regs) {
+           0 < n_free_regs - n_regs_in_flight) {
 
         fetch_parcel_t fetched = fb[fb_rp];
         isa_decoded_t dec      = arch->decode(fetched.addr, fetched.insn);
@@ -971,14 +970,10 @@ run_lsc(int num_images, char *images[], verbosity_t verbosity)
     memset(pr_ready, 0, sizeof pr_ready);
     pr_ready[PR_ZERO] = true;
 
-    freelist_wp = freelist_rp = n_free_regs = 0;
+    freelist_wp = freelist_rp = n_free_regs = n_regs_in_flight = 0;
     memset(pam, 255, sizeof pam);
 
     for (unsigned pr = 1; pr < PR_SINK; ++pr) {
-#ifdef EARLY_RELEASE
-        ++n_free_regs;
-        assert(0 <= n_free_regs && n_free_regs <= PHYSICAL_REGS);
-#endif
         free_reg(pr);
     }
 
@@ -988,10 +983,6 @@ run_lsc(int num_images, char *images[], verbosity_t verbosity)
     map[0] = PR_ZERO;
     for (int i = 1; i < 32; ++i) {
         int pr       = alloc_reg();
-#ifdef EARLY_RELEASE
-        --n_free_regs;
-        assert(0 <= n_free_regs && n_free_regs <= PHYSICAL_REGS);
-#endif
 
         map[i]       = pr;
         pam[pr]      = i;
