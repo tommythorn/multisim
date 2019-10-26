@@ -409,7 +409,8 @@ rollback_rob(int keep_rob_index, verbosity_t verbosity)
     show_freelist("entry to rollback");
 
     do {
-        fprintf(stderr, "[ROB colla, %d rob entries, regs: %d free, %d in-flight; FL %d-%d]\n",
+        fprintf(stderr, "%05d [ROB colla, %d rob entries, regs: %d free, %d in-flight; FL %d-%d]\n",
+                n_cycles,
                 (ROB_SIZE + rob_wp - rob_rp) % ROB_SIZE,
                 n_free_regs, n_regs_in_flight,
                 freelist_rp, freelist_wp);
@@ -639,6 +640,8 @@ lsc_fetch(cpu_state_t *state, verbosity_t verbosity)
             fb_wp = 0;
         fb_size++;
     }
+
+    fprintf(stderr, "%05d [fetched %d, buffer %d]\n", n_cycles, n, fb_size);
 }
 
 static void
@@ -720,7 +723,8 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
         else
             ex_buffer[ex_size++] = mop;
 
-        fprintf(stderr, "[ROB alloc, %d rob entries, regs: %d free, %d in-flight; FL %d-%d]\n",
+        fprintf(stderr, "%05d [ROB alloc, %d rob entries, regs: %d free, %d in-flight; FL %d-%d]\n",
+                n_cycles,
                 (ROB_SIZE + rob_wp - rob_rp) % ROB_SIZE,
                 n_free_regs, n_regs_in_flight,
                 freelist_rp, freelist_wp);
