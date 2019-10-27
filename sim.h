@@ -88,6 +88,7 @@ bool simple_htif(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity, 
 
 // XXX hackish
 char *disk_image;
+bool CONFIG_EARLY_RELEASE;
 
 #endif
 

@@ -69,7 +69,9 @@
  * Early release frees the old physical register at allocation time
  * and roll-back then have to undo that (but this is cheap).
  */
-#define EARLY_RELEASE           1
+
+bool CONFIG_EARLY_RELEASE;
+//#define EARLY_RELEASE           1
 
 // Two special physical registers: the constant zero and the sink for
 // for r0 destination (it's never read)
@@ -187,6 +189,20 @@ is_rob_full(void)
     return (rob_wp + 1) % ROB_SIZE == rob_rp;
 }
 
+static void
+assert_not_in_freelist(int x)
+{
+    int p = freelist_rp;
+    while (p != freelist_wp) {
+        if (freelist[p] == x)
+            fprintf(stderr, "%05d [FAILURE p%d in already free at pos %d\n",
+                    n_cycles, x, p);
+        assert(freelist[p] != x);
+	if (++p == sizeof freelist / sizeof *freelist)
+	    p = 0;
+    }
+}
+
 void
 show_freelist(char *s)
 {
@@ -213,58 +229,46 @@ show_freelist(char *s)
 static void
 free_reg(unsigned pr)
 {
+    assert((unsigned) pr < PHYSICAL_REGS);
     if (pr == PR_ZERO || pr == PR_SINK)
 	return;
 
-    if (0)
-    fprintf(stderr, "[free  P%02d; %d/%d]\n", pr, n_free_regs, n_regs_in_flight);
+    fprintf(stderr, "%05d [free  p%02d; %d/%d FL %d-%d]\n",
+            n_cycles, pr, n_free_regs, n_regs_in_flight,
+            freelist_rp, freelist_wp);
+
     //show_freelist("");
-    assert((unsigned) pr < PHYSICAL_REGS);
-
-    // DEBUG: Make sure pr isn't already on the freelist
-    int p = freelist_rp;
-    while (p != freelist_wp) {
-        if (freelist[p] == pr)
-            show_freelist("");
-
-        assert_ne(freelist[p], pr);
-        if (++p == sizeof freelist / sizeof *freelist)
-            p = 0;
-    }
+    assert_not_in_freelist(pr);
 
     freelist[freelist_wp] = pr;
     if (++freelist_wp == sizeof freelist / sizeof *freelist)
         freelist_wp = 0;
-    assert(freelist_rp != freelist_wp);
-
     ++n_free_regs;
+
+    assert(freelist_rp != freelist_wp);
     assert(0 <= n_free_regs && n_free_regs <= PHYSICAL_REGS - 2);
     assert((PHYSICAL_REGS + freelist_wp - freelist_rp) % PHYSICAL_REGS == n_free_regs);
-
     show_freelist("at exit of free_reg");
 }
 
 static unsigned
 alloc_reg(void)
 {
-    show_freelist("entry to alloc_reg ");
-
     assert(freelist_rp != freelist_wp);
+    //show_freelist("entry to alloc_reg ");
 
     unsigned pr = freelist[freelist_rp++];
     if (freelist_rp == sizeof freelist / sizeof *freelist)
         freelist_rp = 0;
-
     pr_ready[pr] = false;
-
     --n_free_regs;
-    if (0)
-    fprintf(stderr, "[alloc P%02d; %d/%d]\n", pr, n_free_regs, n_regs_in_flight);
 
+    fprintf(stderr, "%05d [alloc p%02d; %d/%d FL %d-%d]\n",
+            n_cycles, pr, n_free_regs, n_regs_in_flight,
+            freelist_rp, freelist_wp);
+    show_freelist("exit of alloc_reg ");
     assert(0 <= n_free_regs && n_free_regs <= PHYSICAL_REGS - 2);
     assert((PHYSICAL_REGS + freelist_wp - freelist_rp) % PHYSICAL_REGS == n_free_regs);
-
-    show_freelist("exit of alloc_reg ");
 
     return pr;
 }
@@ -376,7 +380,7 @@ visualize_retirement(cpu_state_t *state, rob_entry_t rob)
 
 #if 1
     if (pr != PR_SINK)
-        printf("r%02d/P%03d (P%03d) ", dec.dest_reg, pr, rob.pr_old);
+        printf("r%02d/p%03d (p%03d) ", dec.dest_reg, pr, rob.pr_old);
     else
         printf("                ");
 #endif
@@ -409,6 +413,7 @@ rollback_rob(int keep_rob_index, verbosity_t verbosity)
     show_freelist("entry to rollback");
 
     do {
+        if (0)
         fprintf(stderr, "%05d [ROB colla, %d rob entries, regs: %d free, %d in-flight; FL %d-%d]\n",
                 n_cycles,
                 (ROB_SIZE + rob_wp - rob_rp) % ROB_SIZE,
@@ -427,31 +432,50 @@ rollback_rob(int keep_rob_index, verbosity_t verbosity)
         if (rob[p].r == ISA_NO_REG)
             continue;
 
-#ifdef EARLY_RELEASE
-        // Undo the free'd register and the allocation
-        assert(freelist_wp != freelist_rp);
-        if (freelist_wp-- == 0)
-            freelist_wp = sizeof freelist / sizeof *freelist - 1;
-        if (freelist_rp-- == 0)
-            freelist_rp = sizeof freelist / sizeof *freelist - 1;
-        --n_regs_in_flight;
+        if (CONFIG_EARLY_RELEASE) {
+            // Undo the free'd register and the allocation
+            assert(freelist_wp != freelist_rp);
+            if (freelist_wp-- == 0)
+                freelist_wp = sizeof freelist / sizeof *freelist - 1;
 
-        if (0)
-        fprintf(stderr, "[rollback: unalloc P%02d/unfree P%02d; %2d/%2d; %2d-%2d]\n",
-                freelist[freelist_rp],
-                freelist[freelist_wp],
-                n_free_regs, n_regs_in_flight,
-                freelist_rp, freelist_wp);
+            assert_not_in_freelist(map[rob[p].r]);
 
-        assert(0 <= n_regs_in_flight && n_free_regs - n_regs_in_flight <= PHYSICAL_REGS - 2);
-        assert((PHYSICAL_REGS + freelist_wp - freelist_rp) % PHYSICAL_REGS == n_free_regs);
-#else
-        free_reg(map[rob[p].r]);
-#endif
+            if (freelist_rp-- == 0)
+                freelist_rp = sizeof freelist / sizeof *freelist - 1;
 
-        if (rob[p].r != ISA_NO_REG) {
-            map[rob[p].r] = rob[p].pr_old;
+            if (map[rob[p].r] != freelist[freelist_rp])
+                fprintf(stderr, "      map[r%d] (p%d) != freelist[%d] (p%d)\n",
+                        rob[p].r, map[rob[p].r], freelist_rp, freelist[freelist_rp]);
+
+            assert(map[rob[p].r] == freelist[freelist_rp]);
+
+            --n_regs_in_flight;
+
+            fprintf(stderr, "%05d [rollback: unalloc p%02d/unfree p%02d; %2d/%2d; %2d-%2d]\n",
+                    n_cycles,
+                    freelist[freelist_rp],
+                    freelist[freelist_wp],
+                    n_free_regs, n_regs_in_flight,
+                    freelist_rp, freelist_wp);
+            assert(0 <= n_regs_in_flight && n_free_regs - n_regs_in_flight <= PHYSICAL_REGS - 2);
+            assert((PHYSICAL_REGS + freelist_wp - freelist_rp) % PHYSICAL_REGS == n_free_regs);
+        } else {
+            // free_reg(map[rob[p].r]);
+            // We _should_ be able to just unallocate it?
+            if (freelist_rp-- == 0)
+                freelist_rp = sizeof freelist / sizeof *freelist - 1;
+            ++n_free_regs;
+            assert(map[rob[p].r] == freelist[freelist_rp]);
+
+            fprintf(stderr,
+                    "%05d [rollback: unalloc p%02d; %2d/%2d; %2d-%2d]\n",
+                    n_cycles,
+                    freelist[freelist_rp],
+                    n_free_regs, n_regs_in_flight,
+                    freelist_rp, freelist_wp);
         }
+
+        map[rob[p].r] = rob[p].pr_old;
     } while (rob_rp != rob_wp);
 
     if (memcmp(map, art, sizeof map) != 0) {
@@ -586,25 +610,25 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
 
         if (re.dec.insn_addr != copc) {
             fprintf(stderr, "COSIM: REF PC %08"PRIx64" != LSC PC %08"PRIx64"\n",
-                   copc & 0xFFFFFFFF, re.dec.insn_addr & 0xFFFFFFFF);
+                    copc & 0xFFFFFFFF, re.dec.insn_addr & 0xFFFFFFFF);
             assert(0);
         }
 
         if (re.r != ISA_NO_REG && prf[re.pr] != costate->r[re.r]) {
             fprintf(stderr, "COSIM: REF RES %08"PRIx64" != LSC RES %08"PRIx64"\n",
-                   costate->r[re.r] & 0xFFFFFFFF, prf[re.pr] & 0xFFFFFFFF);
+                    costate->r[re.r] & 0xFFFFFFFF, prf[re.pr] & 0xFFFFFFFF);
             assert(0);
         }
 
-#ifdef EARLY_RELEASE
-        if (re.r != ISA_NO_REG) {
-            --n_regs_in_flight;
-            assert(0 <= n_regs_in_flight && n_free_regs - n_regs_in_flight <= PHYSICAL_REGS - 2);
-            assert((PHYSICAL_REGS + freelist_wp - freelist_rp) % PHYSICAL_REGS == n_free_regs);
+        if (CONFIG_EARLY_RELEASE) {
+            if (re.r != ISA_NO_REG) {
+                --n_regs_in_flight;
+                assert(0 <= n_regs_in_flight && n_free_regs - n_regs_in_flight <= PHYSICAL_REGS - 2);
+                assert((PHYSICAL_REGS + freelist_wp - freelist_rp) % PHYSICAL_REGS == n_free_regs);
+            }
+        } else {
+            free_reg(re.pr_old);
         }
-#else
-        free_reg(re.pr_old);
-#endif
 
         if (++rob_rp == ROB_SIZE)
             rob_rp = 0;
@@ -641,6 +665,7 @@ lsc_fetch(cpu_state_t *state, verbosity_t verbosity)
         fb_size++;
     }
 
+    if (0)
     fprintf(stderr, "%05d [fetched %d, buffer %d]\n", n_cycles, n, fb_size);
 }
 
@@ -673,7 +698,7 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
            ex_size < EX_BUFFER_SIZE &&
            me_size < ME_BUFFER_SIZE &&
            !is_rob_full() &&
-           n_regs_in_flight < n_free_regs) {
+           n_regs_in_flight + 1 < n_free_regs) {
 
         fetch_parcel_t fetched = fb[fb_rp];
         isa_decoded_t dec      = arch->decode(fetched.addr, fetched.insn);
@@ -704,12 +729,12 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
             .rob_index = rob_index
         };
 
-#ifdef EARLY_RELEASE
-        if (old_pr != PR_SINK && old_pr != PR_ZERO) {
-	    free_reg(old_pr);
-            ++n_regs_in_flight;
+        if (CONFIG_EARLY_RELEASE) {
+            if (old_pr != PR_SINK && old_pr != PR_ZERO) {
+                free_reg(old_pr);
+                ++n_regs_in_flight;
+            }
         }
-#endif
 
         if (dec.dest_reg != ISA_NO_REG) {
             map[dec.dest_reg] = mop.pr_wb;
@@ -723,6 +748,7 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
         else
             ex_buffer[ex_size++] = mop;
 
+        if (0)
         fprintf(stderr, "%05d [ROB alloc, %d rob entries, regs: %d free, %d in-flight; FL %d-%d]\n",
                 n_cycles,
                 (ROB_SIZE + rob_wp - rob_rp) % ROB_SIZE,
