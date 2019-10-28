@@ -1151,6 +1151,8 @@ static void tick(cpu_state_t *s, int instret, cpu_state_t *cosimstate)
         s->msr[CSR_MINSTRET] = cosimstate->msr[CSR_MINSTRET];
         s->msr[CSR_MCYCLE]   = cosimstate->msr[CSR_MCYCLE];
         s->msr[CSR_MIP]      = cosimstate->msr[CSR_MIP];
+
+        // Interrupts will be forced externally
     } else {
         s->counter += 1;
         // XXX for now, an instruction per tick
@@ -1162,9 +1164,10 @@ static void tick(cpu_state_t *s, int instret, cpu_state_t *cosimstate)
             s->mtimereg[0] += 10;
             if (s->mtimereg[0] >= s->mtimereg[1])
                 s->msr[CSR_MIP] |= MIP_MTIP;}
-    }
 
-    check_for_interrupts(s);}
+        check_for_interrupts(s);
+    }
+}
 
 static uint64_t read_msr(cpu_state_t *s, unsigned csrno, isa_exception_t *exc)
 {

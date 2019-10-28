@@ -70,6 +70,8 @@
  * and roll-back then have to undo that (but this is cheap).
  */
 
+static const bool debug_freelist = false;
+
 bool CONFIG_EARLY_RELEASE;
 //#define EARLY_RELEASE           1
 
@@ -203,23 +205,6 @@ assert_not_in_freelist(int x)
     }
 }
 
-void
-show_freelist(char *s)
-{
-    return;
-    fprintf(stderr, "%s: %2d-%2d", s, freelist_rp, freelist_wp);
-
-    int p = freelist_rp;
-
-    while (p != freelist_wp) {
-	fprintf(stderr, " %d", freelist[p]);
-	if (++p == sizeof freelist / sizeof *freelist)
-	    p = 0;
-    }
-
-    fprintf(stderr, "\n");
-}
-
 #define assert_ne(a, b)                                 \
     ({long long __a = (a), __b = (b);                   \
     if (__a == __b) {                                   \
@@ -233,11 +218,11 @@ free_reg(unsigned pr)
     if (pr == PR_ZERO || pr == PR_SINK)
 	return;
 
+    if (debug_freelist)
     fprintf(stderr, "%05d [free  p%02d; %d/%d FL %d-%d]\n",
             n_cycles, pr, n_free_regs, n_regs_in_flight,
             freelist_rp, freelist_wp);
 
-    //show_freelist("");
     assert_not_in_freelist(pr);
 
     freelist[freelist_wp] = pr;
@@ -248,14 +233,12 @@ free_reg(unsigned pr)
     assert(freelist_rp != freelist_wp);
     assert(0 <= n_free_regs && n_free_regs <= PHYSICAL_REGS - 2);
     assert((PHYSICAL_REGS + freelist_wp - freelist_rp) % PHYSICAL_REGS == n_free_regs);
-    show_freelist("at exit of free_reg");
 }
 
 static unsigned
 alloc_reg(void)
 {
     assert(freelist_rp != freelist_wp);
-    //show_freelist("entry to alloc_reg ");
 
     unsigned pr = freelist[freelist_rp++];
     if (freelist_rp == sizeof freelist / sizeof *freelist)
@@ -263,67 +246,14 @@ alloc_reg(void)
     pr_ready[pr] = false;
     --n_free_regs;
 
+    if (debug_freelist)
     fprintf(stderr, "%05d [alloc p%02d; %d/%d FL %d-%d]\n",
             n_cycles, pr, n_free_regs, n_regs_in_flight,
             freelist_rp, freelist_wp);
-    show_freelist("exit of alloc_reg ");
     assert(0 <= n_free_regs && n_free_regs <= PHYSICAL_REGS - 2);
     assert((PHYSICAL_REGS + freelist_wp - freelist_rp) % PHYSICAL_REGS == n_free_regs);
 
     return pr;
-}
-
-static void
-show_rob(const char *msg)
-{
-    unsigned p = rob_rp;
-
-    fprintf(stderr, "ROB%s:\n", msg);
-    while (p != rob_wp) {
-        fetch_parcel_t fp = rob[p].fp;
-        fprintf(stderr, "  rob[%02d] = %c %d:%08x %08x\n",
-               p, "UC"[rob[p].committed], fp.seqno, (uint32_t)fp.addr, fp.insn);
-        if (++p == ROB_SIZE)
-            p = 0;
-    }
-}
-
-static void
-show_ex(void)
-{
-    if (ex_size)
-        fprintf(stderr, "EX:\n");
-    for (int i = 0; i < ex_size; ++i) {
-        micro_op_t mop = ex_buffer[i];
-        fetch_parcel_t fp = mop.fetched;
-
-        fprintf(stderr, "  rob[%02d] %d:%08x %08x pr%d%c, pr%d%c -> pr%d %s ",
-                mop.rob_index,
-                fp.seqno, (uint32_t)fp.addr, fp.insn,
-                mop.pr_a, "WR"[pr_ready[mop.pr_a]],
-                mop.pr_b, "WR"[pr_ready[mop.pr_b]],
-                mop.pr_wb, pr_ready[mop.pr_a] & pr_ready[mop.pr_b] ? "READY" : "     ");
-        isa_disass(stderr, arch, mop.dec, (isa_result_t) { .result = 0xEEEEEEEE });
-    }
-}
-
-static void
-show_me(void)
-{
-    if (me_size)
-        fprintf(stderr, "ME:\n");
-    for (int i = 0; i < me_size; ++i) {
-        micro_op_t mop = me_buffer[i];
-        fetch_parcel_t fp = mop.fetched;
-
-        fprintf(stderr, "  rob[%02d] %d:%08x %08x pr%d%c, pr%d%c -> pr%d %s ",
-                mop.rob_index,
-                fp.seqno, (uint32_t)fp.addr, fp.insn,
-                mop.pr_a, "WR"[pr_ready[mop.pr_a]],
-                mop.pr_b, "WR"[pr_ready[mop.pr_b]],
-                mop.pr_wb, pr_ready[mop.pr_a] & pr_ready[mop.pr_b] ? "READY" : "     ");
-        isa_disass(stderr, arch, mop.dec, (isa_result_t) { .result = 0xEEEEEEEE });
-    }
 }
 
 static unsigned
@@ -338,12 +268,6 @@ allocate_rob(int r, int pr, int pr_old, fetch_parcel_t fp)
         .r = r, .pr = pr, .pr_old = pr_old, .committed = false,
         .fp = fp
     };
-
-    if (is_rob_full()) {
-        show_rob(" full");
-        show_ex();
-        show_me();
-    }
 
     if (++rob_wp == ROB_SIZE)
         rob_wp = 0;
@@ -410,8 +334,6 @@ visualize_retirement(cpu_state_t *state, rob_entry_t rob)
 static void
 rollback_rob(int keep_rob_index, verbosity_t verbosity)
 {
-    show_freelist("entry to rollback");
-
     do {
         if (0)
         fprintf(stderr, "%05d [ROB colla, %d rob entries, regs: %d free, %d in-flight; FL %d-%d]\n",
@@ -451,6 +373,7 @@ rollback_rob(int keep_rob_index, verbosity_t verbosity)
 
             --n_regs_in_flight;
 
+            if (debug_freelist)
             fprintf(stderr, "%05d [rollback: unalloc p%02d/unfree p%02d; %2d/%2d; %2d-%2d]\n",
                     n_cycles,
                     freelist[freelist_rp],
@@ -467,6 +390,7 @@ rollback_rob(int keep_rob_index, verbosity_t verbosity)
             ++n_free_regs;
             assert(map[rob[p].r] == freelist[freelist_rp]);
 
+    if (debug_freelist)
             fprintf(stderr,
                     "%05d [rollback: unalloc p%02d; %2d/%2d; %2d-%2d]\n",
                     n_cycles,
@@ -488,8 +412,6 @@ rollback_rob(int keep_rob_index, verbosity_t verbosity)
 
     exception_seqno = ~0ULL;
     n_pending_stores = 0;
-
-    show_freelist("exit from rollback");
 }
 
 
@@ -635,7 +557,7 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
     }
 
     arch->tick(state, n_retired, NULL);
-    assert((state->msr[0x342] & (1 << 31)) == 0);
+    //assert((state->msr[0x342] & (1 << 31)) == 0);
 }
 
 static void
@@ -668,25 +590,6 @@ lsc_fetch(cpu_state_t *state, verbosity_t verbosity)
     if (0)
     fprintf(stderr, "%05d [fetched %d, buffer %d]\n", n_cycles, n, fb_size);
 }
-
-static void
-show_fb(void)
-{
-    unsigned p = fb_rp;
-    if (fb_size)
-        fprintf(stderr, "FB: %d\n", fb_size);
-    if (0)
-    for (int i = 0; i < fb_size; ++i) {
-        fetch_parcel_t fp = fb[p];
-
-        fprintf(stderr, "  %d:%08" PRIx64 " %08x\n",
-                fp.seqno, fp.addr, fp.insn);
-
-        if (++p == FETCH_BUFFER_SIZE)
-            p = 0;
-    }
-}
-
 
 static void
 lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
@@ -1018,13 +921,6 @@ run_lsc(int num_images, char *images[], verbosity_t verbosity)
 
     memcpy(art, map, sizeof art);
     for (n_cycles = 0;; ++n_cycles) {
-        if (verbosity) {
-            //fprintf(stderr, "\nN_Cycles #%d:\n", n_cycles);
-            if (0) show_fb();
-            if (0) show_ex();
-            if (0) show_rob("");
-        }
-
         if (step_lsc(state, costate, verbosity))
             break;
 
