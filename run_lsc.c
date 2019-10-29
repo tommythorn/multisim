@@ -21,22 +21,22 @@
  *
  * Correctness:
  *
+ * - Force interrupts on cosim model
+ *
+ * Perf:
+ *
+ * - Predict branches
  * - Misspeculated stores corrupt the memory.  Solutions from simplest to most advanced:
- *   0. block stores until retirement.  Block loads if there are any pending stores.
  *   1. Same but, block loads only if there are overlapping stores.
  *   2. Same but, forward completely overlapping stores with known data.
  *   ...
  *   ?. Track unresolved stores
  *   ?. ... and loads (full OOO)
- *
- * Perf:
- *
- * - Allow loads to execute in the prescence of unretired, but non-overlapping stores
+ * - Allow loads to execute in the presence of unretired, but non-overlapping stores
  * - .... Further, allow loads to execute as long as all earlier stores have committed
  *   (and forward as needed)
  * - crack stores into store data and store address
  *
- * - Predict branches
  * - LSC
  *
  * Cleanup:
@@ -533,13 +533,13 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
         if (re.dec.insn_addr != copc) {
             fprintf(stderr, "COSIM: REF PC %08"PRIx64" != LSC PC %08"PRIx64"\n",
                     copc & 0xFFFFFFFF, re.dec.insn_addr & 0xFFFFFFFF);
-            assert(0);
+            assert(re.dec.insn_addr == copc);
         }
 
         if (re.r != ISA_NO_REG && prf[re.pr] != costate->r[re.r]) {
             fprintf(stderr, "COSIM: REF RES %08"PRIx64" != LSC RES %08"PRIx64"\n",
                     costate->r[re.r] & 0xFFFFFFFF, prf[re.pr] & 0xFFFFFFFF);
-            assert(0);
+            assert(prf[re.pr] == costate->r[re.r]);
         }
 
         if (CONFIG_EARLY_RELEASE) {
