@@ -468,21 +468,18 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
     while (rob_rp != rob_wp && rob[rob_rp].committed) {
         rob_entry_t re = rob[rob_rp];
 
-        if (verbosity & VERBOSE_DISASS) {
-            visualize_retirement(state, re);
+        if (arch->get_interrupt_exception(state, &exception_info)) {
+            re.exception = true;
+            costate->pc = arch->handle_exception(costate, costate->pc, exception_info);
         }
+
+        if (verbosity & VERBOSE_DISASS)
+            visualize_retirement(state, re);
 
         if (re.dec.class == isa_insn_class_store && !re.exception) {
 
             assert(pr_ready[re.store_data_pr]);
             assert(0 < n_pending_stores);
-
-            if (0 & verbosity & VERBOSE_DISASS)
-                fprintf(stderr, "%08"PRIx64" S%c (%08"PRIx64") = %08"PRIx64"\n",
-                        re.fp.addr        & 0xFFFFFFFF,
-                        letter_size[re.dec.loadstore_size],
-                        re.store_addr     & 0xFFFFFFFF,
-                        prf[re.store_data_pr] & 0xFFFFFFFF);
 
             isa_exception_t exc = { 0 };
             arch->store(state, re.store_addr, prf[re.store_data_pr],
@@ -557,7 +554,6 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
     }
 
     arch->tick(state, n_retired, NULL);
-    //assert((state->msr[0x342] & (1 << 31)) == 0);
 }
 
 static void
