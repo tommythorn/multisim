@@ -1132,19 +1132,20 @@ insn_exec64(isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u, uint64_t msr_a,
 
 #define HTIF_DEV_SHIFT      (56)
 
-static void check_for_interrupts(cpu_state_t *s) {
-    bool intr_globally_enabled = s->priv < 3 || BF_GET(s->msr[CSR_MSTATUS], CSR_STATUS_MIE_BF);
+static bool
+get_interrupt_exception(cpu_state_t *s, isa_exception_t *exc)
+{
+    bool intr_globally_enabled =
+        s->priv < 3 || BF_GET(s->msr[CSR_MSTATUS], CSR_STATUS_MIE_BF);
     uint32_t pending = s->msr[CSR_MIP] & s->msr[CSR_MIE];
 
     if (pending != 0 && intr_globally_enabled) {
-        isa_exception_t exc = {
-            .code = (1ULL << 31) | __builtin_ctz(pending),
-            .info = 0 }; // XXX 0?
+        raise_exception((1ULL << 31) | __builtin_ctz(pending), 0, exc);
+        return true;
+    }
 
-         // XXX this is broken; we need to have a cleaner way to
-         // servicing interrupts
-        s->pc = handle_exception(s, s->pc, exc);}}
-
+    return false;
+}
 
 /* executed every cycle */
 static void tick(cpu_state_t *s, int instret, cpu_state_t *cosimstate)
@@ -1167,8 +1168,6 @@ static void tick(cpu_state_t *s, int instret, cpu_state_t *cosimstate)
             if (s->mtimereg[0] >= s->mtimereg[1])
                 s->msr[CSR_MIP] |= MIP_MTIP;}
     }
-
-    check_for_interrupts(s);
 }
 
 static uint64_t read_msr(cpu_state_t *s, unsigned csrno, isa_exception_t *exc)
@@ -1577,6 +1576,7 @@ const arch_t arch_riscv32 = {
     .write_msr = write_msr,
     .load = load,
     .store = store,
+    .get_interrupt_exception = get_interrupt_exception,
     .handle_exception = handle_exception,
 };
 #endif
@@ -1595,6 +1595,8 @@ const arch_t arch_riscv64 = {
     .write_msr = write_msr,
     .load = load,
     .store = store,
+    .get_interrupt_exception = get_interrupt_exception,
+    .handle_exception = handle_exception,
 };
 
 // Local Variables:

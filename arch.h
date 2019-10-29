@@ -217,6 +217,8 @@ typedef struct isa_st {
     uint64_t (*load)(cpu_state_t *, uint64_t address, int mem_access_size, isa_exception_t *exc);
     void (*store)(cpu_state_t *, uint64_t address, uint64_t value, int mem_access_size, isa_exception_t *exc);
 
+    bool (*get_interrupt_exception)(cpu_state_t *state, isa_exception_t *exc);
+
     uint64_t (*handle_exception)(cpu_state_t *state, uint64_t insn_addr, isa_exception_t exc);
 } arch_t;
 

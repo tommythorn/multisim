@@ -44,7 +44,7 @@ clean:
 realclean: clean
 	-rm *~
 
-TAGS:
+TAGS tags:
 	etags *.[hc]
 
 test_hello: multisim
