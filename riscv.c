@@ -733,7 +733,7 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
             res.result = (int32_t)res.result;
             break;
         default:
-            assert(0);
+            goto illegal_insn;
         }
         return res;
 
@@ -767,7 +767,7 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
             res.result = op_a & i.i.imm11_0;
             break;
         default:
-            assert(0);
+            goto illegal_insn;
         }
         return res;
 
@@ -883,7 +883,7 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
                 res.result = op_a & op_b;
                 break;
             default:
-                assert(0);
+                goto illegal_insn;
             }
         return res;
 
@@ -938,7 +938,7 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
                 res.result = (int32_t)res.result;
                 break;
             default:
-                assert(0);
+                goto illegal_insn;
             }
         return res;
 
@@ -961,7 +961,7 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
             res.branch_taken = (i.sb.funct3 & 1) ^ (op_a_u < op_b_u);
             break;
         default:
-            assert(0);
+            goto illegal_insn;
         }
 
         if (res.branch_taken && dec.jumpbranch_target & 3)
@@ -994,6 +994,7 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
              i.i.imm11_0, reg_name[i.r.rs1], i.r.funct3,
              reg_name[i.r.rd],
              opcode_name[i.r.opcode], i.r.opext);
+    illegal_insn:
         return raise_exception(EXCP_INSN_ILLEGAL, 0, exc);
     }
 
@@ -1061,7 +1062,7 @@ insn_exec_system(cpu_state_t *s, isa_decoded_t dec, uint64_t op_a_u, uint64_t op
                         i.raw, i.i.imm11_0);
                 dump_cache_stats((riscv_state_t *)s->arch_specific);
                 fflush(stdout);
-                assert(0);
+                goto illegal_insn;
                 break;
             }
 
@@ -1073,7 +1074,7 @@ insn_exec_system(cpu_state_t *s, isa_decoded_t dec, uint64_t op_a_u, uint64_t op
         case CSRRWI: res.msr_result =          i.i.rs1; return res;
 
         default:
-            assert(0);
+            goto illegal_insn;
         }
         break;
 
@@ -1081,6 +1082,7 @@ insn_exec_system(cpu_state_t *s, isa_decoded_t dec, uint64_t op_a_u, uint64_t op
         break;
 
     default:
+    illegal_insn:
         warn("Opcode %s exec not implemented, insn %08"PRIx32":%08x "
              "i{%x,%s,%x,%s,%s,%x}\n",
              opcode_name[i.r.opcode], (uint32_t)dec.insn_addr, i.raw,
