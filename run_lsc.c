@@ -283,7 +283,6 @@ visualize_retirement(cpu_state_t *state, rob_entry_t rob)
 {
 #define WIDTH 32
 
-    static int next_seqno = 0;
     char line[WIDTH+1];
     fetch_parcel_t fp = rob.fp;
     isa_decoded_t dec = rob.dec;
@@ -299,15 +298,19 @@ visualize_retirement(cpu_state_t *state, rob_entry_t rob)
     line[fp.commit_ts  % WIDTH] = 'C';
     line[n_cycles         % WIDTH] = 'R';
 
-    printf("%6d ", n_cycles);
+    printf("%5d ", n_cycles);
 
-    printf("%6d %s ", next_seqno++, line);
+#if 0
+    printf("%5d ", fp.seqno);
+#endif
+
+    printf("%s ", line);
 
 #if 1
     if (pr != PR_SINK)
-        printf("r%02d/p%03d (p%03d) ", dec.dest_reg, pr, rob.pr_old);
+        printf("r%02d:p%02d>p%02d ", dec.dest_reg, rob.pr_old, pr);
     else
-        printf("                ");
+        printf("            ");
 #endif
     isa_disass(stdout, arch, dec, (isa_result_t) { .result = prf[pr] });
 
