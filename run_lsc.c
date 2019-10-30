@@ -156,6 +156,7 @@ static unsigned         map[32];
 static unsigned         art[32];
 static int64_t          prf[PHYSICAL_REGS];
 static bool             pr_ready[PHYSICAL_REGS]; // Scoreboard
+static bool             pr_ready_next[PHYSICAL_REGS]; // Scoreboard
 static unsigned         freelist[PHYSICAL_REGS];
 static micro_op_t       ex_buffer[EX_BUFFER_SIZE];
 static micro_op_t       me_buffer[ME_BUFFER_SIZE];
@@ -243,7 +244,7 @@ alloc_reg(void)
     unsigned pr = freelist[freelist_rp++];
     if (freelist_rp == sizeof freelist / sizeof *freelist)
         freelist_rp = 0;
-    pr_ready[pr] = false;
+    pr_ready_next[pr] = false;
     --n_free_regs;
 
     if (debug_freelist)
@@ -755,7 +756,7 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, micro_op_t mop)
     }
 
     prf[mop.pr_wb] = res.result;
-    pr_ready[mop.pr_wb] = true;
+    pr_ready_next[mop.pr_wb] = true;
 
     if (mop.dec.dest_msr != ISA_NO_REG)
         arch->write_msr(state, mop.dec.dest_msr, res.msr_result, &exc);
@@ -866,6 +867,8 @@ step_lsc(
     cpu_state_t *state, cpu_state_t *costate,
     verbosity_t verbosity)
 {
+    memcpy(pr_ready, pr_ready_next, sizeof pr_ready);
+
     lsc_retire(state, costate, verbosity);
     lsc_execute(state, verbosity);
     lsc_decode_rename(state, verbosity);
@@ -897,9 +900,9 @@ run_lsc(int num_images, char *images[], verbosity_t verbosity)
     uint64_t tohost = 0;
     getelfsym(&info, "tohost", &tohost);
 
-    /* Pr_Ready and reservation station initialization */
-    memset(pr_ready, 0, sizeof pr_ready);
-    pr_ready[PR_ZERO] = true;
+    /* pr_ready and reservation station initialization */
+    memset(pr_ready_next, 0, sizeof pr_ready_next);
+    pr_ready_next[PR_ZERO] = true;
 
     freelist_wp = freelist_rp = n_free_regs = n_regs_in_flight = 0;
 
@@ -912,7 +915,7 @@ run_lsc(int num_images, char *images[], verbosity_t verbosity)
         int pr       = alloc_reg();
         map[i]       = pr;
         prf[pr]      = state->r[i];
-        pr_ready[pr] = true;
+        pr_ready_next[pr] = true;
     }
 
     memcpy(art, map, sizeof art);
