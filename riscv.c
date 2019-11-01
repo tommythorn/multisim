@@ -685,12 +685,8 @@ decode(uint64_t insn_addr, uint32_t insn)
 static isa_result_t
 raise_exception(int cause, uint64_t info, isa_exception_t *exc)
 {
-    exc->raised = true;
-    exc->code = cause;
-    exc->info = info;
-
-    isa_result_t res  = { 0 };
-    return res;
+    *exc = (isa_exception_t) { true, cause, info };
+    return (isa_result_t) { 0 };
 }
 
 
