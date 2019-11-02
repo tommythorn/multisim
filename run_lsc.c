@@ -472,10 +472,8 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
     while (rob_rp != rob_wp && rob[rob_rp].committed) {
         rob_entry_t re = rob[rob_rp];
 
-        if (arch->get_interrupt_exception(state, &exception_info)) {
+        if (!re.dec.system && arch->get_interrupt_exception(state, &exception_info))
             re.exception = true;
-            costate->pc = arch->handle_exception(costate, costate->pc, exception_info);
-        }
 
         if (verbosity & VERBOSE_DISASS)
             visualize_retirement(state, re);
@@ -502,8 +500,12 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
                         exception_info.code, exception_info.info);
 
             int prev_rob_rp = rob_rp == 0 ? ROB_SIZE - 1 : rob_rp - 1;
+            //assert(state->msr[0x300] == costate->msr[0x300]);
             flush_and_redirect(state, verbosity, prev_rob_rp, re.fp.seqno - 1,
                                arch->handle_exception(state, re.dec.insn_addr, exception_info));
+
+            costate->pc = arch->handle_exception(costate, costate->pc, exception_info);
+            //assert(state->msr[0x300] == costate->msr[0x300]);
             break;
         }
 
