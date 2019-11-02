@@ -56,7 +56,8 @@ step_simple(const arch_t *arch, cpu_state_t *state, cpu_state_t *cosimstate)
 
     uint64_t atomic_load_addr = op_a;
 
-    arch->get_interrupt_exception(state, &exc);
+    if (!cosimstate)
+        arch->get_interrupt_exception(state, &exc);
 
     if (exc.raised)
         goto exception;
