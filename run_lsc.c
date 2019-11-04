@@ -452,6 +452,7 @@ flush_and_redirect(cpu_state_t *state, verbosity_t verbosity, int rob_index, uns
     fb_size = 0;
     fb_rp = fb_wp;
     ex_size = 0;
+    ex_needs[0] = ex_needs[1] = ex_needs[2] = 0;
     me_size = 0;
 
     rollback_rob(rob_index, verbosity);
@@ -631,6 +632,11 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
            !is_rob_full() &&
            n_regs_in_flight + 1 < n_free_regs) {
 
+        assert((ex_needs[0] & ex_needs[1]) == 0);
+        assert((ex_needs[0] & ex_needs[2]) == 0);
+        assert((ex_needs[1] & ex_needs[2]) == 0);
+        assert(__builtin_popcount(ex_needs[0] | ex_needs[1] | ex_needs[2]) == ex_size);
+
         fetch_parcel_t fetched = fb[fb_rp];
         isa_decoded_t dec      = arch->decode(fetched.addr, fetched.insn);
 
@@ -679,15 +685,28 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
         else {
             ex_size++;
 
-            // XXX for now, just organize the ex_buffer by rob id, to
-            // avoid having to many indicies to worry about.
+            // XXX for now, just organize the ex_buffer by ROB index,
+            // to avoid having to many index spaces to worry about.
             ex_buffer[rob_index] = mop;
+
+            // XXX The problem here is that instructions executing
+            // right now will be ready next cycle and miss the
+            // opportunity to update ex_needs[].  Clearly I can't
+            // depend on instructions that I know will execute this
+            // cycle, but here we are tracking dependencies on
+            // registers, not instructions.  This needs a rethink.
+
             if (!pr_ready[mop.pr_a]) depends[mop.pr_a] |= 1ULL << rob_index;
             if (!pr_ready[mop.pr_b]) depends[mop.pr_b] |= 1ULL << rob_index;
 
             int dep = !pr_ready[mop.pr_a];
             dep += !pr_ready[mop.pr_b] && mop.pr_b != mop.pr_a;
             ex_needs[dep] |= 1ULL << rob_index;
+
+            assert((ex_needs[0] & ex_needs[1]) == 0);
+            assert((ex_needs[0] & ex_needs[2]) == 0);
+            assert((ex_needs[1] & ex_needs[2]) == 0);
+            assert(__builtin_popcount(ex_needs[0] | ex_needs[1] | ex_needs[2]) == ex_size);
         }
 
         if (0)
@@ -838,6 +857,12 @@ lsc_execute(cpu_state_t *state, verbosity_t verbosity)
     for (int i = 0; i < EX_BUFFER_SIZE; ++i)
         if ((1ULL << i) & ready_to_run) {
             ex_needs[0] &= ~(1ULL << i);
+            --ex_size;
+
+            assert((ex_needs[0] & ex_needs[1]) == 0);
+            assert((ex_needs[0] & ex_needs[2]) == 0);
+            assert((ex_needs[1] & ex_needs[2]) == 0);
+            assert(__builtin_popcount(ex_needs[0] | ex_needs[1] | ex_needs[2]) == ex_size);
 
             lsc_exec1(state, verbosity, ex_buffer[i]);
             rob[i].fp.execute_ts = n_cycles;
