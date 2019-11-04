@@ -60,9 +60,9 @@
 
 #define FETCH_BUFFER_SIZE      16
 #define FETCH_WIDTH            16
-#define ROB_SIZE               61
+#define ROB_SIZE               61 // <= 64 for now (using uint64_t as bitmasks)
 #define PHYSICAL_REGS          73 // XXX Should exclude the two reserved ones
-#define EX_BUFFER_SIZE         15
+#define EX_BUFFER_SIZE         ROB_SIZE // XXX same, for now
 #define ME_BUFFER_SIZE         28
 
 /*
@@ -160,6 +160,32 @@ static bool             pr_ready_next[PHYSICAL_REGS]; // Scoreboard
 static unsigned         freelist[PHYSICAL_REGS];
 static micro_op_t       ex_buffer[EX_BUFFER_SIZE];
 static micro_op_t       me_buffer[ME_BUFFER_SIZE];
+
+/*
+ * A CAM-free, constant-time, RAM based scheduler organizes the
+ * waitlist (wait set) in three parts based on the number of operands
+ * that are still outstanding:
+ *
+ * - needs0 (AKA, ready, waiting for nothing)
+ * - needs1
+ * - needs2
+ *
+ * When a physical register gets defined, all of the depending
+ * instructions moves up in the hierarchy: the ones in needs1 become
+ * ready, the somes in needs2 moves to needs1.
+ *
+ * We maintain a map from phys. registers to dependent instructions.
+ * As instructions can start in needs2 migrate to needs1, we'd need to
+ * update this map both rename time and execute.
+ *
+ * For now we implement the sets with bitmaps (and thus require
+ * EX_BUFFER_SIZE <= 64), but eventually we'll make everything RAM
+ * based.
+ */
+static uint64_t         ex_needs[3];
+
+// depends[pr], the set of instructions in ex_needsX waiting on pr
+static uint64_t         depends[PHYSICAL_REGS];
 
 static const arch_t    *arch;
 static unsigned         fetch_seqno;
@@ -650,8 +676,19 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
 
         if (dec.class == isa_insn_class_load || dec.class == isa_insn_class_store)
             me_buffer[me_size++] = mop;
-        else
-            ex_buffer[ex_size++] = mop;
+        else {
+            ex_size++;
+
+            // XXX for now, just organize the ex_buffer by rob id, to
+            // avoid having to many indicies to worry about.
+            ex_buffer[rob_index] = mop;
+            if (!pr_ready[mop.pr_a]) depends[mop.pr_a] |= 1ULL << rob_index;
+            if (!pr_ready[mop.pr_b]) depends[mop.pr_b] |= 1ULL << rob_index;
+
+            int dep = !pr_ready[mop.pr_a];
+            dep += !pr_ready[mop.pr_b] && mop.pr_b != mop.pr_a;
+            ex_needs[dep] |= 1ULL << rob_index;
+        }
 
         if (0)
         fprintf(stderr, "%05d [ROB alloc, %d rob entries, regs: %d free, %d in-flight; FL %d-%d]\n",
@@ -763,6 +800,12 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, micro_op_t mop)
     prf[mop.pr_wb] = res.result;
     pr_ready_next[mop.pr_wb] = true;
 
+    ex_needs[0] |= ex_needs[1] & depends[mop.pr_wb];
+    ex_needs[1] &= ~depends[mop.pr_wb];
+
+    ex_needs[1] |= ex_needs[2] & depends[mop.pr_wb];
+    ex_needs[2] &= ~depends[mop.pr_wb];
+
     if (mop.dec.dest_msr != ISA_NO_REG)
         arch->write_msr(state, mop.dec.dest_msr, res.msr_result, &exc);
 
@@ -789,23 +832,17 @@ exception:
 static void
 lsc_execute(cpu_state_t *state, verbosity_t verbosity)
 {
-    bool ex_ready[EX_BUFFER_SIZE];
-    for (int i = 0; i < ex_size; ++i) {
-        micro_op_t mop = ex_buffer[i];
-        ex_ready[i] = pr_ready[mop.pr_a] & pr_ready[mop.pr_b];
-    }
+    uint64_t ready_to_run = ex_needs[0];
 
     /* Schedule and Execute */
-    int ex_size_next = 0;
-    for (int i = 0; i < ex_size; ++i)
-        if (ex_ready[i]) {
-            lsc_exec1(state, verbosity, ex_buffer[i]);
-            rob[ex_buffer[i].rob_index].fp.execute_ts = n_cycles;
-            rob[ex_buffer[i].rob_index].fp.commit_ts = n_cycles;
-        } else
-            ex_buffer[ex_size_next++] = ex_buffer[i];
+    for (int i = 0; i < EX_BUFFER_SIZE; ++i)
+        if ((1ULL << i) & ready_to_run) {
+            ex_needs[0] &= ~(1ULL << i);
 
-    ex_size = ex_size_next;
+            lsc_exec1(state, verbosity, ex_buffer[i]);
+            rob[i].fp.execute_ts = n_cycles;
+            rob[i].fp.commit_ts = n_cycles;
+        }
 
     // ME has to be in order
     int p;
