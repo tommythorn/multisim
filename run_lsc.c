@@ -322,7 +322,7 @@ visualize_retirement(cpu_state_t *state, rob_entry_t rob)
     //line[fp.issue_ts   % WIDTH] = 'I';
     line[fp.execute_ts % WIDTH] = 'E';
     line[fp.commit_ts  % WIDTH] = 'C';
-    line[n_cycles         % WIDTH] = 'R';
+    line[n_cycles      % WIDTH] = 'R';
 
     printf("%5d ", n_cycles);
 
