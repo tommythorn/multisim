@@ -626,8 +626,8 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
         micro_op_t mop = {
             .fetched = fetched,
             .dec     = dec,
-            .pr_a    = map[dec.source_reg_a],
-            .pr_b    = map[dec.source_reg_b],
+            .pr_a    = dec.source_reg_a == ISA_NO_REG ? PR_ZERO : map[dec.source_reg_a],
+            .pr_b    = dec.source_reg_b == ISA_NO_REG ? PR_ZERO : map[dec.source_reg_b],
             .pr_wb   = pr,
             .rob_index = rob_index
         };
