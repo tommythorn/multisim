@@ -58,9 +58,9 @@
 
 //////// Configuration and magic numbers
 
-#define FETCH_BUFFER_SIZE      16
-#define FETCH_WIDTH            16
-#define ROB_SIZE               61 // <= 64 for now (using uint64_t as bitmasks)
+#define FETCH_BUFFER_SIZE      4
+#define FETCH_WIDTH            4
+#define ROB_SIZE               16 // <= 64 for now (using uint64_t as bitmasks)
 #define PHYSICAL_REGS          73 // XXX Should exclude the two reserved ones
 #define EX_BUFFER_SIZE         ROB_SIZE // XXX same, for now
 #define ME_BUFFER_SIZE         28
