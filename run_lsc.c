@@ -216,6 +216,59 @@ static char             letter_size[256] = {
 
 #define EX_INV() ex_check(__FILE__, __LINE__)
 
+static void dump_microarch_state(void)
+{
+    // Scoreboard, without the retired regs
+    printf("         Scoreboard Ready Regs in flight:");
+    for (int pr = 0; pr < PHYSICAL_REGS; ++pr) {
+        int logical = 0;
+        if (pr_ready[pr]) {
+            for (int r = 0; r < 32; ++r)
+                if (map[r] == pr)
+                    logical = 32*logical + r; // catch multiple mappings to same pr
+            for (int r = 0; r < 32; ++r)
+                if (art[r] == pr)
+                    goto skip;
+            printf(" p%d(x%d)", pr, logical);
+skip:;
+        }
+    }
+    printf("\n");
+
+    // FB
+    printf("         FB size %d, ", fb_size);
+    printf("EX size %d: %08lx/%08lx/%08lx, ", ex_size, ex_needs[0], ex_needs[1], ex_needs[2]);
+    printf("ME size %d, ", me_size);
+    printf("Regs free %d (- in flight = %d)\n", n_free_regs, n_free_regs - n_regs_in_flight - 1);
+
+    // EX
+
+    for (int i = 0; i < EX_BUFFER_SIZE; ++i)
+        if ((ex_needs[0] | ex_needs[1] | ex_needs[2]) & (1l << i)) {
+            micro_op_t mop = ex_buffer[i];
+            int missing = 2 * ((ex_needs[2] >> i) & 1) + ((ex_needs[1] >> i) & 1);
+            printf("         EX[%02d] (missing %d {", i, missing);
+            for (int j = 0; j < PHYSICAL_REGS; ++j)
+                if (depends[j] & (1ULL << i))
+                    printf(" x%d", j);
+            printf("} ");
+
+            isa_disass(stdout, arch, mop.dec, (isa_result_t) { .result = 0 });
+        }
+
+    // ROB
+    for (int p = rob_rp; p != rob_wp;) {
+        rob_entry_t    re = rob[p];
+        isa_decoded_t dec = re.dec;
+
+        printf("         ROB[%02d] = %c", p, re.committed ? 'C' : ' ');
+        isa_disass(stdout, arch, dec, (isa_result_t) { .result = 0 });
+
+        if (++p == ROB_SIZE)
+            p = 0;
+    }
+}
+
 static void ex_check(const char *file, unsigned line)
 {
     // INV: Disjunctive union of ex_size bits
@@ -225,6 +278,7 @@ static void ex_check(const char *file, unsigned line)
         printf("%s:%d: EX %d %08lx/%08lx/%08lx\n", file, line, ex_size,
                ex_needs[0], ex_needs[1], ex_needs[2]);
 
+        dump_microarch_state();
         fflush(stdout);
         exit(-1);
     }
@@ -621,39 +675,7 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
          */
 
         printf("%5d CONCERING LACK OF RETIREMENT\n", n_cycles);
-
-        // FB
-        printf("         FB size %d, ", fb_size);
-        printf("EX size %d: %08lx/%08lx/%08lx, ", ex_size, ex_needs[0], ex_needs[1], ex_needs[2]);
-        printf("ME size %d, ", me_size);
-        printf("Regs free %d (- in flight = %d)\n", n_free_regs, n_free_regs - n_regs_in_flight - 1);
-
-        // EX
-
-        for (int i = 0; i < EX_BUFFER_SIZE; ++i)
-            if ((ex_needs[0] | ex_needs[1] | ex_needs[2]) & (1l << i)) {
-                micro_op_t mop = ex_buffer[i];
-                int missing = 2 * ((ex_needs[2] >> i) & 1) + ((ex_needs[1] >> i) & 1);
-                printf("         EX[%02d] (missing %d {", i, missing);
-                for (int j = 0; j < PHYSICAL_REGS; ++j)
-                    if (depends[j] & (1ULL << i))
-                        printf(" x%d", j);
-                printf("} ");
-
-                isa_disass(stdout, arch, mop.dec, (isa_result_t) { .result = 0 });
-            }
-
-        // ROB
-        for (int p = rob_rp; p != rob_wp;) {
-            rob_entry_t    re = rob[p];
-            isa_decoded_t dec = re.dec;
-
-            printf("         ROB[%02d] = %c", p, re.committed ? 'C' : ' ');
-            isa_disass(stdout, arch, dec, (isa_result_t) { .result = 0 });
-
-            if (++p == ROB_SIZE)
-                p = 0;
-        }
+        dump_microarch_state();
     }
 
     arch->tick(state, n_retired, NULL);
@@ -748,9 +770,6 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
         if (dec.class == isa_insn_class_load || dec.class == isa_insn_class_store)
             me_buffer[me_size++] = mop;
         else {
-            EX_INV();
-            ex_size++;
-
             // XXX for now, just organize the ex_buffer by rob id, to
             // avoid having to many indicies to worry about.
             ex_buffer[rob_index] = mop;
@@ -759,8 +778,9 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
 
             int dep = !pr_ready[mop.pr_a];
             dep += !pr_ready[mop.pr_b] && mop.pr_b != mop.pr_a;
+            EX_INV();
             ex_needs[dep] |= 1ULL << rob_index;
-
+            ex_size++;
             EX_INV();
         }
 
@@ -874,6 +894,8 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, micro_op_t mop)
     prf[mop.pr_wb] = res.result;
     pr_ready_next[mop.pr_wb] = true;
 
+    EX_INV();
+
     ex_needs[0] |= ex_needs[1] & depends[mop.pr_wb];
     ex_needs[1] &= ~depends[mop.pr_wb];
 
@@ -913,7 +935,10 @@ lsc_execute(cpu_state_t *state, verbosity_t verbosity)
     /* Schedule and Execute */
     for (int i = 0; i < EX_BUFFER_SIZE; ++i)
         if ((1ULL << i) & ready_to_run) {
+            EX_INV();
             ex_needs[0] &= ~(1ULL << i);
+            --ex_size;
+            EX_INV();
 
             lsc_exec1(state, verbosity, ex_buffer[i]);
             rob[i].fp.execute_ts = n_cycles;
