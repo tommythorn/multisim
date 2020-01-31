@@ -210,7 +210,26 @@ static char             letter_size[256] = {
     [8] = 'D',
 };
 
+#define popcount __builtin_popcount
+
 ///////////////////////////////////////////////////////
+
+#define EX_INV() ex_check(__FILE__, __LINE__)
+
+static void ex_check(const char *file, unsigned line)
+{
+    // INV: Disjunctive union of ex_size bits
+    if (popcount(ex_needs[0] | ex_needs[1] | ex_needs[2]) != ex_size ||
+        (ex_needs[0] & ex_needs[1]) || (ex_needs[1] & ex_needs[2]) || (ex_needs[0] & ex_needs[2])) {
+
+        printf("%s:%d: EX %d %08lx/%08lx/%08lx\n", file, line, ex_size,
+               ex_needs[0], ex_needs[1], ex_needs[2]);
+
+        fflush(stdout);
+        exit(-1);
+    }
+}
+
 
 static bool
 is_rob_full(void)
@@ -453,6 +472,9 @@ flush_and_redirect(cpu_state_t *state, verbosity_t verbosity, int rob_index, uns
     fb_rp = fb_wp;
     ex_size = 0;
     me_size = 0;
+    ex_needs[0] = ex_needs[1] = ex_needs[2] = 0;
+
+    EX_INV();
 
     rollback_rob(rob_index, verbosity);
 
@@ -585,6 +607,55 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
             rob_rp = 0;
     }
 
+    static int deadcycles = 0;
+
+    if (n_retired == 0) ++deadcycles; else deadcycles = 0;
+
+    if (deadcycles > 5) {
+        /* Why aren't we retiring?  Let's look at what's outstanding
+         * in the ROB and where the various instructions are at.
+
+
+         * Problem is that for latency 1 instructions we need to
+         * update the scoreboard earlier
+         */
+
+        printf("%5d CONCERING LACK OF RETIREMENT\n", n_cycles);
+
+        // FB
+        printf("         FB size %d, ", fb_size);
+        printf("EX size %d: %08lx/%08lx/%08lx, ", ex_size, ex_needs[0], ex_needs[1], ex_needs[2]);
+        printf("ME size %d, ", me_size);
+        printf("Regs free %d (- in flight = %d)\n", n_free_regs, n_free_regs - n_regs_in_flight - 1);
+
+        // EX
+
+        for (int i = 0; i < EX_BUFFER_SIZE; ++i)
+            if ((ex_needs[0] | ex_needs[1] | ex_needs[2]) & (1l << i)) {
+                micro_op_t mop = ex_buffer[i];
+                int missing = 2 * ((ex_needs[2] >> i) & 1) + ((ex_needs[1] >> i) & 1);
+                printf("         EX[%02d] (missing %d {", i, missing);
+                for (int j = 0; j < PHYSICAL_REGS; ++j)
+                    if (depends[j] & (1ULL << i))
+                        printf(" x%d", j);
+                printf("} ");
+
+                isa_disass(stdout, arch, mop.dec, (isa_result_t) { .result = 0 });
+            }
+
+        // ROB
+        for (int p = rob_rp; p != rob_wp;) {
+            rob_entry_t    re = rob[p];
+            isa_decoded_t dec = re.dec;
+
+            printf("         ROB[%02d] = %c", p, re.committed ? 'C' : ' ');
+            isa_disass(stdout, arch, dec, (isa_result_t) { .result = 0 });
+
+            if (++p == ROB_SIZE)
+                p = 0;
+        }
+    }
+
     arch->tick(state, n_retired, NULL);
 }
 
@@ -677,6 +748,7 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
         if (dec.class == isa_insn_class_load || dec.class == isa_insn_class_store)
             me_buffer[me_size++] = mop;
         else {
+            EX_INV();
             ex_size++;
 
             // XXX for now, just organize the ex_buffer by rob id, to
@@ -688,6 +760,8 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
             int dep = !pr_ready[mop.pr_a];
             dep += !pr_ready[mop.pr_b] && mop.pr_b != mop.pr_a;
             ex_needs[dep] |= 1ULL << rob_index;
+
+            EX_INV();
         }
 
         if (0)
@@ -805,6 +879,8 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, micro_op_t mop)
 
     ex_needs[1] |= ex_needs[2] & depends[mop.pr_wb];
     ex_needs[2] &= ~depends[mop.pr_wb];
+
+    EX_INV();
 
     if (mop.dec.dest_msr != ISA_NO_REG)
         arch->write_msr(state, mop.dec.dest_msr, res.msr_result, &exc);
