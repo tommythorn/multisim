@@ -99,14 +99,33 @@ typedef struct fetch_parcel_st {
 //  uint64_t            retire_ts; // This is implicit
 } fetch_parcel_t;
 
+// Instructions state in the ROB
+typedef enum {
+    IS_INVALID,
+    // IS_SPECULATIVE,
+    IS_FETCHED,
+    // IS_READY,
+    IS_EXECUTED,
+    IS_EXCEPTION,
+    // IS_DISPATCHED,
+    IS_COMMITTED,
+    // IS_RETIRED,
+} insn_state_t;
+
+static char insn_state_to_char[] = {
+    [IS_INVALID]   = '?',
+    [IS_FETCHED]   = ' ',
+    [IS_EXECUTED]  = 'E',
+    [IS_EXCEPTION]  = 'X',
+    [IS_COMMITTED] = 'C',
+};
+
 typedef struct rob_entry_st {
-    bool                committed; /* The instruction is done executing and has written the result, if any, to the
-                                    * register file */
+    insn_state_t        insn_state;
     uint64_t            result; // ~ prf
 
     bool                restart;
     uint64_t            restart_pc;
-    bool                exception;
 
 
     uint64_t            store_addr;
@@ -167,7 +186,7 @@ static void dump_microarch_state(void)
         rob_entry_t    re = rob[p];
         isa_decoded_t dec = re.dec;
 
-        printf("         ROB[%02d] = %c", p, re.committed ? 'C' : ' ');
+        printf("         ROB[%02d] = %c", p, insn_state_to_char[re.insn_state]);
         isa_disass(stdout, arch, dec, (isa_result_t) { .result = 0 });
 
         if (++p == ROB_SIZE)
@@ -198,14 +217,10 @@ visualize_retirement(cpu_state_t *state, rob_entry_t rob)
     printf("%3d ", fp.seqno);
     printf("%s ",  line);
 
-#if 0
-    if (dec.dest_reg != ISA_NO_REG)
-        printf("r%02d:p%02d ", dec.dest_reg, pr);
-    else
-        printf("        ");
-#endif
-
-    isa_disass(stdout, arch, dec, (isa_result_t) { .result = rob.result /* XXX MSR result */ });
+    isa_disass(stdout, arch, dec,
+               (isa_result_t)
+               { .result     = rob.result,
+                 .msr_result = rob.result, });
 }
 
 static void
@@ -222,6 +237,8 @@ rollback_rob(int keep_rob_index, verbosity_t verbosity)
             break;
         rob_wp = p;
     } while (rob_rp != rob_wp);
+
+    assert(rob_wp == (keep_rob_index == ROB_SIZE - 1 ? 0 : keep_rob_index + 1));
 
     exception_seqno = ~0ULL;
     n_pending_stores = 0;
@@ -262,7 +279,7 @@ get_reg(unsigned rob_index, int r, bool *ready)
             --p;
 
         if (rob[p].dec.dest_reg == r) {
-            *ready = rob[p].committed;
+            *ready = rob[p].insn_state == IS_COMMITTED;
             return rob[p].result;
         }
     } while (p != rob_rp);
@@ -303,16 +320,16 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
 {
     int n_retired = 0;
 
-    while (rob_rp != rob_wp && rob[rob_rp].committed) {
+    while (rob_rp != rob_wp && rob[rob_rp].insn_state == IS_COMMITTED) {
         rob_entry_t re = rob[rob_rp];
 
         if (!re.dec.system && arch->get_interrupt_exception(state, &exception_info))
-            re.exception = true;
+            re.insn_state = IS_EXCEPTION;
 
         if (verbosity & VERBOSE_DISASS)
             visualize_retirement(state, re);
 
-        if (re.dec.class == isa_insn_class_store && !re.exception) {
+        if (re.dec.class == isa_insn_class_store && re.insn_state != IS_EXCEPTION) {
 
             assert(0 < n_pending_stores);
 
@@ -326,12 +343,12 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
             --n_pending_stores;
 
             if (exc.raised) {
-                re.exception = true;
+                re.insn_state = IS_EXCEPTION;
                 exception_info = exc;
             }
         }
 
-        if (re.exception) {
+        if (re.insn_state == IS_EXCEPTION) {
             if (state->verbosity & VERBOSE_DISASS)
                 fprintf(stderr, "                  EXCEPTION %"PRId64" (%08"PRId64") RAISED\n",
                         exception_info.code, exception_info.info);
@@ -472,7 +489,7 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
         fetched.decode_ts = n_cycles;
 
         rob[rob_wp] = (rob_entry_t) {
-            .committed = false,
+            .insn_state = IS_FETCHED,
             .fp = fetched,
             .dec = dec
         };
@@ -597,11 +614,11 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned rob_index,
     }
 
 exception:
-    rob[rob_index].committed = true;
+    rob[rob_index].insn_state = IS_COMMITTED;
     rob[rob_index].mmio = mmio;
 
     if (exc.raised) {
-        rob[rob_index].exception = true;
+        rob[rob_index].insn_state = IS_EXCEPTION;
 
         unsigned seqno = rob[rob_index].fp.seqno;
 
@@ -620,6 +637,10 @@ lsc_execute(cpu_state_t *state, verbosity_t verbosity)
     for (unsigned p = rob_rp; p != rob_wp; p = p == ROB_SIZE - 1 ? 0 : p + 1) {
         rob_entry_t re = rob[p];
         bool ready_a, ready_b;
+
+        if (re.insn_state != IS_FETCHED)
+            continue;
+
         int64_t val_a = get_reg(p, re.dec.source_reg_a, &ready_a);
         int64_t val_b = get_reg(p, re.dec.source_reg_b, &ready_b);
 
