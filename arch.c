@@ -39,12 +39,14 @@ isa_disass(FILE *out, const arch_t *arch, isa_decoded_t dec, isa_result_t res)
 {
     char dis_buf[99];
 
-    fprintf(out, "%08x %08x ", (uint32_t) dec.insn_addr, dec.insn);
+    fprintf(out, "%08x ", (uint32_t) dec.insn_addr);
 
-    if (dec.dest_reg == ISA_NO_REG)
-        fprintf(out, "%8s ", "");
-    else
-        fprintf(out, "%08x ", (uint32_t)res.result);
+    if (0) {
+        if (dec.dest_reg == ISA_NO_REG)
+            fprintf(out, "%8s ", "");
+        else
+            fprintf(out, "%08x ", (uint32_t)res.result);
+    }
 
     arch->disass_insn(dec.insn_addr, dec.insn, dis_buf, sizeof dis_buf);
 
