@@ -141,8 +141,6 @@ static int64_t          art[32]; // register -> retired value
 
 static rob_entry_t      rob[ROB_SIZE];
 static unsigned         rob_wp = 0, rob_rp = 0;
-static unsigned         rob_wp_seqno_offset = 0;
-static unsigned         rob_rp_seqno_offset = 0;
 
 static uint64_t         exception_seqno = ~0ULL;
 static isa_exception_t  exception_info;
@@ -191,10 +189,10 @@ visualize_retirement(cpu_state_t *state, rob_entry_t rob)
 
     line[fp.fetch_ts   % WIDTH] = 'F';
     line[fp.decode_ts  % WIDTH] = 'D';
-    //line[fp.issue_ts   % WIDTH] = 'I';
+  //line[fp.issue_ts   % WIDTH] = 'I';
     line[fp.execute_ts % WIDTH] = 'E';
     line[fp.commit_ts  % WIDTH] = 'C';
-    line[n_cycles         % WIDTH] = 'R';
+    line[n_cycles      % WIDTH] = 'R';
 
     printf("%3d ", n_cycles);
     printf("%3d ", fp.seqno);
@@ -210,49 +208,28 @@ visualize_retirement(cpu_state_t *state, rob_entry_t rob)
     isa_disass(stdout, arch, dec, (isa_result_t) { .result = rob.result /* XXX MSR result */ });
 }
 
-
-/*
- * Example roll-back: we determine that the #2:BEQ was mispredicted so
- * we have to flush the pipe and roll ROB back to #2.  That means
- * undoing #4 and #3 in that order.
- *
- * #0: J        <--- oldest uncommitted/rp
- * #1: CSRR
- * #2: BEQ      <--- most recent
- * #3:          <--- wp
- */
-
 static void
 rollback_rob(int keep_rob_index, verbosity_t verbosity)
 {
     do {
         unsigned p = rob_wp;
-        unsigned p_offset = rob_wp_seqno_offset;
         if (p-- == 0) {
             p = ROB_SIZE - 1;
-            p_offset -= ROB_SIZE;
         }
 
         assert((unsigned)p < ROB_SIZE);
         if (p == keep_rob_index)
             break;
         rob_wp = p;
-        rob_wp_seqno_offset = p_offset;
-
-/* XXX don't recall why I did that
-        if (rob[p].r == ISA_NO_REG)
-            continue;
-*/
-
     } while (rob_rp != rob_wp);
 
     exception_seqno = ~0ULL;
     n_pending_stores = 0;
 }
 
-
 static void
-flush_and_redirect(cpu_state_t *state, verbosity_t verbosity, int rob_index, unsigned seqno, uint64_t new_pc)
+flush_and_redirect(cpu_state_t *state, verbosity_t verbosity, int rob_index,
+                   unsigned seqno, uint64_t new_pc)
 {
     // Flush
     fb_size = 0;
@@ -266,7 +243,8 @@ flush_and_redirect(cpu_state_t *state, verbosity_t verbosity, int rob_index, uns
 }
 
 
-/* All register values can be found by just scanning the ROB backward from the refering instruction */
+/* All register values can be found by just scanning the ROB backward
+ * from the refering instruction */
 static int64_t
 get_reg(unsigned rob_index, int r, bool *ready)
 {
@@ -358,12 +336,10 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
                 fprintf(stderr, "                  EXCEPTION %"PRId64" (%08"PRId64") RAISED\n",
                         exception_info.code, exception_info.info);
 
-            int prev_rob_rp_offset = rob_rp_seqno_offset;
             int prev_rob_rp = rob_rp - 1;
 
             if (rob_rp == 0) {
                 prev_rob_rp = ROB_SIZE - 1;
-                prev_rob_rp_offset -= ROB_SIZE;
             }
 
             //assert(state->msr[0x300] == costate->msr[0x300]);
@@ -415,7 +391,7 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
         }
 
         if (++rob_rp == ROB_SIZE)
-            rob_rp = 0, rob_rp_seqno_offset += ROB_SIZE;
+            rob_rp = 0;
     }
 
     static int deadcycles = 0;
@@ -501,10 +477,8 @@ lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
             .dec = dec
         };
 
-        assert(fetched.seqno == rob_wp + rob_wp_seqno_offset);
-
         if (++rob_wp == ROB_SIZE)
-            rob_wp = 0, rob_wp_seqno_offset += ROB_SIZE;
+            rob_wp = 0;
 
         assert(rob_wp != rob_rp);
     }
@@ -629,8 +603,7 @@ exception:
     if (exc.raised) {
         rob[rob_index].exception = true;
 
-        unsigned seqno = rob_index + rob_rp_seqno_offset;
-        assert(rob[rob_index].fp.seqno == seqno);
+        unsigned seqno = rob[rob_index].fp.seqno;
 
         if (seqno < exception_seqno) {
             exception_seqno = seqno;
