@@ -123,6 +123,7 @@ static char insn_state_to_char[] = {
 typedef struct rob_entry_st {
     insn_state_t        insn_state;
     uint64_t            result; // ~ prf
+    uint64_t            msr_result;
 
     bool                restart;
     uint64_t            restart_pc;
@@ -222,7 +223,7 @@ visualize_retirement(cpu_state_t *state, unsigned rob_index, rob_entry_t re)
     isa_disass(stdout, arch, dec,
                (isa_result_t)
                { .result     = re.result,
-                 .msr_result = re.result,
+                 .msr_result = re.msr_result,
                  .store_value= re.result,
                  .store_addr = re.store_addr, });
 }
@@ -607,12 +608,8 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
         break;
     }
 
-    // RISC-V only every need either of these
-    if (dec.dest_msr != ISA_NO_REG) {
-        rob[p].result = res.msr_result;
-        assert(dec.dest_reg == ISA_NO_REG);
-    } else
-        rob[p].result = res.result;
+    rob[p].result     = res.result;
+    rob[p].msr_result = res.msr_result;
 
     if (dec.dest_msr != ISA_NO_REG)
         arch->write_msr(state, dec.dest_msr, res.msr_result, &exc);
