@@ -179,7 +179,8 @@ is_rob_full(void)
 static void dump_microarch_state(void)
 {
     // FB
-    printf("         FB size %d, ", fb_size);
+    printf("         FB size %d\n", fb_size);
+    printf("         ROB:\n");
 
     // ROB
     for (int p = rob_rp; p != rob_wp;) {
@@ -195,13 +196,13 @@ static void dump_microarch_state(void)
 }
 
 static void
-visualize_retirement(cpu_state_t *state, rob_entry_t rob)
+visualize_retirement(cpu_state_t *state, unsigned rob_index, rob_entry_t re)
 {
 #define WIDTH 32
 
     char line[WIDTH+1];
-    fetch_parcel_t fp = rob.fp;
-    isa_decoded_t dec = rob.dec;
+    fetch_parcel_t fp = re.fp;
+    isa_decoded_t dec = re.dec;
 
     memset(line, '.', WIDTH);
     line[WIDTH] = '\0';
@@ -215,14 +216,15 @@ visualize_retirement(cpu_state_t *state, rob_entry_t rob)
 
     printf("%3d ", n_cycles);
     printf("%3d ", fp.seqno);
+    printf("%2d ", rob_index);
     printf("%s ",  line);
 
     isa_disass(stdout, arch, dec,
                (isa_result_t)
-               { .result     = rob.result,
-                 .msr_result = rob.result,
-                 .store_value= rob.result,
-                 .store_addr = rob.store_addr, });
+               { .result     = re.result,
+                 .msr_result = re.result,
+                 .store_value= re.result,
+                 .store_addr = re.store_addr, });
 }
 
 static void
@@ -337,7 +339,7 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
         }
 
         if (verbosity & VERBOSE_DISASS)
-            visualize_retirement(state, re);
+            visualize_retirement(state, rob_rp, re);
 
         if (re.dec.class == isa_insn_class_store) {
             isa_exception_t exc = { 0 };
