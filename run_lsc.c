@@ -620,10 +620,8 @@ exception:
     if (exc.raised) {
         rob[p].insn_state = IS_EXCEPTION;
 
-        unsigned seqno = rob[p].fp.seqno;
-
-        if (seqno < exception_seqno) {
-            exception_seqno = seqno;
+        if (rob[p].fp.seqno < exception_seqno) {
+            exception_seqno = rob[p].fp.seqno;
             exception_info  = exc;
         }
     }
