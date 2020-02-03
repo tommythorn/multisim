@@ -602,7 +602,12 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
         break;
     }
 
-    rob[p].result = res.result;
+    // RISC-V only every need either of these
+    if (dec.dest_msr != ISA_NO_REG) {
+        rob[p].result = res.msr_result;
+        assert(dec.dest_reg == ISA_NO_REG);
+    } else
+        rob[p].result = res.result;
 
     if (dec.dest_msr != ISA_NO_REG)
         arch->write_msr(state, dec.dest_msr, res.msr_result, &exc);
