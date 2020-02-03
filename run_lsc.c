@@ -614,8 +614,9 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
     }
 
 exception:
-    rob[p].insn_state = IS_COMMITTED;
+    rob[p].insn_state = IS_EXECUTED;
     rob[p].mmio = mmio;
+    rob[p].fp.execute_ts = n_cycles;
 
     if (exc.raised) {
         rob[p].insn_state = IS_EXCEPTION;
@@ -632,6 +633,13 @@ exception:
 static void
 lsc_execute(cpu_state_t *state, verbosity_t verbosity)
 {
+    // Commit previously executed insns
+    for (unsigned p = rob_rp; p != rob_wp; p = p == ROB_SIZE - 1 ? 0 : p + 1)
+        if (rob[p].insn_state == IS_EXECUTED) {
+            rob[p].insn_state = IS_COMMITTED;
+            rob[p].fp.commit_ts = n_cycles;
+        }
+
     for (unsigned p = rob_rp; p != rob_wp; p = p == ROB_SIZE - 1 ? 0 : p + 1) {
         rob_entry_t re = rob[p];
         bool ready_a, ready_b;
@@ -654,22 +662,6 @@ lsc_execute(cpu_state_t *state, verbosity_t verbosity)
         if (!lsc_exec1(state, verbosity, p, val_a, val_b))
             // Loads may not be able to execute yet
             continue;
-
-        rob[p].fp.execute_ts = n_cycles;
-        rob[p].fp.commit_ts = n_cycles;
-
-#if 0
-        if (exc.raised) {
-            rob[p].exception = true;
-
-            if (re.fp.seqno < exception_seqno) {
-                exception_seqno = re.fp.seqno;
-                exception_info  = exc;
-                }
-            }
-            ++n_pending_stores;
-            continue;
-#endif
     }
 }
 
