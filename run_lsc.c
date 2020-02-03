@@ -220,7 +220,9 @@ visualize_retirement(cpu_state_t *state, rob_entry_t rob)
     isa_disass(stdout, arch, dec,
                (isa_result_t)
                { .result     = rob.result,
-                 .msr_result = rob.result, });
+                 .msr_result = rob.result,
+                 .store_value= rob.result,
+                 .store_addr = rob.store_addr, });
 }
 
 static void
@@ -328,19 +330,18 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
         if (!re.dec.system && arch->get_interrupt_exception(state, &exception_info))
             goto exception;
 
+        if (re.dec.class == isa_insn_class_store) {
+            assert(0 < n_pending_stores);
+            if (!get_reg(rob_rp, re.dec.source_reg_b, &re.result))
+                break;
+        }
+
         if (verbosity & VERBOSE_DISASS)
             visualize_retirement(state, re);
 
-        if (re.dec.class == isa_insn_class_store && re.insn_state != IS_EXCEPTION) {
-
-            assert(0 < n_pending_stores);
-
+        if (re.dec.class == isa_insn_class_store) {
             isa_exception_t exc = { 0 };
-            assert(get_reg(rob_rp, re.dec.source_reg_b, &re.result));
-            arch->store(state,
-                        re.store_addr,
-                        re.result,
-                        re.dec.loadstore_size, &exc);
+            arch->store(state, re.store_addr, re.result, re.dec.loadstore_size, &exc);
             --n_pending_stores;
 
             if (exc.raised) {
