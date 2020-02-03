@@ -32,9 +32,33 @@
  *
  *  rob[rp] ... rob[wp-1] is the outstading non-retired instructions
  *  we retire from the rp and insert new ones at the wp
- *
- *  ** TODO **
- *
+
+TODO:
+- Check selected (like mstatus) CSRs for every cosim step
+- drop n_stores pending (I think it's mishandled in the rollback)
+- rename XXXlsc to XXXooo and drop the old OOO
+
+Once this can run everything (in some order)
+
+- Add some branch prediction.  Seems not that hard to add a RAS as
+well.  CLEAR
+
+- Accellerate the register lookup; a rename table is obvious but then
+  we need to consider how to restore it upon rollback.
+
+  1. The immediate options: the simple Chronis idea which is just
+     stops fetch and waits for retirement to catch up.  MOSTLY CLEAR
+
+  2. Checkpoints a la CPR; UNCLEAR
+
+- Two dimensional ROB a la mc88120; UNCLEAR
+- CPR; UNCLEAR
+
+- Finally, piece de resistance: optimizing trace cache of packets.
+  RESEARCH
+
+
+
  * Correctness:
  *
  * - Force interrupts on cosim model
