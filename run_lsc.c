@@ -265,7 +265,7 @@ flush_and_redirect(cpu_state_t *state, verbosity_t verbosity, int rob_index,
 
 
 /* All register values can be found by just scanning the ROB backward
- * from the refering instruction */
+ * from the refering instruction's rob_index */
 static bool
 get_reg(unsigned rob_index, int r, uint64_t *value)
 {
@@ -275,7 +275,7 @@ get_reg(unsigned rob_index, int r, uint64_t *value)
     }
 
     unsigned p = rob_index;
-    do {
+    while (p != rob_rp) {
         if (p == 0)
             p = ROB_SIZE - 1;
         else
@@ -285,7 +285,7 @@ get_reg(unsigned rob_index, int r, uint64_t *value)
             *value = rob[p].result;
             return rob[p].insn_state == IS_COMMITTED;
         }
-    } while (p != rob_rp);
+    }
 
     *value = art[r];
     return true;
