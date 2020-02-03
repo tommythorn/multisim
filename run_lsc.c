@@ -510,10 +510,10 @@ is_mmio_space(cpu_state_t *state, uint64_t addr)
 }
 
 static bool
-lsc_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned rob_index,
+lsc_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
           uint64_t op_a, uint64_t op_b)
 {
-    rob_entry_t re = rob[rob_index];
+    rob_entry_t re = rob[p];
     isa_decoded_t dec = re.dec;
     isa_exception_t exc = { 0 };
     uint64_t msr_a =
@@ -561,7 +561,7 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned rob_index,
 
     case isa_insn_class_store:
         // XXX could check the address for exceptions
-        rob[rob_index].store_addr = CANONICALIZE(res.store_addr);
+        rob[p].store_addr = CANONICALIZE(res.store_addr);
         ++n_pending_stores;
         break;
 
@@ -584,43 +584,43 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned rob_index,
 
     case isa_insn_class_branch:
         if (res.branch_taken) {
-            rob[rob_index].restart = true;
-            rob[rob_index].restart_pc = dec.jumpbranch_target;
+            rob[p].restart = true;
+            rob[p].restart_pc = dec.jumpbranch_target;
         }
         break;
 
     case isa_insn_class_jump: {
-            rob[rob_index].restart = true;
-            rob[rob_index].restart_pc = dec.jumpbranch_target;
+            rob[p].restart = true;
+            rob[p].restart_pc = dec.jumpbranch_target;
         }
         break;
 
     case isa_insn_class_compjump: {
-            rob[rob_index].restart = true;
-            rob[rob_index].restart_pc = res.compjump_target;
+            rob[p].restart = true;
+            rob[p].restart_pc = res.compjump_target;
         }
         break;
     }
 
-    rob[rob_index].result = res.result;
+    rob[p].result = res.result;
 
     if (dec.dest_msr != ISA_NO_REG)
         arch->write_msr(state, dec.dest_msr, res.msr_result, &exc);
 
     // Flush the pipe on system instructions unless is a compjump
     if (dec.system && dec.class != isa_insn_class_compjump) {
-        rob[rob_index].restart = true;
-        rob[rob_index].restart_pc = dec.insn_addr + 4;
+        rob[p].restart = true;
+        rob[p].restart_pc = dec.insn_addr + 4;
     }
 
 exception:
-    rob[rob_index].insn_state = IS_COMMITTED;
-    rob[rob_index].mmio = mmio;
+    rob[p].insn_state = IS_COMMITTED;
+    rob[p].mmio = mmio;
 
     if (exc.raised) {
-        rob[rob_index].insn_state = IS_EXCEPTION;
+        rob[p].insn_state = IS_EXCEPTION;
 
-        unsigned seqno = rob[rob_index].fp.seqno;
+        unsigned seqno = rob[p].fp.seqno;
 
         if (seqno < exception_seqno) {
             exception_seqno = seqno;
