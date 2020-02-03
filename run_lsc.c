@@ -262,13 +262,12 @@ flush_and_redirect(cpu_state_t *state, verbosity_t verbosity, int rob_index,
 
 /* All register values can be found by just scanning the ROB backward
  * from the refering instruction */
-static int64_t
-get_reg(unsigned rob_index, int r, bool *ready)
+static bool
+get_reg(unsigned rob_index, int r, uint64_t *value)
 {
-    *ready = false;
     if (r == 0) {
-        *ready = true;
-        return 0;
+        *value = 0;
+        return true;
     }
 
     unsigned p = rob_index;
@@ -279,13 +278,13 @@ get_reg(unsigned rob_index, int r, bool *ready)
             --p;
 
         if (rob[p].dec.dest_reg == r) {
-            *ready = rob[p].insn_state == IS_COMMITTED;
-            return rob[p].result;
+            *value = rob[p].result;
+            return rob[p].insn_state == IS_COMMITTED;
         }
     } while (p != rob_rp);
 
-    *ready = true;
-    return art[r];
+    *value = art[r];
+    return true;
 }
 
 /*
@@ -337,12 +336,11 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
             assert(0 < n_pending_stores);
 
             isa_exception_t exc = { 0 };
-            bool ready_b;
+            assert(get_reg(rob_rp, re.dec.source_reg_b, &re.result));
             arch->store(state,
                         re.store_addr,
-                        get_reg(rob_rp, re.dec.source_reg_b, &ready_b),
+                        re.result,
                         re.dec.loadstore_size, &exc);
-            assert(ready_b);
             --n_pending_stores;
 
             if (exc.raised) {
@@ -651,21 +649,19 @@ lsc_execute(cpu_state_t *state, verbosity_t verbosity)
 
     for (unsigned p = rob_rp; p != rob_wp; p = p == ROB_SIZE - 1 ? 0 : p + 1) {
         rob_entry_t re = rob[p];
-        bool ready_a, ready_b;
 
         if (re.insn_state != IS_FETCHED)
             continue;
-
-        int64_t val_a = get_reg(p, re.dec.source_reg_a, &ready_a);
-        int64_t val_b = get_reg(p, re.dec.source_reg_b, &ready_b);
 
         // Stores are special and execute the address calculation even
         // if the data isn't ready.  Loads have additional dependency
         // on stores.
 
-        if (re.dec.class == isa_insn_class_store && !ready_a)
+        uint64_t val_a, val_b;
+        if (re.dec.class == isa_insn_class_store && !get_reg(p, re.dec.source_reg_a, &val_a))
             continue;
-        else if (!ready_a || !ready_b)
+        else if (!get_reg(p, re.dec.source_reg_a, &val_a) ||
+                 !get_reg(p, re.dec.source_reg_b, &val_b))
             continue;
 
         if (!lsc_exec1(state, verbosity, p, val_a, val_b))
