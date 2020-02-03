@@ -323,8 +323,11 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
     while (rob_rp != rob_wp && rob[rob_rp].insn_state == IS_COMMITTED) {
         rob_entry_t re = rob[rob_rp];
 
+        if (re.insn_state == IS_EXCEPTION)
+            goto exception;
+
         if (!re.dec.system && arch->get_interrupt_exception(state, &exception_info))
-            re.insn_state = IS_EXCEPTION;
+            goto exception;
 
         if (verbosity & VERBOSE_DISASS)
             visualize_retirement(state, re);
@@ -343,12 +346,13 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
             --n_pending_stores;
 
             if (exc.raised) {
-                re.insn_state = IS_EXCEPTION;
                 exception_info = exc;
+                goto exception;
             }
         }
 
         if (re.insn_state == IS_EXCEPTION) {
+        exception:
             if (state->verbosity & VERBOSE_DISASS)
                 fprintf(stderr, "                  EXCEPTION %"PRId64" (%08"PRId64") RAISED\n",
                         exception_info.code, exception_info.info);
