@@ -95,6 +95,7 @@ well.  CLEAR
 #include "sim.h"
 #include "run_simple.h"
 #include "loadelf.h"
+#include "riscv.h" // Sigh, we need this for illegal and misaligned exceptions
 
 //////// Configuration and magic numbers
 
@@ -211,12 +212,6 @@ static void dump_microarch_state(void)
 {
     // FB
     printf("         FB size %d\n", fb_size);
-    printf("         LSU stats: STA stall %ld/STD stall %ld/Reordered %ld/bypass missed %ld\n",
-           n_cycles_waiting_on_uncommitted_store_addr,
-           n_cycles_waiting_on_uncommitted_store_data,
-           n_loads_reordred,
-           n_missed_store_forwardings);
-
     printf("         ROB:\n");
 
     // ROB
@@ -240,6 +235,26 @@ visualize_retirement(cpu_state_t *state, unsigned rob_index, rob_entry_t re)
     char line[WIDTH+1];
     fetch_parcel_t fp = re.fp;
     isa_decoded_t dec = re.dec;
+
+    static uint64_t last_cycles = 0;
+    static uint64_t last_instret = 0;
+
+    if (last_cycles + 100 < n_cycles) {
+        printf("IPC %4.2f ", ((double)fp.seqno - last_instret) / (n_cycles - last_cycles));
+        last_cycles = n_cycles;
+        last_instret = fp.seqno;
+
+        printf("LSU stats: STA stall %ld/STD stall %ld/Reordered %ld/bypass missed %ld\n",
+               n_cycles_waiting_on_uncommitted_store_addr,
+               n_cycles_waiting_on_uncommitted_store_data,
+               n_loads_reordred,
+               n_missed_store_forwardings);
+
+        n_cycles_waiting_on_uncommitted_store_addr = 0;
+        n_cycles_waiting_on_uncommitted_store_data = 0;
+        n_loads_reordred = 0;
+        n_missed_store_forwardings = 0;
+    }
 
     memset(line, '.', WIDTH);
     line[WIDTH] = '\0';
@@ -360,14 +375,14 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
 {
     int n_retired = 0;
 
-    while (rob_rp != rob_wp && rob[rob_rp].insn_state == IS_COMMITTED) {
+    while (rob_rp != rob_wp && (rob[rob_rp].insn_state == IS_COMMITTED ||
+                                rob[rob_rp].insn_state == IS_EXCEPTION)) {
+
+        // XXX Interrupts should get inserted in fetch
+        if (arch->get_interrupt_exception(state, &exception_info))
+            goto exception;
+
         rob_entry_t re = rob[rob_rp];
-
-        if (re.insn_state == IS_EXCEPTION)
-            goto exception;
-
-        if (!re.dec.system && arch->get_interrupt_exception(state, &exception_info))
-            goto exception;
 
         if (re.dec.class == isa_insn_class_store) {
             assert(0 < n_pending_stores);
@@ -377,6 +392,12 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
 
         if (verbosity & VERBOSE_DISASS)
             visualize_retirement(state, rob_rp, re);
+
+        if (re.insn_state == IS_EXCEPTION)
+            goto exception;
+
+        if (!re.dec.system && arch->get_interrupt_exception(state, &exception_info))
+            goto exception;
 
         if (re.dec.class == isa_insn_class_store) {
             isa_exception_t exc = { 0 };
@@ -392,7 +413,7 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
         if (re.insn_state == IS_EXCEPTION) {
         exception:
             if (state->verbosity & VERBOSE_DISASS)
-                fprintf(stderr, "                  EXCEPTION %"PRId64" (%08"PRId64") RAISED\n",
+                fprintf(stdout, "                  EXCEPTION %"PRId64" (%08"PRId64") RAISED\n",
                         exception_info.code, exception_info.info);
 
             int prev_rob_rp = rob_rp - 1;
@@ -437,6 +458,7 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
         if (re.dec.insn_addr != copc) {
             fprintf(stderr, "COSIM: REF PC %08"PRIx64" != LSC PC %08"PRIx64"\n",
                     copc & 0xFFFFFFFF, re.dec.insn_addr & 0xFFFFFFFF);
+            fflush(stdout);
             assert(re.dec.insn_addr == copc);
         }
 
@@ -445,6 +467,7 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
                 fprintf(stderr, "COSIM: REF RES %08"PRIx64" != LSC RES %08"PRIx64"\n",
                         costate->r[re.dec.dest_reg] & 0xFFFFFFFF,
                         re.result);
+                fflush(stdout);
                 assert(re.result == costate->r[re.dec.dest_reg]);
             }
         }
@@ -457,7 +480,7 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
 
     if (n_retired == 0) ++deadcycles; else deadcycles = 0;
 
-    if (deadcycles > 5) {
+    if (deadcycles > 10) {
         /* Why aren't we retiring?  Let's look at what's outstanding
          * in the ROB and where the various instructions are at.
 
@@ -580,8 +603,23 @@ lsc_exec_load(cpu_state_t *state, verbosity_t verbosity, unsigned load_rob_index
     // interesting enough already
     unsigned size = abs(load_type); // XXX this is bad
 
-    assert(size == 1 || size == 2 || size == 4 || size == 8);
-    assert((load_addr & (size - 1)) == 0);
+    //assert(size == 1 || size == 2 || size == 4 || size == 8);
+    //assert((load_addr & (size - 1)) == 0);
+    // Forgot this bad speculation runs bad code
+
+    if (!(size == 1 || size == 2 || size == 4 || size == 8)) {
+        exc->raised = true;
+        exc->code = EXCP_INSN_ILLEGAL;
+        exc->info = 0;
+        return true;
+    }
+
+    if ((load_addr & (size - 1)) != 0) {
+        exc->raised = true;
+        exc->code = EXCP_LOAD_MISALIGN;
+        exc->info = 0;
+        return true;
+    }
 
     // XXX Assume 32-bit for now
     //uint64_t addr_word = load_addr & -4ll;
