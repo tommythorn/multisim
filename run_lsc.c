@@ -168,6 +168,12 @@ static isa_exception_t  exception_info;
 static int              n_cycles;
 static int              n_pending_stores;
 
+static uint64_t         n_cycles_waiting_on_uncommitted_store_addr;
+static uint64_t         n_cycles_waiting_on_uncommitted_store_data;
+static uint64_t         n_loads_reordred;
+static uint64_t         n_missed_store_forwardings;
+
+
 ///////////////////////////////////////////////////////
 
 static bool
@@ -181,6 +187,12 @@ static void dump_microarch_state(void)
 {
     // FB
     printf("         FB size %d\n", fb_size);
+    printf("         LSU stats: STA stall %ld/STD stall %ld/Reordered %ld/bypass missed %ld\n",
+           n_cycles_waiting_on_uncommitted_store_addr,
+           n_cycles_waiting_on_uncommitted_store_data,
+           n_loads_reordred,
+           n_missed_store_forwardings);
+
     printf("         ROB:\n");
 
     // ROB
@@ -515,6 +527,105 @@ is_mmio_space(cpu_state_t *state, uint64_t addr)
     return addr < 0x80000000;
 }
 
+// Checking for overlap (XXX there's a trick I need to dig up again)
+static bool
+does_overlap(uint64_t a, unsigned a_size, uint64_t b, unsigned b_size)
+{
+    return
+        a <= b && b < a + a_size ||
+        b <= a && a < b + b_size;
+}
+
+/*
+ * Loads are the most interesting instruction in an OoO superscalar machine.
+ *
+ * We need to check all potentially overlapping older stores in the
+ * ROB. If we can tell none can overlap, the load can proceed.  If all
+ * overlapping stores have committed, then we can calculate the part
+ * that needs to be forwarded and combined load data (if necessary).
+ * Otherwise, we must wait.
+ */
+static bool
+lsc_exec_load(cpu_state_t *state, verbosity_t verbosity, unsigned load_rob_index,
+              uint64_t load_addr, int load_type, isa_exception_t *exc,
+              uint64_t *res)
+{
+    unsigned reordered_load = 0;
+
+    // XXX I'm only doing to dealed with aligned data; it's
+    // interesting enough already
+    unsigned size = abs(load_type); // XXX this is bad
+
+    assert(size == 1 || size == 2 || size == 4 || size == 8);
+    assert((load_addr & (size - 1)) == 0);
+
+    // XXX Assume 32-bit for now
+    //uint64_t addr_word = load_addr & -4ll;
+    //uint64_t data_mask = (1ll << (size * 8)) - 1;
+    //data_mask <<= 8 * (load_addr & 3);
+
+    unsigned p = load_rob_index;
+    while (p != rob_rp) {
+        if (p == 0)
+            p = ROB_SIZE - 1;
+        else
+            --p;
+
+        // We _only_ care about store(-like) instructions
+        if (rob[p].dec.class != isa_insn_class_store)
+            continue;
+
+        // Uncommitted stores don't have a store address
+        if (rob[p].insn_state != IS_COMMITTED) {
+            // Without speculation, we can't know if this might overlap
+            ++/*rob[p].stat.*/n_cycles_waiting_on_uncommitted_store_addr;
+            return false;
+        }
+
+        // Unrelated stores can be skipped - this effectively reorders the load
+        if (!does_overlap(load_addr, size,
+                          rob[p].store_addr,
+                          rob[p].dec.loadstore_size)) {
+            // Puh, dodged this one
+            reordered_load = true;
+            continue;
+        }
+
+        // Uncommitted overlapping store data means we stop
+        uint64_t store_data;
+        if (!get_reg(p, rob[p].dec.source_reg_b, &store_data)) {
+            ++/*rob[p].stat.*/n_cycles_waiting_on_uncommitted_store_data;
+            return false;
+        }
+
+#if 0
+        // We have an overlapping store with data.  If it fully
+        // overlaps, we take it and return.  XXX Only deal with same
+        // sized data
+        if (rob[p].dec.loadstore_size == size) {
+            ++n_full_store_forwards;
+            *res.result = signed_extend(store_data, load_type);
+            return true;
+        }
+#endif
+
+        // XXX This is where we start collecting bits of the data to
+        // forward.  I'm not going to do this for now, instead just
+        // bail.
+
+        ++n_missed_store_forwardings;
+
+        return false; // Sorry, another time
+    }
+
+    n_loads_reordred += reordered_load;
+
+    *res = arch->load(state, load_addr, size, exc);
+
+    return true;
+}
+
+
 static bool
 lsc_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
           uint64_t op_a, uint64_t op_b)
@@ -533,8 +644,10 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
     if (exc.raised)
         goto exception;
 
-    if (dec.class == isa_insn_class_atomic)
-        op_a = arch->load(state, atomic_load_addr, dec.loadstore_size, &exc);
+    if (dec.class == isa_insn_class_atomic) {
+        assert(0); // XXX extend this to handle AMOs
+        // op_a = arch->load(state, atomic_load_addr, dec.loadstore_size, &exc);
+    }
 
     if (exc.raised)
         goto exception;
@@ -556,9 +669,13 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
         // XXXX We need to examine pending stores and forward as necessary XXX
         // XXX THIS IS KNOWN WRONG
         res.load_addr = CANONICALIZE(res.load_addr);
-        res.result = arch->load(state, res.load_addr, dec.loadstore_size, &exc);
-        res.result = CANONICALIZE(res.result);
         mmio = is_mmio_space(state, res.load_addr);
+
+        if (!lsc_exec_load(state, verbosity, p, res.load_addr, dec.loadstore_size, &exc,
+                           &res.result))
+            return false;
+
+        res.result = CANONICALIZE(res.result);
 
         if (exc.raised)
             goto exception;
