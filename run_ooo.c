@@ -402,15 +402,6 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
             }
         }
 
-        if (re.dec.dest_msr != ISA_NO_REG) {
-            isa_exception_t exc = { 0 };
-            arch->write_msr(state, re.dec.dest_msr, re.msr_result, &exc);
-            if (exc.raised) {
-                exception_info = exc;
-                goto exception;
-            }
-        }
-
         if (re.insn_state == IS_EXCEPTION) {
         exception:
             if (state->verbosity & VERBOSE_DISASS)
@@ -727,8 +718,13 @@ ooo_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
 
     if (!dec.system)
         res = arch->insn_exec(dec, op_a, op_b, msr_a, &exc);
-    else
+    else {
         res = arch->insn_exec_system(state, dec, op_a, op_b, msr_a, &exc);
+        if (!exc.raised && dec.dest_msr != ISA_NO_REG)
+            // This works because this is the only active instruction in the pipeline now
+            arch->write_msr(state, re.dec.dest_msr, res.msr_result, &exc);
+    }
+
     res.result = CANONICALIZE(res.result);
 
     if (exc.raised)
