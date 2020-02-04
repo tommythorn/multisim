@@ -36,9 +36,6 @@
 TODO:
 - Rethink how interrupts are handled; maybe inserting them at decode?
   but how to get a non-speculative path?
-- DONE Check selected (like mstatus) CSRs for every cosim step DONE
-- DONE drop n_stores pending (I think it's mishandled in the rollback)
-- rename XXXlsc to XXXooo and drop the old OOO
 
 Once this can run everything (in some order)
 
@@ -371,7 +368,7 @@ get_reg(unsigned rob_index, int r, uint64_t *value)
  * #7:          <--- wp
  */
 static void
-lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
+ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
 {
     int n_retired = 0;
 
@@ -463,7 +460,7 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
             costate->r[re.dec.dest_reg] = re.result;
 
         if (re.dec.insn_addr != copc) {
-            fprintf(stderr, "COSIM: REF PC %08"PRIx64" != LSC PC %08"PRIx64"\n",
+            fprintf(stderr, "COSIM: REF PC %08"PRIx64" != DUT PC %08"PRIx64"\n",
                     copc & 0xFFFFFFFF, re.dec.insn_addr & 0xFFFFFFFF);
             fflush(stdout);
             assert(re.dec.insn_addr == copc);
@@ -472,7 +469,7 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
 
         if (re.dec.dest_reg != ISA_NO_REG) {
             if (re.result != costate->r[re.dec.dest_reg]) {
-                fprintf(stderr, "COSIM: REF RES %08"PRIx64" != LSC RES %08"PRIx64"\n",
+                fprintf(stderr, "COSIM: REF RES %08"PRIx64" != DUT RES %08"PRIx64"\n",
                         costate->r[re.dec.dest_reg] & 0xFFFFFFFF,
                         re.result);
                 fflush(stdout);
@@ -515,7 +512,7 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
 }
 
 static void
-lsc_fetch(cpu_state_t *state, verbosity_t verbosity)
+ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
 {
     isa_exception_t exc = { 0 };
     int n = 0;
@@ -546,7 +543,7 @@ lsc_fetch(cpu_state_t *state, verbosity_t verbosity)
 }
 
 static void
-lsc_decode_rename(cpu_state_t *state, verbosity_t verbosity)
+ooo_decode_rename(cpu_state_t *state, verbosity_t verbosity)
 {
     /*
      * Decode and rename
@@ -611,7 +608,7 @@ does_overlap(uint64_t a, unsigned a_size, uint64_t b, unsigned b_size)
  * Otherwise, we must wait.
  */
 static bool
-lsc_exec_load(cpu_state_t *state, verbosity_t verbosity, unsigned load_rob_index,
+ooo_exec_load(cpu_state_t *state, verbosity_t verbosity, unsigned load_rob_index,
               uint64_t load_addr, int load_type, isa_exception_t *exc,
               uint64_t *res)
 {
@@ -707,7 +704,7 @@ lsc_exec_load(cpu_state_t *state, verbosity_t verbosity, unsigned load_rob_index
 
 
 static bool
-lsc_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
+ooo_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
           uint64_t op_a, uint64_t op_b)
 {
     rob_entry_t re = rob[p];
@@ -751,7 +748,7 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
         res.load_addr = CANONICALIZE(res.load_addr);
         mmio = is_mmio_space(state, res.load_addr);
 
-        if (!lsc_exec_load(state, verbosity, p, res.load_addr, dec.loadstore_size, &exc,
+        if (!ooo_exec_load(state, verbosity, p, res.load_addr, dec.loadstore_size, &exc,
                            &res.result))
             return false;
 
@@ -831,7 +828,7 @@ exception:
 }
 
 static void
-lsc_execute(cpu_state_t *state, verbosity_t verbosity)
+ooo_execute(cpu_state_t *state, verbosity_t verbosity)
 {
     // Commit previously executed insns
     for (unsigned p = rob_rp; p != rob_wp; p = p == ROB_SIZE - 1 ? 0 : p + 1)
@@ -857,27 +854,27 @@ lsc_execute(cpu_state_t *state, verbosity_t verbosity)
                  !get_reg(p, re.dec.source_reg_b, &val_b))
             continue;
 
-        if (!lsc_exec1(state, verbosity, p, val_a, val_b))
+        if (!ooo_exec1(state, verbosity, p, val_a, val_b))
             // Loads may not be able to execute yet
             continue;
     }
 }
 
 static bool
-step_lsc(
+step_ooo(
     cpu_state_t *state, cpu_state_t *costate,
     verbosity_t verbosity)
 {
-    lsc_retire(state, costate, verbosity);
-    lsc_execute(state, verbosity);
-    lsc_decode_rename(state, verbosity);
-    lsc_fetch(state, verbosity); // XXX execute affects pc in the same n_cycles
+    ooo_retire(state, costate, verbosity);
+    ooo_execute(state, verbosity);
+    ooo_decode_rename(state, verbosity);
+    ooo_fetch(state, verbosity); // XXX execute affects pc in the same n_cycles
 
     return false;
 }
 
 void
-run_lsc(int num_images, char *images[], verbosity_t verbosity)
+run_ooo(int num_images, char *images[], verbosity_t verbosity)
 {
     cpu_state_t *state = state_create();
     cpu_state_t *costate = state_create();
@@ -900,7 +897,7 @@ run_lsc(int num_images, char *images[], verbosity_t verbosity)
     getelfsym(&info, "tohost", &tohost);
 
     for (n_cycles = 0;; ++n_cycles) {
-        if (step_lsc(state, costate, verbosity))
+        if (step_ooo(state, costate, verbosity))
             break;
 
         if (simple_htif(arch, state, verbosity, tohost))

@@ -62,7 +62,7 @@ struct cpu_state_st {
 
 void exception(char *kind);
 void run_simple(int, char **, verbosity_t);
-void run_lsc(int, char **, verbosity_t);
+void run_ooo(int, char **, verbosity_t);
 
 static inline cpu_state_t *
 state_create(void)

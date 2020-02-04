@@ -26,7 +26,7 @@ FLAGS=
 #MORE_STUFF=run_sscalar.o run_sscalar_oooe.o
 MORE_STUFF=
 OBJS=main.o arch.o \
-	run_simple.o run_lsc.o $(MORE_STUFF) \
+	run_simple.o run_ooo.o $(MORE_STUFF) \
 	memory.o loadelf.o riscv.o
 #VERB=-t
 VERB=-d
@@ -48,16 +48,16 @@ TAGS tags:
 	etags *.[hc]
 
 test_hello: multisim
-	./multisim -d --lsc workloads/zephyr/hello_world.elf
+	./multisim -d --ooo workloads/zephyr/hello_world.elf
 
-test_lsc: multisim
-	./multisim -d --lsc workloads/riscv-tests/rv32ui-p-lw
+test_ooo: multisim
+	./multisim -d --ooo workloads/riscv-tests/rv32ui-p-lw
 
 test_philo: multisim
-	./multisim -d --lsc workloads/zephyr/philosophers.elf
+	./multisim -d --ooo workloads/zephyr/philosophers.elf
 
 arewethereyet:
-	@bash -c 'printf "We are %3.1f%% there\n" $$(echo `./regress-rv32.sh --lsc|grep SUCCESS|wc -l` / 0.39|bc -l)'
+	@bash -c 'printf "We are %3.1f%% there\n" $$(echo `./regress-rv32.sh --ooo|grep SUCCESS|wc -l` / 0.39|bc -l)'
 
 
 -include *.d

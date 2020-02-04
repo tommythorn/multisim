@@ -39,7 +39,7 @@ static int run = '1';
 
 static struct option long_options[] = {
     {"simple",         0, NULL, '1'},
-    {"lsc",            0, NULL, '2'},
+    {"ooo",            0, NULL, '2'},
     {"help",           0, NULL, '?'},
     {0, 0, 0, 0}
 };
@@ -141,7 +141,7 @@ int main(int argc, char **argv)
         break;
 
     case '2':
-        run_lsc(num_images, images, verbosity);
+        run_ooo(num_images, images, verbosity);
         break;
 
     default:
