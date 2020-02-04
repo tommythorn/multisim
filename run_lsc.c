@@ -34,8 +34,10 @@
  *  we retire from the rp and insert new ones at the wp
 
 TODO:
-- Check selected (like mstatus) CSRs for every cosim step
-- drop n_stores pending (I think it's mishandled in the rollback)
+- Rethink how interrupts are handled; maybe inserting them at decode?
+  but how to get a non-speculative path?
+- DONE Check selected (like mstatus) CSRs for every cosim step DONE
+- DONE drop n_stores pending (I think it's mishandled in the rollback)
 - rename XXXlsc to XXXooo and drop the old OOO
 
 Once this can run everything (in some order)
@@ -191,7 +193,6 @@ static uint64_t         exception_seqno = ~0ULL;
 static isa_exception_t  exception_info;
 
 static int              n_cycles;
-static int              n_pending_stores;
 
 static uint64_t         n_cycles_waiting_on_uncommitted_store_addr;
 static uint64_t         n_cycles_waiting_on_uncommitted_store_data;
@@ -297,7 +298,6 @@ rollback_rob(int keep_rob_index, verbosity_t verbosity)
     assert(rob_wp == (keep_rob_index == ROB_SIZE - 1 ? 0 : keep_rob_index + 1));
 
     exception_seqno = ~0ULL;
-    n_pending_stores = 0;
 }
 
 static void
@@ -385,7 +385,6 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
         rob_entry_t re = rob[rob_rp];
 
         if (re.dec.class == isa_insn_class_store) {
-            assert(0 < n_pending_stores);
             if (!get_reg(rob_rp, re.dec.source_reg_b, &re.result))
                 break;
         }
@@ -402,8 +401,16 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
         if (re.dec.class == isa_insn_class_store) {
             isa_exception_t exc = { 0 };
             arch->store(state, re.store_addr, re.result, re.dec.loadstore_size, &exc);
-            --n_pending_stores;
 
+            if (exc.raised) {
+                exception_info = exc;
+                goto exception;
+            }
+        }
+
+        if (re.dec.dest_msr != ISA_NO_REG) {
+            isa_exception_t exc = { 0 };
+            arch->write_msr(state, re.dec.dest_msr, re.msr_result, &exc);
             if (exc.raised) {
                 exception_info = exc;
                 goto exception;
@@ -460,6 +467,7 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
                     copc & 0xFFFFFFFF, re.dec.insn_addr & 0xFFFFFFFF);
             fflush(stdout);
             assert(re.dec.insn_addr == copc);
+
         }
 
         if (re.dec.dest_reg != ISA_NO_REG) {
@@ -470,6 +478,16 @@ lsc_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
                 fflush(stdout);
                 assert(re.result == costate->r[re.dec.dest_reg]);
             }
+        }
+
+        costate->msr[CSR_MCYCLE] = state->msr[CSR_MCYCLE];
+        if (memcmp(state->msr, costate->msr, sizeof state->msr)) {
+            for (unsigned csr = 0; csr < 0x1000; ++csr)
+                if (costate->msr[csr] != state->msr[csr])
+                    fprintf(stderr, "COSIM: CSR[0x%03x]: %08lx != %08lx\n",
+                            csr, costate->msr[csr], state->msr[csr]);
+            fflush(stdout);
+            assert(0);
         }
 
         if (++rob_rp == ROB_SIZE)
@@ -747,7 +765,6 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
     case isa_insn_class_store:
         // XXX could check the address for exceptions
         rob[p].store_addr = CANONICALIZE(res.store_addr);
-        ++n_pending_stores;
         break;
 
     case isa_insn_class_atomic:
@@ -789,9 +806,6 @@ lsc_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
 
     rob[p].result     = res.result;
     rob[p].msr_result = res.msr_result;
-
-    if (dec.dest_msr != ISA_NO_REG)
-        arch->write_msr(state, dec.dest_msr, res.msr_result, &exc);
 
     // Flush the pipe on system instructions unless is a compjump
     if (dec.system && dec.class != isa_insn_class_compjump) {
