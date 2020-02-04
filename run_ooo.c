@@ -392,9 +392,6 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
         if (re.insn_state == IS_EXCEPTION)
             goto exception;
 
-        if (!re.dec.system && arch->get_interrupt_exception(state, &exception_info))
-            goto exception;
-
         if (re.dec.class == isa_insn_class_store) {
             isa_exception_t exc = { 0 };
             arch->store(state, re.store_addr, re.result, re.dec.loadstore_size, &exc);
@@ -554,13 +551,10 @@ ooo_decode_rename(cpu_state_t *state, verbosity_t verbosity)
         isa_decoded_t dec      = arch->decode(fetched.addr, fetched.insn);
 
         // Serialize system instruction; block issuing until all
-        // previous instructions have executed (really, retired) and then only allow a single one in
+        // previous instructions have retired and then only allow a single one in
 
-/* XXX later
-   if (dec.system)
-   // Check if there are other ready instructions
-   break;
-*/
+        if (dec.system && rob_rp != rob_wp)
+            break;
 
         if (++fb_rp == FETCH_BUFFER_SIZE)
             fb_rp = 0;
