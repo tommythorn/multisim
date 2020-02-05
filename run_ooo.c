@@ -685,7 +685,7 @@ ooo_exec_load(cpu_state_t *state, verbosity_t verbosity, unsigned load_rob_index
 
     n_loads_reordred += reordered_load;
 
-    *res = arch->load(state, load_addr, size, exc);
+    *res = arch->load(state, load_addr, load_type, exc);
 
     return true;
 }
