@@ -375,11 +375,11 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
     while (rob_rp != rob_wp && (rob[rob_rp].insn_state == IS_COMMITTED ||
                                 rob[rob_rp].insn_state == IS_EXCEPTION)) {
 
+        rob_entry_t re = rob[rob_rp];
+
         // XXX Interrupts should get inserted in fetch
         if (arch->get_interrupt_exception(state, &exception_info))
             goto exception;
-
-        rob_entry_t re = rob[rob_rp];
 
         if (re.dec.class == isa_insn_class_store) {
             if (!get_reg(rob_rp, re.dec.source_reg_b, &re.result))
