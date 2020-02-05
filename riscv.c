@@ -252,6 +252,10 @@ disass_insn(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
         if (i.i.funct3 == ADDI && i.i.rs1 == 0 && i.i.rd == 0 && i.i.imm11_0 == 0)
             // nop pseudo instruction
             snprintf(buf, buf_size, "nop");
+        else if (i.i.funct3 == ADDI && i.i.imm11_0 == 0)
+            // mv pseudo instruction
+            snprintf(buf, buf_size, "%-11s%s,%s",
+                     "mv", N[i.i.rd], N[i.i.rs1]);
         else if (i.i.funct3 == ADDI && i.i.rs1 == 0)
             // li pseudo instruction
             snprintf(buf, buf_size, "%-11s%s,%d",
