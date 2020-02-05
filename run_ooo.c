@@ -709,7 +709,10 @@ ooo_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
         goto exception;
 
     if (dec.class == isa_insn_class_atomic) {
-        assert(0); // XXX extend this to handle AMOs
+        exc.raised = true;
+        exc.code = EXCP_INSN_ILLEGAL;
+        goto exception;
+        // XXX extend this to handle AMOs
         // op_a = arch->load(state, atomic_load_addr, dec.loadstore_size, &exc);
     }
 
