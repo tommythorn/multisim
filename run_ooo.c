@@ -377,8 +377,10 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
 
         rob_entry_t re = rob[rob_rp];
 
-        // XXX Interrupts should get inserted in fetch
-        if (arch->get_interrupt_exception(state, &exception_info))
+        // We can't interrupt a system instruction as it may already
+        // have modified the state and cannot be restarted.
+        if (!re.dec.system &&
+            arch->get_interrupt_exception(state, &exception_info))
             goto exception;
 
         if (re.dec.class == isa_insn_class_store) {
