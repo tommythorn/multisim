@@ -264,15 +264,16 @@ visualize_retirement(cpu_state_t *state, unsigned rob_index, rob_entry_t re)
     line[fp.commit_ts  % WIDTH] = 'C';
     line[n_cycles      % WIDTH] = 'R';
 
-    printf("%3d ", n_cycles);
+//  printf("%3d ", n_cycles);
     printf("%3d ", fp.seqno);
-    printf("%2d ", rob_index);
+//  printf("%2d ", rob_index);
     printf("%s ",  line);
 
     isa_disass(stdout, arch, dec,
                (isa_result_t)
                { .result     = re.result,
                  .msr_result = re.msr_result,
+                 .load_addr  = re.store_addr,
                  .store_value= re.result,
                  .store_addr = re.store_addr, });
 }
@@ -740,7 +741,7 @@ ooo_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
         // XXXXXXXXXX
         // XXXX We need to examine pending stores and forward as necessary XXX
         // XXX THIS IS KNOWN WRONG
-        res.load_addr = CANONICALIZE(res.load_addr);
+        rob[p].store_addr = res.load_addr = CANONICALIZE(res.load_addr);
         mmio = is_mmio_space(state, res.load_addr);
 
         if (!ooo_exec_load(state, verbosity, p, res.load_addr, dec.loadstore_size, &exc,
