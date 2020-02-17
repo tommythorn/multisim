@@ -311,6 +311,8 @@ flush_and_redirect(cpu_state_t *state, verbosity_t verbosity, int rob_index,
     state->pc = new_pc;
     fetch_seqno = seqno + 1;
     // mispredicted = true;
+
+    exception_seqno = ~0ULL;
 }
 
 
