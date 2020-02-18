@@ -113,6 +113,7 @@ well.  CLEAR
 typedef struct fetch_parcel_st {
     unsigned            seqno;
     uint64_t            addr;
+    uint64_t            addr_next_predicted; // XXX crude and expensive
     uint32_t            insn;
 
     // For visualization
@@ -157,6 +158,10 @@ typedef struct rob_entry_st {
 
     uint64_t            store_addr;
 
+    bool                mispredicted_br;
+    bool                mispredicted_jump;
+    bool                mispredicted_compjump;
+
     // For cosim
     bool                mmio; // force reference model to follow us
 
@@ -182,6 +187,9 @@ static const arch_t    *arch;
 static fetch_parcel_t   fb[FETCH_BUFFER_SIZE];
 static unsigned         fetch_seqno;
 static int              fb_rp = 0, fb_wp = 0, fb_size = 0;
+
+static bool             allocation_stopped = false;
+static unsigned         allocation_stopped_from;
 
 static int              map[32]; // [tt1], rename table.  -1 means unmapped
 static int64_t          art[32]; // register -> retired value
@@ -306,21 +314,36 @@ visualize_retirement(cpu_state_t *state, unsigned rob_index, rob_entry_t re)
 static void
 restart(cpu_state_t *state, unsigned seqno, uint64_t new_pc)
 {
+    if (!allocation_stopped || seqno < allocation_stopped_from) {
+        allocation_stopped = true;
+        allocation_stopped_from = seqno;
+
+        // Flush FB
+        fb_size = 0;
+        fb_rp = fb_wp;
+
+        state->pc = new_pc;
+        fetch_seqno = seqno + 1;
+        //printf("**** RESTARTING FROM #%d -> 0x%08x ****\n", seqno, (uint32_t)new_pc);
+    }
+    // else printf("**** IGNORED A RESTART FROM #%d -> 0x%08lx ****\n", seqno, new_pc);
+}
+
+static void
+resume(void)
+{
     // No speculative regs => clear MAP
     for (int r = 0; r < 32; ++r)
         map[r] = -1;
 
-    // Flush FB and EX
-    fb_size = 0;
-    fb_rp = fb_wp;
-
-    rob_wp = rob_rp; // Empty ROB
-
-    state->pc = new_pc;
-    fetch_seqno = seqno + 1;
+    // printf("**** ROB had %d entries at when restarting ****\n", (rob_wp + ROB_SIZE - rob_rp) % ROB_SIZE);
+    // Empty ROB
+    rob_wp = rob_rp;
 
     // Clear pending interrupt info
     exception_seqno = ~0ULL;
+
+    allocation_stopped = false;
 }
 
 
@@ -398,6 +421,7 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
             //assert(state->msr[0x300] == costate->msr[0x300]);
             restart(state, re.fp.seqno - 1,
                     arch->handle_exception(state, re.dec.insn_addr, exception_info));
+            resume();
 
             costate->pc = arch->handle_exception(costate, costate->pc, exception_info);
             //assert(state->msr[0x300] == costate->msr[0x300]);
@@ -416,7 +440,7 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
             rob_rp = 0;
 
         if (re.restart)
-            restart(state, re.fp.seqno, re.restart_pc);
+            resume();
 
         ++n_retired;
 
@@ -495,12 +519,35 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
     while (fb_size < FETCH_BUFFER_SIZE && n++ < FETCH_WIDTH) {
         uint64_t addr = state->pc;
         uint32_t insn = (uint32_t)arch->load(state, addr, 0 /* = ifetch */, &exc);
-        state->pc += 4;
-        assert(!exc.raised);
+
+        if (exc.raised) {
+            // XXX technically should tag this as an illegal address
+            // but we'll make do with an illegal instruction for now
+            insn = 0;
+        }
+
+        /* XXX Cheating a bit here until I can get a real predictor */
+        uint64_t pc_next = addr + 4;
+        isa_decoded_t dec = arch->decode(addr, insn);
+
+        switch (dec.class) {
+        case isa_insn_class_branch:
+            if (dec.jumpbranch_target < addr)
+                pc_next = dec.jumpbranch_target;
+            break;
+
+        case isa_insn_class_jump:
+            pc_next = dec.jumpbranch_target;
+            break;
+        default:;
+        }
+
+        state->pc = pc_next;
 
         fb[fb_wp] = (fetch_parcel_t){
             .seqno = fetch_seqno++,
             .addr = addr,
+            .addr_next_predicted = state->pc,
             .insn = insn,
             .fetch_ts = n_cycles
         };
@@ -520,6 +567,10 @@ ooo_decode_rename(cpu_state_t *state, verbosity_t verbosity)
     /*
      * Decode and rename
      */
+
+    if (allocation_stopped)
+        return;
+
     while (0 < fb_size && !is_rob_full()) {
 
         fetch_parcel_t fetched = fb[fb_rp];
@@ -728,11 +779,10 @@ ooo_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
     if (exc.raised)
         goto exception;
 
+    uint64_t pc_next = dec.insn_addr + 4;
+
     switch (dec.class) {
     case isa_insn_class_load:
-        // XXXXXXXXXX
-        // XXXX We need to examine pending stores and forward as necessary XXX
-        // XXX THIS IS KNOWN WRONG
         rob[p].store_addr = res.load_addr = CANONICALIZE(res.load_addr);
         mmio = is_mmio_space(state, res.load_addr);
 
@@ -770,21 +820,33 @@ ooo_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
         break;
 
     case isa_insn_class_branch:
-        if (res.branch_taken) {
+        if (res.branch_taken)
+            pc_next = dec.jumpbranch_target;
+
+        if (pc_next != re.fp.addr_next_predicted) {
             rob[p].restart = true;
-            rob[p].restart_pc = dec.jumpbranch_target;
+            rob[p].restart_pc = pc_next;
+            rob[p].mispredicted_br = true;
         }
         break;
 
-    case isa_insn_class_jump: {
+    case isa_insn_class_jump:
+        pc_next = dec.jumpbranch_target;
+
+        if (pc_next != re.fp.addr_next_predicted) {
             rob[p].restart = true;
-            rob[p].restart_pc = dec.jumpbranch_target;
+            rob[p].restart_pc = pc_next;
+            rob[p].mispredicted_jump = true;
         }
         break;
 
-    case isa_insn_class_compjump: {
+    case isa_insn_class_compjump:
+        pc_next = res.compjump_target;
+
+        if (pc_next != re.fp.addr_next_predicted) {
             rob[p].restart = true;
-            rob[p].restart_pc = res.compjump_target;
+            rob[p].restart_pc = pc_next;
+            rob[p].mispredicted_compjump = true;
         }
         break;
     }
@@ -796,10 +858,14 @@ ooo_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
     rob[p].msr_result = res.msr_result;
 
     // Flush the pipe on system instructions unless is a compjump
-    if (dec.system && dec.class != isa_insn_class_compjump) {
+    if (!rob[p].restart && dec.system) {
+        pc_next = dec.insn_addr + 4;
         rob[p].restart = true;
-        rob[p].restart_pc = dec.insn_addr + 4;
+        rob[p].restart_pc = pc_next;
     }
+
+    if (rob[p].restart)
+        restart(state, re.fp.seqno, pc_next);
 
 exception:
     rob[p].insn_state = IS_EXECUTED;
