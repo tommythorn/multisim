@@ -1164,7 +1164,7 @@ static void tick(cpu_state_t *s, int instret, cpu_state_t *cosimstate)
 
         // mtime on QEMU runs at 10 MHz.  Let's pretend our processors runs at 1 MHz
         if ((s->counter & 0) == 0) {
-            s->mtimereg[0] += 100;
+            s->mtimereg[0] += 3;
             if (s->mtimereg[0] >= s->mtimereg[1])
                 s->msr[CSR_MIP] |= MIP_MTIP;}
     }
