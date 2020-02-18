@@ -19,8 +19,8 @@
 ISA=
 #ISA=-m32
 WARN=-Wall -Werror -Wno-parentheses
-OPT=$(ISA)
-CFLAGS=-g -std=c99 $(WARN) -MD $(OPT) -g -I/opt/local/include
+OPT=
+CFLAGS=-g -std=c99 $(WARN) -MD $(OPT) $(ISA) -g -I/opt/local/include
 LDFLAGS=-g $(ISA)
 FLAGS=
 #MORE_STUFF=run_sscalar.o run_sscalar_oooe.o
