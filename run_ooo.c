@@ -98,9 +98,9 @@ well.  CLEAR
 
 //////// Configuration and magic numbers
 
-#define FETCH_BUFFER_SIZE      4
-#define FETCH_WIDTH            4
-#define ROB_SIZE               16 // <= 64 for now (using uint64_t as bitmasks)
+#define FETCH_WIDTH            8
+#define FETCH_BUFFER_SIZE      16
+#define ROB_SIZE               64
 
 // Two special physical registers: the constant zero and the sink for
 // for r0 destination (it's never read)
