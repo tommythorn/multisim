@@ -1,6 +1,6 @@
 /*
  * Multisim: a microprocessor architecture exploration framework
- * Copyright (C) 2019 Tommy Thorn
+ * Copyright (C) 2019,2020 Tommy Thorn
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -101,6 +101,7 @@ well.  CLEAR
 #define FETCH_WIDTH            8
 #define FETCH_BUFFER_SIZE      16
 #define ROB_SIZE               64
+#define PRF_SIZE               (2*ROB_SIZE)
 
 // Two special physical registers: the constant zero and the sink for
 // for r0 destination (it's never read)
@@ -146,8 +147,9 @@ static char insn_state_to_char[] = {
 
 typedef struct rob_entry_st {
     insn_state_t        insn_state;
-    uint64_t            result; // ~ prf
     uint64_t            msr_result;
+
+    int                 prd, prs1, prs2;
 
     bool                restart;
     uint64_t            restart_pc;
@@ -181,10 +183,15 @@ static fetch_parcel_t   fb[FETCH_BUFFER_SIZE];
 static unsigned         fetch_seqno;
 static int              fb_rp = 0, fb_wp = 0, fb_size = 0;
 
+static int              map[32]; // [tt1], rename table.  -1 means unmapped
 static int64_t          art[32]; // register -> retired value
 
 static rob_entry_t      rob[ROB_SIZE];
 static unsigned         rob_wp = 0, rob_rp = 0;
+
+static int64_t          prf[PRF_SIZE];
+static bool             pr_ready[PRF_SIZE];
+static int              pr_next = 0;
 
 static uint64_t         exception_seqno = ~0ULL;
 static isa_exception_t  exception_info;
@@ -199,6 +206,19 @@ static uint64_t         n_missed_store_forwardings;
 
 ///////////////////////////////////////////////////////
 
+/* Given the renamed pr or the original logical, return value */
+static bool
+readreg(int pr, int r, uint64_t *value)
+{
+    if (pr != -1) {
+        *value = prf[pr];
+        return pr_ready[pr];
+    }
+
+    *value = art[r];
+    return true;
+}
+
 static bool
 is_rob_full(void)
 {
@@ -206,7 +226,8 @@ is_rob_full(void)
 }
 
 
-static void dump_microarch_state(void)
+static void
+dump_microarch_state(void)
 {
     // FB
     printf("         FB size %d\n", fb_size);
@@ -269,79 +290,39 @@ visualize_retirement(cpu_state_t *state, unsigned rob_index, rob_entry_t re)
 //  printf("%2d ", rob_index);
     printf("%s ",  line);
 
+    uint64_t store_data;
+    bool ready = readreg(re.prs2, re.dec.source_reg_b, &store_data);
+    assert(ready);
+
     isa_disass(stdout, arch, dec,
                (isa_result_t)
-               { .result     = re.result,
+               { .result     = prf[re.prd],
                  .msr_result = re.msr_result,
                  .load_addr  = re.store_addr,
-                 .store_value= re.result,
+                 .store_value= store_data,
                  .store_addr = re.store_addr, });
 }
 
 static void
-rollback_rob(int keep_rob_index, verbosity_t verbosity)
+restart(cpu_state_t *state, unsigned seqno, uint64_t new_pc)
 {
-    do {
-        unsigned p = rob_wp;
-        if (p-- == 0) {
-            p = ROB_SIZE - 1;
-        }
+    // No speculative regs => clear MAP
+    for (int r = 0; r < 32; ++r)
+        map[r] = -1;
 
-        assert((unsigned)p < ROB_SIZE);
-        if (p == keep_rob_index)
-            break;
-        rob_wp = p;
-    } while (rob_rp != rob_wp);
-
-    assert(rob_wp == (keep_rob_index == ROB_SIZE - 1 ? 0 : keep_rob_index + 1));
-
-    exception_seqno = ~0ULL;
-}
-
-static void
-flush_and_redirect(cpu_state_t *state, verbosity_t verbosity, int rob_index,
-                   unsigned seqno, uint64_t new_pc)
-{
-    // Flush
+    // Flush FB and EX
     fb_size = 0;
     fb_rp = fb_wp;
 
-    rollback_rob(rob_index, verbosity);
+    rob_wp = rob_rp; // Empty ROB
 
     state->pc = new_pc;
     fetch_seqno = seqno + 1;
-    // mispredicted = true;
 
+    // Clear pending interrupt info
     exception_seqno = ~0ULL;
 }
 
-
-/* All register values can be found by just scanning the ROB backward
- * from the refering instruction's rob_index */
-static bool
-get_reg(unsigned rob_index, int r, uint64_t *value)
-{
-    if (r == 0) {
-        *value = 0;
-        return true;
-    }
-
-    unsigned p = rob_index;
-    while (p != rob_rp) {
-        if (p == 0)
-            p = ROB_SIZE - 1;
-        else
-            --p;
-
-        if (rob[p].dec.dest_reg == r) {
-            *value = rob[p].result;
-            return rob[p].insn_state == IS_COMMITTED;
-        }
-    }
-
-    *value = art[r];
-    return true;
-}
 
 /*
  * The ReOrder Buffer holds instructions in fetch (= program) order.
@@ -386,55 +367,56 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
             arch->get_interrupt_exception(state, &exception_info))
             goto exception;
 
-        if (re.dec.class == isa_insn_class_store) {
-            if (!get_reg(rob_rp, re.dec.source_reg_b, &re.result))
-                break;
-        }
+        // Can't retire a committed store until the data is ready
+        if (re.dec.class == isa_insn_class_store &&
+            re.prs2 != -1 && !pr_ready[re.prs2])
+            break;
 
         if (verbosity & VERBOSE_DISASS)
             visualize_retirement(state, rob_rp, re);
 
-        if (re.insn_state == IS_EXCEPTION)
-            goto exception;
-
-        if (re.dec.class == isa_insn_class_store) {
+        if (re.insn_state != IS_EXCEPTION && re.dec.class == isa_insn_class_store) {
             isa_exception_t exc = { 0 };
-            arch->store(state, re.store_addr, re.result, re.dec.loadstore_size, &exc);
+            uint64_t store_data;
+            bool ready = readreg(re.prs2, re.dec.source_reg_b, &store_data);
+            assert(ready);
+            arch->store(state, re.store_addr, store_data, re.dec.loadstore_size, &exc);
 
             if (exc.raised) {
+                re.insn_state = IS_EXCEPTION;
                 exception_info = exc;
-                goto exception;
             }
         }
 
         if (re.insn_state == IS_EXCEPTION) {
         exception:
             if (state->verbosity & VERBOSE_DISASS)
-                fprintf(stdout, "                  EXCEPTION %"PRId64" (%08"PRId64") RAISED\n",
-                        exception_info.code, exception_info.info);
-
-            int prev_rob_rp = rob_rp - 1;
-
-            if (rob_rp == 0) {
-                prev_rob_rp = ROB_SIZE - 1;
-            }
+                fprintf(stdout, "                  %s %"PRId64" (%08"PRId64") RAISED\n",
+                        exception_info.code &  (1 << 31) ? "INTERRUPT" : "EXCEPTION",
+                        exception_info.code & ~(1 << 31), exception_info.info);
 
             //assert(state->msr[0x300] == costate->msr[0x300]);
-            flush_and_redirect(state, verbosity, prev_rob_rp, re.fp.seqno - 1,
-                               arch->handle_exception(state, re.dec.insn_addr, exception_info));
+            restart(state, re.fp.seqno - 1,
+                    arch->handle_exception(state, re.dec.insn_addr, exception_info));
 
             costate->pc = arch->handle_exception(costate, costate->pc, exception_info);
             //assert(state->msr[0x300] == costate->msr[0x300]);
             break;
         }
 
+        // Move the pf to the ART
         if (re.dec.dest_reg != ISA_NO_REG) {
-            art[re.dec.dest_reg] = re.result;
+            assert(pr_ready[re.prd] && re.prd != -1);
+            art[re.dec.dest_reg] = prf[re.prd];
+            if (map[re.dec.dest_reg] == re.prd)
+                map[re.dec.dest_reg] = -1;
         }
 
-        if (re.restart) {
-            flush_and_redirect(state, verbosity, rob_rp, re.fp.seqno, re.restart_pc);
-        }
+        if (++rob_rp == ROB_SIZE)
+            rob_rp = 0;
+
+        if (re.restart)
+            restart(state, re.fp.seqno, re.restart_pc);
 
         ++n_retired;
 
@@ -452,7 +434,7 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
         bool override = re.mmio;
 
         if (override && re.dec.dest_reg != ISA_NO_REG)
-            costate->r[re.dec.dest_reg] = re.result;
+            costate->r[re.dec.dest_reg] = prf[re.prd];
 
         if (re.dec.insn_addr != copc) {
             fprintf(stderr, "COSIM: REF PC %08"PRIx64" != DUT PC %08"PRIx64"\n",
@@ -463,12 +445,12 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
         }
 
         if (re.dec.dest_reg != ISA_NO_REG) {
-            if (re.result != costate->r[re.dec.dest_reg]) {
+            if (prf[re.prd] != costate->r[re.dec.dest_reg]) {
                 fprintf(stderr, "COSIM: REF RES %08"PRIx64" != DUT RES %08"PRIx64"\n",
                         costate->r[re.dec.dest_reg] & 0xFFFFFFFF,
-                        re.result);
+                        prf[re.prd]);
                 fflush(stdout);
-                assert(re.result == costate->r[re.dec.dest_reg]);
+                assert(prf[re.prd] == costate->r[re.dec.dest_reg]);
             }
         }
 
@@ -481,9 +463,6 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
             fflush(stdout);
             assert(0);
         }
-
-        if (++rob_rp == ROB_SIZE)
-            rob_rp = 0;
     }
 
     static int deadcycles = 0;
@@ -547,7 +526,8 @@ ooo_decode_rename(cpu_state_t *state, verbosity_t verbosity)
         isa_decoded_t dec      = arch->decode(fetched.addr, fetched.insn);
 
         // Serialize system instruction; block issuing until all
-        // previous instructions have retired and then only allow a single one in
+        // previous instructions have retired and then only allow a
+        // single one in
 
         if (dec.system && rob_rp != rob_wp)
             break;
@@ -561,8 +541,17 @@ ooo_decode_rename(cpu_state_t *state, verbosity_t verbosity)
         rob[rob_wp] = (rob_entry_t) {
             .insn_state = IS_FETCHED,
             .fp = fetched,
-            .dec = dec
+            .dec = dec,
+            .prd = -1,
+            .prs1 = map[dec.source_reg_a],
+            .prs2 = map[dec.source_reg_b]
         };
+
+        if (dec.dest_reg != ISA_NO_REG) {
+            rob[rob_wp].prd = map[dec.dest_reg] = pr_next;
+            pr_ready[pr_next] = false;
+            pr_next = (pr_next + 1) % PRF_SIZE;
+        }
 
         if (++rob_wp == ROB_SIZE)
             rob_wp = 0;
@@ -660,7 +649,7 @@ ooo_exec_load(cpu_state_t *state, verbosity_t verbosity, unsigned load_rob_index
 
         // Uncommitted overlapping store data means we stop
         uint64_t store_data;
-        if (!get_reg(p, rob[p].dec.source_reg_b, &store_data)) {
+        if (!readreg(rob[p].prs2, rob[p].dec.source_reg_b, &store_data)) {
             ++/*rob[p].stat.*/n_cycles_waiting_on_uncommitted_store_data;
             return false;
         }
@@ -692,6 +681,7 @@ ooo_exec_load(cpu_state_t *state, verbosity_t verbosity, unsigned load_rob_index
     return true;
 }
 
+static bool pr_ready_next[PRF_SIZE];
 
 static bool
 ooo_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
@@ -799,7 +789,10 @@ ooo_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
         break;
     }
 
-    rob[p].result     = res.result;
+    if (re.dec.dest_reg != ISA_NO_REG) {
+        prf[re.prd] = res.result;
+        pr_ready_next[re.prd] = true;
+    }
     rob[p].msr_result = res.msr_result;
 
     // Flush the pipe on system instructions unless is a compjump
@@ -828,7 +821,9 @@ exception:
 static void
 ooo_execute(cpu_state_t *state, verbosity_t verbosity)
 {
-    // Commit previously executed insns
+    memcpy(pr_ready_next, pr_ready, sizeof pr_ready_next);
+
+    // Commit previously executed insns XXX redundant now
     for (unsigned p = rob_rp; p != rob_wp; p = p == ROB_SIZE - 1 ? 0 : p + 1)
         if (rob[p].insn_state == IS_EXECUTED) {
             rob[p].insn_state = IS_COMMITTED;
@@ -841,21 +836,25 @@ ooo_execute(cpu_state_t *state, verbosity_t verbosity)
         if (re.insn_state != IS_FETCHED)
             continue;
 
+        uint64_t val_a, val_b = 0;
+
+        if (!readreg(re.prs1, re.dec.source_reg_a, &val_a))
+            continue;
+
         // Stores are special and execute the address calculation even
         // if the data isn't ready.  Loads have additional dependency
         // on stores.
 
-        uint64_t val_a, val_b;
-        if (re.dec.class == isa_insn_class_store && !get_reg(p, re.dec.source_reg_a, &val_a))
-            continue;
-        else if (!get_reg(p, re.dec.source_reg_a, &val_a) ||
-                 !get_reg(p, re.dec.source_reg_b, &val_b))
+        if (re.dec.class != isa_insn_class_store &&
+            !readreg(re.prs2, re.dec.source_reg_b, &val_b))
             continue;
 
         if (!ooo_exec1(state, verbosity, p, val_a, val_b))
             // Loads may not be able to execute yet
             continue;
     }
+
+    memcpy(pr_ready, pr_ready_next, sizeof pr_ready);
 }
 
 static bool
@@ -893,6 +892,9 @@ run_ooo(int num_images, char *images[], verbosity_t verbosity)
 
     uint64_t tohost = 0;
     getelfsym(&info, "tohost", &tohost);
+
+    for (int r = 0; r < 32; ++r)
+        map[r] = -1;
 
     for (n_cycles = 0;; ++n_cycles) {
         if (step_ooo(state, costate, verbosity))
