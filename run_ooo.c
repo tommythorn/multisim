@@ -210,7 +210,7 @@ static uint64_t         n_cycles_waiting_on_uncommitted_store_addr;
 static uint64_t         n_cycles_waiting_on_uncommitted_store_data;
 static uint64_t         n_loads_reordred;
 static uint64_t         n_missed_store_forwardings;
-
+static uint64_t         n_full_store_forwards;
 
 ///////////////////////////////////////////////////////
 
@@ -271,10 +271,11 @@ visualize_retirement(cpu_state_t *state, unsigned rob_index, rob_entry_t re)
         last_cycles = n_cycles;
         last_instret = fp.seqno;
 
-        printf("LSU stats: STA stall %ld/STD stall %ld/Reordered %ld/bypass missed %ld\n",
+        printf("LSU stats: STA stall %ld/STD stall %ld/Reordered %ld/full bypass %ld/bypass missed %ld\n",
                n_cycles_waiting_on_uncommitted_store_addr,
                n_cycles_waiting_on_uncommitted_store_data,
                n_loads_reordred,
+               n_full_store_forwards,
                n_missed_store_forwardings);
 
         n_cycles_waiting_on_uncommitted_store_addr = 0;
@@ -705,16 +706,18 @@ ooo_exec_load(cpu_state_t *state, verbosity_t verbosity, unsigned load_rob_index
             return false;
         }
 
-#if 0
         // We have an overlapping store with data.  If it fully
         // overlaps, we take it and return.  XXX Only deal with same
         // sized data
-        if (rob[p].dec.loadstore_size == size) {
+        if (rob[p].dec.loadstore_size == load_type) {
             ++n_full_store_forwards;
-            *res.result = signed_extend(store_data, load_type);
+            if (load_type < 0)
+                // Sign-extended
+                *res = (int64_t)store_data << (64-8*size) >> (64-8*size);
+            else
+                *res = (uint64_t)store_data << (64-8*size) >> (64-8*size);
             return true;
         }
-#endif
 
         // XXX This is where we start collecting bits of the data to
         // forward.  I'm not going to do this for now, instead just
