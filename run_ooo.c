@@ -102,6 +102,7 @@ well.  CLEAR
 #define FETCH_BUFFER_SIZE      16
 #define ROB_SIZE               64
 #define PRF_SIZE               (2*ROB_SIZE)
+#define RAS_SIZE               8
 
 // Two special physical registers: the constant zero and the sink for
 // for r0 destination (it's never read)
@@ -187,6 +188,8 @@ static const arch_t    *arch;
 static fetch_parcel_t   fb[FETCH_BUFFER_SIZE];
 static unsigned         fetch_seqno;
 static int              fb_rp = 0, fb_wp = 0, fb_size = 0;
+static uint64_t         ras[RAS_SIZE];
+static unsigned         ras_sp = 0;
 
 static bool             allocation_stopped = false;
 static unsigned         allocation_stopped_from;
@@ -325,7 +328,7 @@ restart(cpu_state_t *state, unsigned seqno, uint64_t new_pc)
 
         state->pc = new_pc;
         fetch_seqno = seqno + 1;
-        //printf("**** RESTARTING FROM #%d -> 0x%08x ****\n", seqno, (uint32_t)new_pc);
+        printf("**** RESTARTING FROM #%d -> 0x%08x ****\n", seqno, (uint32_t)new_pc);
     }
     // else printf("**** IGNORED A RESTART FROM #%d -> 0x%08lx ****\n", seqno, new_pc);
 }
@@ -538,8 +541,40 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
             break;
 
         case isa_insn_class_jump:
+            if (dec.dest_reg == 1 || dec.dest_reg == 5) {
+                ras[ras_sp] = pc_next;
+                ras_sp = (ras_sp + 1) % RAS_SIZE;
+            }
             pc_next = dec.jumpbranch_target;
             break;
+
+        case isa_insn_class_compjump: {
+            // Table 2.1
+            bool rd_link = dec.dest_reg == 1 || dec.dest_reg == 5;
+            bool rs1_link = dec.source_reg_a == 1 || dec.source_reg_a == 5;
+            if (!rd_link && !rs1_link)
+                break;
+
+            if (!rd_link && rs1_link) {
+                // pop
+                ras_sp = (ras_sp - 1) % RAS_SIZE;
+                pc_next = ras[ras_sp];
+            } else if (rd_link && !rs1_link) {
+                // push
+                ras[ras_sp] = pc_next;
+                ras_sp = (ras_sp + 1) % RAS_SIZE;
+            } else if (dec.dest_reg != dec.source_reg_a) {
+                // pop, then push
+                uint64_t save = ras[ras_sp];
+                ras[ras_sp]   = pc_next;
+                pc_next       = save;
+            } else {
+                // push
+                ras[ras_sp] = pc_next;
+                ras_sp = (ras_sp + 1) % RAS_SIZE;
+            }
+        }
+
         default:;
         }
 
@@ -550,7 +585,7 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
             .addr = addr,
             .addr_next_predicted = state->pc,
             .insn = insn,
-            .fetch_ts = n_cycles
+            .fetch_ts = n_cycles,
         };
 
         if (++fb_wp == FETCH_BUFFER_SIZE)
