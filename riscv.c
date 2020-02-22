@@ -477,6 +477,7 @@ decode(uint64_t insn_addr, uint32_t insn)
     dec.source_msr_a = ISA_NO_REG;
     dec.class        = isa_insn_class_illegal;
     dec.system       = false;
+    dec.imm          = 0;
 
     switch (i.r.opcode) {
     case LOAD:
@@ -487,6 +488,7 @@ decode(uint64_t insn_addr, uint32_t insn)
             dec.loadstore_size = -dec.loadstore_size;
         dec.source_reg_a = i.i.rs1;
         dec.dest_reg     = i.i.rd;
+        dec.imm          = i.i.imm11_0;
         break;
 
     case LOAD_FP:
@@ -501,11 +503,22 @@ decode(uint64_t insn_addr, uint32_t insn)
 
     case OP_IMM:
     case OP_IMM_32:
+        dec.class        = isa_insn_class_alu;
+        dec.dest_reg     = i.i.rd;
         dec.source_reg_a = i.i.rs1;
+        dec.imm          = i.i.imm11_0;
+        break;
+
     case AUIPC:
+        dec.dest_reg     = i.i.rd;
+        dec.class        = isa_insn_class_alu;
+        dec.imm          = dec.insn_addr + (i.u.imm31_12 << 12);
+        break;
+
     case LUI:
         dec.dest_reg     = i.i.rd;
         dec.class        = isa_insn_class_alu;
+        dec.imm          = i.u.imm31_12 << 12;
         break;
 
     case STORE:
@@ -515,6 +528,7 @@ decode(uint64_t insn_addr, uint32_t insn)
 	    goto illegal;
         dec.source_reg_a = i.s.rs1;
         dec.source_reg_b = i.s.rs2;
+        dec.imm          = i.s.imm11_5 << 5 | i.s.imm4_0;
         break;
 
     illegal:
@@ -591,6 +605,7 @@ decode(uint64_t insn_addr, uint32_t insn)
         dec.class        = isa_insn_class_compjump;
         dec.source_reg_a = i.i.rs1;
         dec.dest_reg     = i.i.rd;
+        dec.imm          = i.i.imm11_0;
         break;
 
     case JAL: {
@@ -708,9 +723,6 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
     uint32_t op_b_u_32= (uint32_t) op_b_u;
     insn_t i          = { .raw = dec.insn };
     isa_result_t res  = { 0 };
-    uint64_t ea_load  = op_a + i.i.imm11_0;
-    uint64_t ea_store = op_a + (i.s.imm11_5 << 5 | i.s.imm4_0);
-
 
     if (dec.class == isa_insn_class_illegal)
         goto illegal_insn;
@@ -718,7 +730,7 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
     // XXX dispatch by dec.class instead?
     switch (i.r.opcode) {
     case LOAD:
-        res.load_addr = ea_load;
+        res.load_addr = op_a + dec.imm;
         return res;
 
     case LOAD_FP:
@@ -727,51 +739,51 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
     case OP_IMM_32:
         switch (i.i.funct3) {
         case ADDI: // ADDIW
-            res.result = op_a_32 + i.i.imm11_0;
+            res.result = op_a + dec.imm;
             break;
         case SLLI: // SLLIW
-            res.result = op_a_32 << (i.i.imm11_0 & (xlen - 1));
+            res.result = op_a_32 << (dec.imm & (xlen - 1));
             break;
         case SR_I: // SRLIW/SRAIW
             if (i.i.imm11_0 & 1 << 10)
-                res.result = op_a_32 >> (i.i.imm11_0 & (xlen - 1));
+                res.result = op_a_32 >> (dec.imm & (xlen - 1));
             else
-                res.result = op_a_u_32 >> (i.i.imm11_0 & (xlen - 1));
-            res.result = (int32_t)res.result;
+                res.result = op_a_u_32 >> (dec.imm & (xlen - 1));
             break;
         default:
             goto illegal_insn;
         }
+        res.result = (int32_t)res.result;
         return res;
 
     case OP_IMM:
         switch (i.i.funct3) {
         case ADDI:
-            res.result = op_a + i.i.imm11_0;
+            res.result = op_a + dec.imm;
             break;
         case SLLI:
-            res.result = op_a << (i.i.imm11_0 & (xlen - 1));
+            res.result = op_a << (dec.imm & (xlen - 1));
             break;
         case SLTI:
-            res.result = op_a < i.i.imm11_0;
+            res.result = op_a < dec.imm;
             break;
         case SLTIU:
-            res.result = op_a_u < (uint64_t) (int64_t) i.i.imm11_0;
+            res.result = op_a_u < (uint64_t) (int64_t) dec.imm;
             break;
         case XORI:
-            res.result = op_a ^ i.i.imm11_0;
+            res.result = op_a ^ dec.imm;
             break;
         case SR_I:
             if (i.i.imm11_0 & 1 << 10)
-                res.result = op_a >> (i.i.imm11_0 & (xlen - 1));
+                res.result = op_a >> (dec.imm & (xlen - 1));
             else
-                res.result = (uint32_t) op_a_u >> (i.i.imm11_0 & (xlen - 1)); // XXX RV32
+                res.result = (uint32_t) op_a_u >> (dec.imm & (xlen - 1)); // XXX RV32
             break;
         case ORI:
-            res.result = op_a | i.i.imm11_0;
+            res.result = op_a | dec.imm;
             break;
         case ANDI:
-            res.result = op_a & i.i.imm11_0;
+            res.result = op_a & dec.imm;
             break;
         default:
             goto illegal_insn;
@@ -779,12 +791,12 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
         return res;
 
     case AUIPC:
-        res.result = dec.insn_addr + (i.u.imm31_12 << 12);
+        res.result = dec.imm;
         return res;
 
     case STORE:
         res.store_value = op_b;
-        res.store_addr = ea_store;
+        res.store_addr = op_a + dec.imm;
         return res;
 
     case STORE_FP:
@@ -950,7 +962,7 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
         return res;
 
     case LUI:
-        res.result = i.u.imm31_12 << 12;
+        res.result = dec.imm;
         return res;
 
     case BRANCH:
@@ -978,7 +990,7 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
 
     case JALR:
         res.result = dec.insn_addr + 4;
-        res.compjump_target = (op_a + i.i.imm11_0) & -2LL;
+        res.compjump_target = (op_a + dec.imm) & -2LL;
 
         if (res.compjump_target & 3)
             return raise_exception(EXCP_INSN_MISALIGN, res.compjump_target, exc);

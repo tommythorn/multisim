@@ -109,6 +109,7 @@ typedef struct isa_decoded_st {
     isa_msr_t           dest_msr, source_msr_a;
     isa_insn_class_t    class;
     bool                system; // system instruction are handled differently
+    int64_t             imm;    // generalized optional immediate
     union {
         int                 loadstore_size;
         uint64_t            jumpbranch_target;
