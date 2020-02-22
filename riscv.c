@@ -1,6 +1,6 @@
 /*
  * Multisim: a microprocessor architecture exploration framework
- * Copyright (C) 2014,2018 Tommy Thorn
+ * Copyright (C) 2014,2018,2020 Tommy Thorn
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -519,7 +519,7 @@ decode(uint64_t insn_addr, uint32_t insn)
 
     illegal:
       dec.system = true;
-      dec.class = isa_insn_class_compjump;
+      dec.class = isa_insn_class_illegal;
       break;
 
     case STORE_FP:
@@ -629,6 +629,8 @@ decode(uint64_t insn_addr, uint32_t insn)
               dec.source_msr_a = 0xFFF & (unsigned) i.i.imm11_0;
               dec.dest_reg     = i.i.rd;
               dec.class        = isa_insn_class_alu;
+              // XXX treating this as non-sequential is fragile, but
+              // works except for xSTATUS, INSTRET, and CYCLE
               break;
           }
           /* Fall-through */
@@ -709,6 +711,11 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
     uint64_t ea_load  = op_a + i.i.imm11_0;
     uint64_t ea_store = op_a + (i.s.imm11_5 << 5 | i.s.imm4_0);
 
+
+    if (dec.class == isa_insn_class_illegal)
+        goto illegal_insn;
+
+    // XXX dispatch by dec.class instead?
     switch (i.r.opcode) {
     case LOAD:
         res.load_addr = ea_load;
