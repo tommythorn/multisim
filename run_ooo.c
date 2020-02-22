@@ -98,11 +98,11 @@ well.  CLEAR
 
 //////// Configuration and magic numbers
 
-#define FETCH_WIDTH            8
-#define FETCH_BUFFER_SIZE      16
-#define ROB_SIZE               64
+#define FETCH_WIDTH            32
+#define FETCH_BUFFER_SIZE      64
+#define ROB_SIZE               128
 #define PRF_SIZE               (2*ROB_SIZE)
-#define RAS_SIZE               8
+#define RAS_SIZE               32
 
 // Two special physical registers: the constant zero and the sink for
 // for r0 destination (it's never read)
