@@ -313,6 +313,9 @@ visualize_retirement(cpu_state_t *state, unsigned rob_index, rob_entry_t re)
                  .load_addr  = re.store_addr,
                  .store_value= store_data,
                  .store_addr = re.store_addr, });
+
+    if (re.restart)
+        putc('\n', stdout);
 }
 
 static void
@@ -328,9 +331,7 @@ restart(cpu_state_t *state, unsigned seqno, uint64_t new_pc)
 
         state->pc = new_pc;
         fetch_seqno = seqno + 1;
-        printf("**** RESTARTING FROM #%d -> 0x%08x ****\n", seqno, (uint32_t)new_pc);
     }
-    // else printf("**** IGNORED A RESTART FROM #%d -> 0x%08lx ****\n", seqno, new_pc);
 }
 
 static void
@@ -340,7 +341,6 @@ resume(void)
     for (int r = 0; r < 32; ++r)
         map[r] = -1;
 
-    // printf("**** ROB had %d entries at when restarting ****\n", (rob_wp + ROB_SIZE - rob_rp) % ROB_SIZE);
     // Empty ROB
     rob_wp = rob_rp;
 
