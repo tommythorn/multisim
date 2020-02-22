@@ -217,6 +217,16 @@ static uint64_t         n_missed_store_forwardings;
 static uint64_t         n_full_store_forwards;
 
 ///////////////////////////////////////////////////////
+static bool
+is_serializing(isa_decoded_t dec)
+{
+    if (!dec.system)
+        return false;
+
+    insn_t i = { .raw = dec.insn };
+
+    return !(i.r.opcode == SYSTEM && i.r.funct3 == CSRRS && i.i.rs1 == 0);
+}
 
 /* Given the renamed pr or the original logical, return value */
 static bool
@@ -392,7 +402,7 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
 
         // We can't interrupt a system instruction as it may already
         // have modified the state and cannot be restarted.
-        if (!re.dec.system &&
+        if (!is_serializing(re.dec) &&
             arch->get_interrupt_exception(state, &exception_info))
             goto exception;
 
@@ -597,7 +607,7 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
             fb_wp = 0;
         fb_size++;
 
-        if (dec.system) {
+        if (is_serializing(dec)) {
             allow_fetch = false;
             break;
         }
@@ -623,7 +633,7 @@ ooo_decode_rename(cpu_state_t *state, verbosity_t verbosity)
         // previous instructions have retired and then only allow a
         // single one in
 
-        if (dec.system && rob_rp != rob_wp)
+        if (is_serializing(dec) && rob_rp != rob_wp)
             break;
 
         if (++fb_rp == FETCH_BUFFER_SIZE)
@@ -903,7 +913,7 @@ ooo_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
     rob[p].msr_result = res.msr_result;
 
     // Flush the pipe on system instructions unless is a compjump
-    if (!rob[p].restart && dec.system) {
+    if (!rob[p].restart && is_serializing(dec)) {
         pc_next = dec.insn_addr + 4;
         rob[p].restart = true;
         rob[p].restart_pc = pc_next;
