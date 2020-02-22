@@ -187,6 +187,7 @@ static const arch_t    *arch;
 
 static fetch_parcel_t   fb[FETCH_BUFFER_SIZE];
 static unsigned         fetch_seqno;
+static bool             allow_fetch = true;
 static int              fb_rp = 0, fb_wp = 0, fb_size = 0;
 static uint64_t         ras[RAS_SIZE];
 static unsigned         ras_sp = 0;
@@ -331,6 +332,7 @@ restart(cpu_state_t *state, unsigned seqno, uint64_t new_pc)
 
         state->pc = new_pc;
         fetch_seqno = seqno + 1;
+        allow_fetch = true;
     }
 }
 
@@ -517,6 +519,9 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
     isa_exception_t exc = { 0 };
     int n = 0;
 
+    if (!allow_fetch)
+        return;
+
     /*
      * Fetch (branch prediction would happen here, eventually)
      */
@@ -580,7 +585,7 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
 
         state->pc = pc_next;
 
-        fb[fb_wp] = (fetch_parcel_t){
+        fb[fb_wp] = (fetch_parcel_t) {
             .seqno = fetch_seqno++,
             .addr = addr,
             .addr_next_predicted = state->pc,
@@ -591,10 +596,12 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
         if (++fb_wp == FETCH_BUFFER_SIZE)
             fb_wp = 0;
         fb_size++;
-    }
 
-    if (0)
-    fprintf(stderr, "%05d [fetched %d, buffer %d]\n", n_cycles, n, fb_size);
+        if (dec.system) {
+            allow_fetch = false;
+            break;
+        }
+    }
 }
 
 static void
