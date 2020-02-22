@@ -647,8 +647,10 @@ ooo_decode_rename(cpu_state_t *state, verbosity_t verbosity)
             .fp = fetched,
             .dec = dec,
             .prd = -1,
-            .prs1 = map[dec.source_reg_a],
-            .prs2 = map[dec.source_reg_b]
+            .prs1 = (dec.source_reg_a == ISA_NO_REG
+                     ? -1 : map[dec.source_reg_a]),
+            .prs2 = (dec.source_reg_b == ISA_NO_REG
+                     ? -1 : map[dec.source_reg_b]),
         };
 
         if (dec.dest_reg != ISA_NO_REG) {
