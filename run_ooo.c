@@ -18,71 +18,11 @@
  * Boston, MA 02111-1307, USA.
  *
  *
- * This branch goes in a different direction: what is the simplest
- * possible we can do?  Try to minimize the state; all instruction are
- * referred to by their sequence number.  A register is either retired
- * and lives in the architecture file (ARF), otherwise it lives in the
- * ROB (conceptually).
- * Scheduling work straight out of the ROB.
+ * Most significant bit: the purpose of this model is to be a IPC
+ * limit study so many things are completely unrealistic.  That's not
+ * an issue [yet].
  *
- * This eliminates freelist, simplifies rollback, make scheduling much
- * simpler (for now).
- *
- * Once this model works, we can look at ways to improve it.
- *
- *  rob[rp] ... rob[wp-1] is the outstading non-retired instructions
- *  we retire from the rp and insert new ones at the wp
-
-TODO:
-- Rethink how interrupts are handled; maybe inserting them at decode?
-  but how to get a non-speculative path?
-
-Once this can run everything (in some order)
-
-- Add some branch prediction.  Seems not that hard to add a RAS as
-well.  CLEAR
-
-- Accellerate the register lookup; a rename table is obvious but then
-  we need to consider how to restore it upon rollback.
-
-  1. The immediate options: the simple Chronis idea which is just
-     stops fetch and waits for retirement to catch up.  MOSTLY CLEAR
-
-  2. Checkpoints a la CPR; UNCLEAR
-
-- Two dimensional ROB a la mc88120; UNCLEAR
-- CPR; UNCLEAR
-
-- Finally, piece de resistance: optimizing trace cache of packets.
-  RESEARCH
-
-
-
- * Correctness:
- *
- * - Force interrupts on cosim model
- *
- * Perf:
- *
- * - Predict branches
- * - Misspeculated stores corrupt the memory.  Solutions from simplest to most advanced:
- *   1. Same but, block loads only if there are overlapping stores.
- *   2. Same but, forward completely overlapping stores with known data.
- *   ...
- *   ?. Track unresolved stores
- *   ?. ... and loads (full OOO)
- * - Allow loads to execute in the presence of unretired, but non-overlapping stores
- * - .... Further, allow loads to execute as long as all earlier stores have committed
- *   (and forward as needed)
- * - crack stores into store data and store address
- *
- * - LSC
- *
- * Cleanup:
- *
- * - Don't depend on seqno outside of self-checking and visualization
- * - Review what's tracked in data structures
- * - fp vs fetched
+ * The code changes to fast any kind of coherent TO-DO list.
  */
 
 #include <stdio.h>
@@ -94,7 +34,7 @@ well.  CLEAR
 #include "sim.h"
 #include "run_simple.h"
 #include "loadelf.h"
-#include "riscv.h" // Sigh, we need this for illegal and misaligned exceptions
+#include "riscv.h" // We are increasingly including RISC-V specifics
 
 //////// Configuration and magic numbers
 
@@ -103,11 +43,6 @@ well.  CLEAR
 #define ROB_SIZE               128
 #define PRF_SIZE               (2*ROB_SIZE)
 #define RAS_SIZE               32
-
-// Two special physical registers: the constant zero and the sink for
-// for r0 destination (it's never read)
-
-#define PR_ZERO                 0
 
 //////// Types
 
@@ -129,21 +64,18 @@ typedef struct fetch_parcel_st {
 // Instructions state in the ROB
 typedef enum {
     IS_INVALID,
-    // IS_SPECULATIVE,
     IS_FETCHED,
-    // IS_READY,
     IS_EXECUTED,
     IS_EXCEPTION,
     // IS_DISPATCHED,
     IS_COMMITTED,
-    // IS_RETIRED,
 } insn_state_t;
 
 static char insn_state_to_char[] = {
     [IS_INVALID]   = '?',
     [IS_FETCHED]   = ' ',
     [IS_EXECUTED]  = 'E',
-    [IS_EXCEPTION]  = 'X',
+    [IS_EXCEPTION] = 'X',
     [IS_COMMITTED] = 'C',
 };
 
@@ -156,7 +88,6 @@ typedef struct rob_entry_st {
     bool                restart;
     uint64_t            restart_pc;
 
-
     uint64_t            store_addr;
 
     bool                mispredicted_br;
@@ -166,20 +97,10 @@ typedef struct rob_entry_st {
     // For cosim
     bool                mmio; // force reference model to follow us
 
-    // For debugging (XXX well, I do use the seqno, but we could avoid that)
     fetch_parcel_t      fp;
     isa_decoded_t       dec;
 } rob_entry_t;
 
-typedef struct micro_op_st {
-    fetch_parcel_t      fetched; // XXX redundant?
-    isa_decoded_t       dec;
-
-    unsigned            pr_a;
-    unsigned            pr_b;
-    unsigned            pr_wb;
-    unsigned            rob_index;
-} micro_op_t;
 
 //////// State
 

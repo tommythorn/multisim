@@ -10,7 +10,7 @@ int main() { sieve(); }
 static int prime[N] = { 0 };
 static char cand[N] = { 0 };
 
-void sieve(void)
+int main(int c, char **v)
 {
     int i, ii;
     int *p = prime;
