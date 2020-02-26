@@ -165,18 +165,63 @@ exception:
     return exc.raised ? 0 : 1;
 }
 
-bool simple_htif(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity, uint64_t tohost)
+bool simple_htif(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity, uint64_t tohost, uint64_t fromhost)
 {
     if (tohost && verbosity & VERBOSE_TOHOST)  {
-	isa_exception_t exc = { 0 };
-	uint32_t val = arch->load(state, tohost, 4, &exc);
-	if (val) {
-	    if (val != 1)
-		fprintf(stderr, "  FAILED with %d\n", val);
-	    else
-		fprintf(stderr, "  SUCCESS\n");
-	    return true;
-	}
+        isa_exception_t exc = { 0 };
+        uint32_t val = arch->load(state, tohost, 4, &exc);
+        assert(exc.raised == false);
+
+        if (val == 0)
+            return false;
+
+        arch->store(state, tohost, 0, 4, &exc);
+        if (exc.raised)
+            return false;
+
+        if (val & 1) {
+            if (val >> 1)
+                fprintf(stderr, "  FAILED with %08x\n", val);
+            else
+                fprintf(stderr, "  SUCCESS\n");
+            return true;
+        }
+
+        /* Val is an address of a command block */
+        volatile uint64_t magic_memval[4];
+        magic_memval[0] = arch->load(state, val,      8, &exc);
+        if (exc.raised)
+            return false;
+        magic_memval[1] = arch->load(state, val +  8, 8, &exc);
+        if (exc.raised)
+            return false;
+        magic_memval[2] = arch->load(state, val + 16, 8, &exc);
+        if (exc.raised)
+            return false;
+        magic_memval[3] = arch->load(state, val + 24, 8, &exc);
+        if (exc.raised)
+            return false;
+
+#define SYS_write 64
+        if (magic_memval[0] == SYS_write) {
+            // uint64_t fd = magic_memval[1];
+            uint64_t s  = magic_memval[2];
+            uint64_t n  = magic_memval[3];
+
+            while (n > 0) {
+                char ch = arch->load(state, s, 1, &exc);
+                if (exc.raised)
+                    break;
+
+                fputc(ch, stderr);
+                --n;
+                ++s;
+            }
+
+            magic_memval[0] = magic_memval[3];
+        }
+
+        arch->store(state, fromhost, 1, 4, &exc);
     }
 
     return false;
@@ -199,12 +244,15 @@ void run_simple(int num_images, char *images[], verbosity_t verbosity)
     uint64_t tohost = 0;
     getelfsym(&info, "tohost", &tohost);
 
+    uint64_t fromhost = 0;
+    getelfsym(&info, "fromhost", &fromhost);
+
     for (;;) {
         if (step_simple(arch, state, false) == 0)
             continue;
 
-	if (simple_htif(arch, state, verbosity, tohost))
-	    break;
+        if (tohost && fromhost && simple_htif(arch, state, verbosity, tohost, fromhost))
+            break;
     }
 
     if (verbosity & VERBOSE_DISASS)

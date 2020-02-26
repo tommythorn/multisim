@@ -938,6 +938,9 @@ run_ooo(int num_images, char *images[], verbosity_t verbosity)
     uint64_t tohost = 0;
     getelfsym(&info, "tohost", &tohost);
 
+    uint64_t fromhost = 0;
+    getelfsym(&info, "fromhost", &fromhost);
+
     for (int r = 0; r < 32; ++r)
         map[r] = -1;
 
@@ -945,7 +948,7 @@ run_ooo(int num_images, char *images[], verbosity_t verbosity)
         if (step_ooo(state, costate, verbosity))
             break;
 
-        if (simple_htif(arch, state, verbosity, tohost))
+        if (tohost && fromhost && simple_htif(arch, state, verbosity, tohost, fromhost))
             break;
     }
 
