@@ -189,7 +189,7 @@ void run_simple(int num_images, char *images[], verbosity_t verbosity)
     const arch_t *arch;
     elf_info_t info;
 
-    memory_ensure_mapped_range(state->mem, 0x80000000, 0x80000000 + 32*1024-1);
+    memory_ensure_mapped_range(state->mem, 0x80000000, 0x80000000 + 256*1024-1);
 
     loadelfs(state->mem, num_images, images, &info);
 

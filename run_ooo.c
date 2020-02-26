@@ -920,12 +920,13 @@ run_ooo(int num_images, char *images[], verbosity_t verbosity)
     cpu_state_t *state = state_create();
     cpu_state_t *costate = state_create();
     elf_info_t info;
+    int M = 256;
 
     memory_ensure_mapped_range(state->mem,
-                               0x80000000, 0x80000000 + 32*1024-1);
+                               0x80000000, 0x80000000 + M*1024-1);
 
     memory_ensure_mapped_range(costate->mem,
-                               0x80000000, 0x80000000 + 32*1024-1);
+                               0x80000000, 0x80000000 + M*1024-1);
 
     loadelfs(state->mem, num_images, images, &info);
     loadelfs(costate->mem, num_images, images, &info);
