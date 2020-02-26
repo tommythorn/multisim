@@ -96,15 +96,15 @@ int main(int argc, char **argv)
         case 0:
             break;
 
-	case 'o': {
-	    int arg = atoi(optarg);
+        case 'o': {
+            int arg = atoi(optarg);
             CONFIG_EARLY_RELEASE = (arg & 1) == 1;
-	    break;
+            break;
         }
 
-	case 'i':
-	    disk_image = optarg;
-	    break;
+        case 'i':
+            disk_image = optarg;
+            break;
 
         case 'd':
             verbosity |= VERBOSE_DISASS;

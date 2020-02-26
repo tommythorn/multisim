@@ -71,9 +71,9 @@ step_simple(const arch_t *arch, cpu_state_t *state, cpu_state_t *cosimstate)
     isa_result_t res;
 
     if (!dec.system)
-	res = arch->insn_exec(dec, op_a, op_b, msr_a, &exc);
+        res = arch->insn_exec(dec, op_a, op_b, msr_a, &exc);
     else
-	res = arch->insn_exec_system(state, dec, op_a, op_b, msr_a, &exc);
+        res = arch->insn_exec_system(state, dec, op_a, op_b, msr_a, &exc);
     res.result = CANONICALIZE(res.result);
 
     if (exc.raised)
@@ -211,7 +211,7 @@ void run_simple(int num_images, char *images[], verbosity_t verbosity)
         printf("IPC = %.2f\n", (double) state->n_issue / state->counter);
 
     if (verbosity & VERBOSE_COMPLIANCE) {
-	isa_exception_t exc = { 0 };
+        isa_exception_t exc = { 0 };
         uint64_t begin_signature;
         uint64_t end_signature;
 
