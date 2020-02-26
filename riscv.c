@@ -263,7 +263,8 @@ disass_insn(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
         else if (i.i.funct3 == SR_I) {
             const char *opcode = i.i.imm11_0 & 1 << 10 ? "srai" : "srli";
             snprintf(buf, buf_size, "%-11s%s,%s,%d",
-                     opcode, N[i.i.rd], N[i.i.rs1], i.i.imm11_0);
+                     opcode, N[i.i.rd], N[i.i.rs1],
+                     i.i.imm11_0 & 63); // XXX XLEN-1
         } else
             snprintf(buf, buf_size, "%-11s%s,%s,%d",
                      opcode_imm_name[i.i.funct3], N[i.i.rd], N[i.i.rs1], i.i.imm11_0);
