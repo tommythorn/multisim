@@ -229,9 +229,7 @@ visualize_retirement(cpu_state_t *state, unsigned rob_index, rob_entry_t re)
     line[fp.commit_ts  % WIDTH] = 'C';
     line[n_cycles      % WIDTH] = 'R';
 
-//  printf("%3d ", n_cycles);
-    printf("%3d ", fp.seqno);
-//  printf("%2d ", rob_index);
+    printf("%5d ", fp.seqno);
     printf("%s ",  line);
 
     uint64_t store_data;
@@ -381,8 +379,6 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
 
         ++n_retired;
 
-        arch->tick(state, n_retired, NULL);
-
         /* Co-simulate retired instructions.  A complication is that
          * costate->pc might not be the next instuction retired (if
          * the instruction traps, then the next retired instruction
@@ -442,6 +438,8 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
         printf("%5d CONCERING LACK OF RETIREMENT\n", n_cycles);
         dump_microarch_state();
     }
+
+    arch->tick(state, n_retired, NULL);
 }
 
 static void
