@@ -215,8 +215,9 @@ visualize_retirement(cpu_state_t *state, unsigned rob_index, rob_entry_t re)
 
         n_cycles_waiting_on_uncommitted_store_addr = 0;
         n_cycles_waiting_on_uncommitted_store_data = 0;
-        n_loads_reordred = 0;
-        n_missed_store_forwardings = 0;
+        n_loads_reordred                           = 0;
+        n_missed_store_forwardings                 = 0;
+        n_full_store_forwards                      = 0;
     }
 
     memset(line, '.', WIDTH);
