@@ -389,7 +389,9 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
         uint64_t copc;
         do copc = costate->pc; while (step_simple(arch, costate, state) == 0);
 
-        bool override = re.mmio;
+        bool override = re.mmio ||
+            re.dec.source_msr_a == CSR_MCYCLE ||
+            re.dec.source_msr_a == CSR_MINSTRET;
 
         if (override && re.dec.dest_reg != ISA_NO_REG)
             costate->r[re.dec.dest_reg] = prf[re.prd];
