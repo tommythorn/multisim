@@ -380,6 +380,9 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
 
         ++n_retired;
 
+        if (verbosity & VERBOSE_NO_COSIM)
+            continue;
+
         /* Co-simulate retired instructions.  A complication is that
          * costate->pc might not be the next instuction retired (if
          * the instruction traps, then the next retired instruction

@@ -160,6 +160,7 @@ typedef enum verbosity_e {
     VERBOSE_CACHE      = 1 << 3,
     VERBOSE_COMPLIANCE = 1 << 4,
     VERBOSE_TOHOST     = 1 << 5,
+    VERBOSE_NO_COSIM   = 1 << 6, // XXX Rename "verbose" to "RT config" or such
 } verbosity_t;
 
 typedef struct isa_st {

@@ -41,6 +41,7 @@ static struct option long_options[] = {
     {"simple",         0, NULL, '1'},
     {"ooo",            0, NULL, '2'},
     {"help",           0, NULL, '?'},
+    {"no-cosim",       0, NULL, 'N'},
     {0, 0, 0, 0}
 };
 
@@ -61,10 +62,11 @@ void usage(char *program)
             "  where options can be one or more of\n"
             "\n"
             "  -i<diskimage>\n"
-            "  -d      disassemble executed instructions\n"
-            "  -o=$X   options\n"
-            "  -c      compliance\n",
-            program);
+            "  -d          disassemble executed instructions\n"
+            "  -o=$X       options\n"
+            "  -c          compliance\n"
+            "  --no-cosim  disable cosimulation\n"
+            , program);
 
     for (i = 0; long_options[i].name; ++i) {
         fprintf(stderr, "  --%s\n", long_options[i].name);
@@ -87,7 +89,7 @@ int main(int argc, char **argv)
         int c;
         int option_index = 0;
 
-        c = getopt_long(argc, argv, "cdf:i:o:12",
+        c = getopt_long(argc, argv, "cdf:i:o:12N",
                         long_options, &option_index);
         if (c == -1)
             break;
@@ -112,6 +114,10 @@ int main(int argc, char **argv)
 
         case 'c':
             verbosity |= VERBOSE_COMPLIANCE;
+            break;
+
+        case 'N':
+            verbosity |= VERBOSE_NO_COSIM;
             break;
 
         case '?':
