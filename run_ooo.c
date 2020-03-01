@@ -42,7 +42,7 @@
 #define FETCH_BUFFER_SIZE      64
 #define ROB_SIZE               128
 #define PRF_SIZE               (2*ROB_SIZE)
-#define RAS_SIZE               32
+#define RAS_SIZE               64
 
 //////// Types
 
@@ -51,6 +51,10 @@ typedef struct fetch_parcel_st {
     uint64_t            addr;
     uint64_t            addr_next_predicted; // XXX crude and expensive
     uint32_t            insn;
+
+    unsigned            ras_top;
+    unsigned            ras_free_rp;
+    unsigned            ras_popped_entry;
 
     // For visualization
     uint64_t            fetch_ts;
@@ -110,8 +114,53 @@ static fetch_parcel_t   fb[FETCH_BUFFER_SIZE];
 static unsigned         fetch_seqno;
 static bool             allow_fetch = true;
 static int              fb_rp = 0, fb_wp = 0, fb_size = 0;
+
+/*
+ * The Return Address Stack tracks calls and returns as seen in the
+ * frontend.
+ *
+ * The problem is that the frontend is often on a speculative path and
+ * if it turns out to be the wrong path, then the RAS needs to be
+ * restored as we restart on the correct path.  Storing the whole RAS
+ * in snapshots is the traditional way, but that's very expensive and
+ * thus limits the size of the RAS.
+ *
+ * We instead use a highly unusual solution that scales much better.
+ *
+ * RAS entries are always split between a set of free elements from
+ * retired pops, a singly linked RAS, and elements in flight in the
+ * ROB.
+ *
+ * If the free set is empty then fetch blocks.
+ *
+ * Push pulls a fresh free RAS entry from the free sets and links it
+ * into the RAS, replacing the top.  If we need to restart, restoring
+ * the top pointer will undo the push (and the free sets is restored).
+ *
+ * Pop unlinks the top element and signals that should this
+ * instruction retire, then the unlinked element can be reused.  If we
+ * restart the the top element change is undone and the element is of
+ * course never reused.
+ *
+ * Since restarts only adjust the RAS pointer and the free list read
+ * pointer, we will return both the RAS and the free set to the
+ * original state (Proof pending).
+ *
+ * COMPLICATION (not yet done): eventually the RAS will consume all
+ * free entries and the fetch will deadlock.  To avoid this, we
+ * maintain a shadow RAS at retirement and when it reaches a certain
+ * size, the oldest element is freed.  For this to work, we need to
+ * block the frontend from accessing this element.  One way to do this
+ * is to maintain the RAS size in the frontend and reduce it from the
+ * backend as needed.
+ */
+
 static uint64_t         ras[RAS_SIZE];
-static unsigned         ras_sp = 0;
+static unsigned         ras_older[RAS_SIZE];
+static unsigned         ras_top;
+
+static unsigned         ras_free[RAS_SIZE];
+static unsigned         ras_free_wp, ras_free_rp;
 
 static bool             allocation_stopped = false;
 static unsigned         allocation_stopped_from;
@@ -249,23 +298,97 @@ visualize_retirement(cpu_state_t *state, unsigned rob_index, rob_entry_t re)
         putc('\n', stdout);
 }
 
+static bool debug_ras = true;
+
 static void
-push_ras(uint64_t pc)
+ras_invariants(const char *headline)
 {
-    ras[ras_sp] = pc;
-    ras_sp = (ras_sp + 1) % RAS_SIZE;
+    assert(RAS_SIZE <= 64);
+    uint64_t entries = 0;
+
+    assert(ras_top < RAS_SIZE);
+    assert(ras_free_wp < RAS_SIZE);
+    assert(ras_free_rp < RAS_SIZE);
+
+    if (debug_ras) fprintf(stderr, "%-7s %5d => RAS ", headline, fetch_seqno);
+
+    for (unsigned x = ras_top; x != 0; x = ras_older[x]) {
+        if (debug_ras) fprintf(stderr, " %d", x);
+
+        assert((entries & (1ULL << x)) == 0);
+        entries |= 1ULL << x;
+    }
+
+    if (debug_ras) fprintf(stderr, "\n                 Free");
+
+    for (unsigned i = ras_free_rp; i != ras_free_wp; i = (i + 1) % RAS_SIZE) {
+        if (debug_ras) fprintf(stderr, " %d", ras_free[i]);
+        assert((entries & (1ULL << ras_free[i])) == 0);
+        entries |= 1ULL << ras_free[i];
+    }
+
+    if (debug_ras) fprintf(stderr, "\n");
+
+    //assert(entries == ((1ULL << RAS_SIZE) - 2));
 }
 
 static uint64_t
-pop_ras(void)
+pop_ras(unsigned seqno, unsigned *popped_entry)
 {
-    ras_sp = (ras_sp - 1) % RAS_SIZE;
-    return ras[ras_sp];
+    if (ras_top == 0) {
+         /* RAS empty, can't predict (we have no prediction) */
+        if (debug_ras) fprintf(stderr, "POP  %5d ON EMPTY RAS\n", seqno);
+        *popped_entry = 0;
+        return 0;
+    } else {
+
+        uint64_t return_pc = ras[ras_top];
+
+        *popped_entry = ras_top;
+        ras_top = ras_older[ras_top];
+        ras_invariants("POP");
+
+        return return_pc;
+    }
 }
 
 static void
-restart(cpu_state_t *state, unsigned seqno, uint64_t new_pc)
+push_ras(unsigned seqno, uint64_t pc)
 {
+    unsigned next;
+
+    assert(ras_free_wp != ras_free_rp);
+
+    /* We take an element from the old end of the free queue */
+    next = ras_free[ras_free_rp];
+    ras_free_rp = (ras_free_rp + 1) % RAS_SIZE;
+
+    ras_older[next] = ras_top;
+    ras_top = next;
+    ras[ras_top] = pc;
+
+    ras_invariants("PUSH");
+}
+
+
+static void
+init_ras(void)
+{
+    ras_top = 0;
+    ras_free_rp = ras_free_wp = 0;
+    memset(ras_older,   -1, sizeof ras_older);
+    for (unsigned i = 1; i < RAS_SIZE; ++i) {
+        ras_free[ras_free_wp++] = i;
+    }
+
+    ras_invariants("INIT");
+}
+
+static void
+restart(cpu_state_t *state, unsigned seqno, uint64_t new_pc,
+        unsigned new_ras_top, unsigned new_ras_free_rp)
+{
+    /* Oldest restart takes precedence */
     if (!allocation_stopped || seqno < allocation_stopped_from) {
         allocation_stopped = true;
         allocation_stopped_from = seqno;
@@ -277,6 +400,11 @@ restart(cpu_state_t *state, unsigned seqno, uint64_t new_pc)
         state->pc = new_pc;
         fetch_seqno = seqno + 1;
         allow_fetch = true;
+
+        ras_top     = new_ras_top;
+        ras_free_rp = new_ras_free_rp;
+
+        ras_invariants("RESTART");
     }
 }
 
@@ -368,14 +496,23 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
                         exception_info.code &  (1 << 31) ? "INTERRUPT" : "EXCEPTION",
                         exception_info.code & ~(1 << 31), exception_info.info);
 
-            //assert(state->msr[0x300] == costate->msr[0x300]);
+            // XXX What should happen if a pop or push caused an exception?
+
             restart(state, re.fp.seqno - 1,
-                    arch->handle_exception(state, re.dec.insn_addr, exception_info));
+                    arch->handle_exception(state, re.dec.insn_addr, exception_info),
+                    re.fp.ras_top, re.fp.ras_free_rp);
             resume();
 
             costate->pc = arch->handle_exception(costate, costate->pc, exception_info);
-            //assert(state->msr[0x300] == costate->msr[0x300]);
             break;
+        }
+
+        // Return popped RAS entries to be reused (XXX keep RAS below a certain size)
+        if (re.fp.ras_popped_entry) {
+            if (debug_ras) fprintf(stderr, "FREEING %d\n", re.fp.ras_popped_entry);
+
+            ras_free[ras_free_wp] = re.fp.ras_popped_entry;
+            ras_free_wp = (ras_free_wp + 1) % RAS_SIZE;
         }
 
         // Move the pf to the ART
@@ -475,6 +612,12 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
      * Fetch (branch prediction would happen here, eventually)
      */
     while (fb_size < FETCH_BUFFER_SIZE && n++ < FETCH_WIDTH) {
+
+        if (ras_free_rp == ras_free_wp) {
+            if (debug_ras) fprintf(stderr, "Block fetch as we have no free RAS entries\n");
+            return;
+        }
+
         uint64_t addr = state->pc;
         uint32_t insn = (uint32_t)arch->load(state, addr, 0 /* = ifetch */, &exc);
 
@@ -487,6 +630,7 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
         /* XXX Cheating a bit here until I can get a real predictor */
         uint64_t pc_next = addr + 4;
         isa_decoded_t dec = arch->decode(addr, insn);
+        unsigned ras_popped_entry = 0;
 
         switch (dec.class) {
         case isa_insn_class_branch:
@@ -496,7 +640,7 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
 
         case isa_insn_class_jump:
             if (dec.dest_reg == 1 || dec.dest_reg == 5) {
-                push_ras(pc_next);
+                push_ras(fetch_seqno, pc_next);
             }
             pc_next = dec.jumpbranch_target;
             break;
@@ -509,15 +653,15 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
                 break;
 
             if (!rd_link && rs1_link) {
-                pc_next = pop_ras();
+                pc_next = pop_ras(fetch_seqno, &ras_popped_entry);
             } else if (rd_link && !rs1_link) {
-                push_ras(pc_next);
+                push_ras(fetch_seqno, pc_next);
             } else if (dec.dest_reg != dec.source_reg_a) {
-                uint64_t save = pop_ras();
-                push_ras(pc_next);
+                uint64_t save = pop_ras(fetch_seqno, &ras_popped_entry);
+                push_ras(fetch_seqno, pc_next);
                 pc_next = save;
             } else {
-                push_ras(pc_next);
+                push_ras(fetch_seqno, pc_next);
             }
         }
 
@@ -532,6 +676,9 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
             .addr_next_predicted = state->pc,
             .insn = insn,
             .fetch_ts = n_cycles,
+            .ras_top = ras_top,
+            .ras_free_rp = ras_free_rp,
+            .ras_popped_entry = ras_popped_entry,
         };
 
         if (++fb_wp == FETCH_BUFFER_SIZE)
@@ -853,7 +1000,8 @@ ooo_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
     }
 
     if (rob[p].restart)
-        restart(state, re.fp.seqno, pc_next);
+        restart(state, re.fp.seqno, pc_next,
+                re.fp.ras_top, re.fp.ras_free_rp);
 
 exception:
     rob[p].insn_state = IS_EXECUTED;
@@ -931,6 +1079,8 @@ run_ooo(int num_images, char *images[], verbosity_t verbosity)
     cpu_state_t *costate = state_create();
     elf_info_t info;
     int M = 256;
+
+    init_ras();
 
     memory_ensure_mapped_range(state->mem,
                                0x80000000, 0x80000000 + M*1024-1);

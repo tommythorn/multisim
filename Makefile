@@ -29,7 +29,7 @@ OBJS=main.o arch.o \
 	run_simple.o run_ooo.o $(MORE_STUFF) \
 	memory.o loadelf.o riscv.o
 #VERB=-t
-VERB=-d
+#VERB=-d
 
 regress: test_philo
 
@@ -48,13 +48,13 @@ TAGS tags:
 	etags *.[hc]
 
 test_hello: multisim
-	./multisim -d --ooo workloads/zephyr/hello_world.elf
+	./multisim $(VERB) --ooo workloads/zephyr/hello_world.elf
 
 test_ooo: multisim
-	./multisim -d --ooo workloads/riscv-tests/rv32ui-p-lw
+	./multisim $(VERB) --ooo workloads/riscv-tests/rv32ui-p-lw
 
 test_philo: multisim
-	./multisim -d --ooo workloads/zephyr/philosophers.elf
+	./multisim $(VERB) --ooo workloads/zephyr/philosophers.elf
 
 arewethereyet:
 	@bash -c 'printf "We are %3.1f%% there\n" $$(echo `./regress-rv32.sh --ooo|grep SUCCESS|wc -l` / 0.39|bc -l)'
