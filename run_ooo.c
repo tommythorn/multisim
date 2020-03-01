@@ -42,7 +42,13 @@
 #define FETCH_BUFFER_SIZE      64
 #define ROB_SIZE               128
 #define PRF_SIZE               (2*ROB_SIZE)
-#define RAS_SIZE               64
+
+// RAS entries are split between retired free entries, non-retired
+// free, and in-RAS entries.  RAS_ENTRIES - RAS_MAX_SIZE will
+// constrain speculation.
+
+#define RAS_ENTRIES            20
+#define RAS_MAX_SIZE           (RAS_ENTRIES / 2)
 
 //////// Types
 
@@ -54,7 +60,8 @@ typedef struct fetch_parcel_st {
 
     unsigned            ras_top;
     unsigned            ras_free_rp;
-    unsigned            ras_popped_entry;
+    int                 ras_popped_entry;
+    int                 ras_pushed_entry;
 
     // For visualization
     uint64_t            fetch_ts;
@@ -146,21 +153,26 @@ static int              fb_rp = 0, fb_wp = 0, fb_size = 0;
  * pointer, we will return both the RAS and the free set to the
  * original state (Proof pending).
  *
- * COMPLICATION (not yet done): eventually the RAS will consume all
- * free entries and the fetch will deadlock.  To avoid this, we
- * maintain a shadow RAS at retirement and when it reaches a certain
- * size, the oldest element is freed.  For this to work, we need to
- * block the frontend from accessing this element.  One way to do this
- * is to maintain the RAS size in the frontend and reduce it from the
- * backend as needed.
+ * Complication: eventually the RAS will consume all free entries and
+ * the fetch will deadlock.  To avoid this, we maintain a shadow RAS
+ * at retirement and when it reaches a certain size, the oldest
+ * element is freed.  For this to work, we need to block the frontend
+ * from accessing this element.  One way to do this is to maintain the
+ * RAS end-element in at retirement.
  */
 
-static uint64_t         ras[RAS_SIZE];
-static unsigned         ras_older[RAS_SIZE];
+static uint64_t         ras[RAS_ENTRIES];
+static unsigned         ras_older[RAS_ENTRIES];
 static unsigned         ras_top;
+static unsigned         ras_end;
+static unsigned         ras_size;
 
-static unsigned         ras_free[RAS_SIZE];
+static unsigned         ras_free[RAS_ENTRIES];
 static unsigned         ras_free_wp, ras_free_rp;
+
+static unsigned         rras[RAS_MAX_SIZE];
+static unsigned         rras_size;
+static unsigned         rras_sp;
 
 static bool             allocation_stopped = false;
 static unsigned         allocation_stopped_from;
@@ -303,42 +315,34 @@ static bool debug_ras = true;
 static void
 ras_invariants(const char *headline)
 {
-    assert(RAS_SIZE <= 64);
-    uint64_t entries = 0;
-
-    assert(ras_top < RAS_SIZE);
-    assert(ras_free_wp < RAS_SIZE);
-    assert(ras_free_rp < RAS_SIZE);
+    assert(ras_top < RAS_ENTRIES);
+    assert(ras_end < RAS_ENTRIES);
+    assert(ras_size < RAS_ENTRIES);
+    assert(ras_free_wp < RAS_ENTRIES);
+    assert(ras_free_rp < RAS_ENTRIES);
 
     if (debug_ras) fprintf(stderr, "%-7s %5d => RAS ", headline, fetch_seqno);
 
-    for (unsigned x = ras_top; x != 0; x = ras_older[x]) {
+    for (unsigned x = ras_top; x != ras_end; x = ras_older[x]) {
         if (debug_ras) fprintf(stderr, " %d", x);
-
-        assert((entries & (1ULL << x)) == 0);
-        entries |= 1ULL << x;
     }
 
     if (debug_ras) fprintf(stderr, "\n                 Free");
 
-    for (unsigned i = ras_free_rp; i != ras_free_wp; i = (i + 1) % RAS_SIZE) {
+    for (unsigned i = ras_free_rp; i != ras_free_wp; i = (i + 1) % RAS_ENTRIES) {
         if (debug_ras) fprintf(stderr, " %d", ras_free[i]);
-        assert((entries & (1ULL << ras_free[i])) == 0);
-        entries |= 1ULL << ras_free[i];
     }
 
     if (debug_ras) fprintf(stderr, "\n");
-
-    //assert(entries == ((1ULL << RAS_SIZE) - 2));
 }
 
 static uint64_t
-pop_ras(unsigned seqno, unsigned *popped_entry)
+pop_ras(unsigned seqno, int *popped_entry)
 {
-    if (ras_top == 0) {
+    if (ras_top == ras_end) {
          /* RAS empty, can't predict (we have no prediction) */
         if (debug_ras) fprintf(stderr, "POP  %5d ON EMPTY RAS\n", seqno);
-        *popped_entry = 0;
+        *popped_entry = -1;
         return 0;
     } else {
 
@@ -353,7 +357,7 @@ pop_ras(unsigned seqno, unsigned *popped_entry)
 }
 
 static void
-push_ras(unsigned seqno, uint64_t pc)
+push_ras(unsigned seqno, uint64_t pc, int *pushed_entry)
 {
     unsigned next;
 
@@ -361,13 +365,15 @@ push_ras(unsigned seqno, uint64_t pc)
 
     /* We take an element from the old end of the free queue */
     next = ras_free[ras_free_rp];
-    ras_free_rp = (ras_free_rp + 1) % RAS_SIZE;
+    ras_free_rp = (ras_free_rp + 1) % RAS_ENTRIES;
 
     ras_older[next] = ras_top;
     ras_top = next;
     ras[ras_top] = pc;
 
     ras_invariants("PUSH");
+
+    *pushed_entry = ras_top;
 }
 
 
@@ -375,11 +381,16 @@ static void
 init_ras(void)
 {
     ras_top = 0;
+    ras_end = 0;
+    ras_size = 0;
     ras_free_rp = ras_free_wp = 0;
     memset(ras_older,   -1, sizeof ras_older);
-    for (unsigned i = 1; i < RAS_SIZE; ++i) {
+    for (unsigned i = 1; i < RAS_ENTRIES; ++i) {
         ras_free[ras_free_wp++] = i;
     }
+
+    rras_sp = -1;
+    rras_size = 0;
 
     ras_invariants("INIT");
 }
@@ -508,11 +519,22 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
         }
 
         // Return popped RAS entries to be reused (XXX keep RAS below a certain size)
-        if (re.fp.ras_popped_entry) {
-            if (debug_ras) fprintf(stderr, "FREEING %d\n", re.fp.ras_popped_entry);
+        if (re.fp.ras_popped_entry != -1) {
+            assert(rras_size > 0);
+            assert(re.fp.ras_popped_entry == rras[rras_sp]);
 
-            ras_free[ras_free_wp] = re.fp.ras_popped_entry;
-            ras_free_wp = (ras_free_wp + 1) % RAS_SIZE;
+            ras_free[ras_free_wp] = rras[rras_sp];
+            if (debug_ras) fprintf(stderr, "FREEING %d\n", rras[rras_sp]);
+            ras_free_wp   = (ras_free_wp + 1) % RAS_ENTRIES;
+            rras_sp       = (rras_sp - 1)     % RAS_MAX_SIZE;
+            rras_size    -= 1;
+        }
+
+        if (re.fp.ras_pushed_entry != -1) {
+            assert(rras_size < RAS_MAX_SIZE);
+            rras_sp       = (rras_sp + 1)     % RAS_MAX_SIZE;
+            rras[rras_sp] = re.fp.ras_pushed_entry;
+            rras_size    += 1;
         }
 
         // Move the pf to the ART
@@ -630,7 +652,8 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
         /* XXX Cheating a bit here until I can get a real predictor */
         uint64_t pc_next = addr + 4;
         isa_decoded_t dec = arch->decode(addr, insn);
-        unsigned ras_popped_entry = 0;
+        int ras_popped_entry = -1;
+        int ras_pushed_entry = -1;
 
         switch (dec.class) {
         case isa_insn_class_branch:
@@ -640,7 +663,7 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
 
         case isa_insn_class_jump:
             if (dec.dest_reg == 1 || dec.dest_reg == 5) {
-                push_ras(fetch_seqno, pc_next);
+                push_ras(fetch_seqno, pc_next, &ras_pushed_entry);
             }
             pc_next = dec.jumpbranch_target;
             break;
@@ -655,13 +678,13 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
             if (!rd_link && rs1_link) {
                 pc_next = pop_ras(fetch_seqno, &ras_popped_entry);
             } else if (rd_link && !rs1_link) {
-                push_ras(fetch_seqno, pc_next);
+                push_ras(fetch_seqno, pc_next, &ras_pushed_entry);
             } else if (dec.dest_reg != dec.source_reg_a) {
                 uint64_t save = pop_ras(fetch_seqno, &ras_popped_entry);
-                push_ras(fetch_seqno, pc_next);
+                push_ras(fetch_seqno, pc_next, &ras_pushed_entry);
                 pc_next = save;
             } else {
-                push_ras(fetch_seqno, pc_next);
+                push_ras(fetch_seqno, pc_next, &ras_pushed_entry);
             }
         }
 
@@ -679,6 +702,7 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
             .ras_top = ras_top,
             .ras_free_rp = ras_free_rp,
             .ras_popped_entry = ras_popped_entry,
+            .ras_pushed_entry = ras_pushed_entry,
         };
 
         if (++fb_wp == FETCH_BUFFER_SIZE)
