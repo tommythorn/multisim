@@ -250,6 +250,20 @@ visualize_retirement(cpu_state_t *state, unsigned rob_index, rob_entry_t re)
 }
 
 static void
+push_ras(uint64_t pc)
+{
+    ras[ras_sp] = pc;
+    ras_sp = (ras_sp + 1) % RAS_SIZE;
+}
+
+static uint64_t
+pop_ras(void)
+{
+    ras_sp = (ras_sp - 1) % RAS_SIZE;
+    return ras[ras_sp];
+}
+
+static void
 restart(cpu_state_t *state, unsigned seqno, uint64_t new_pc)
 {
     if (!allocation_stopped || seqno < allocation_stopped_from) {
@@ -482,8 +496,7 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
 
         case isa_insn_class_jump:
             if (dec.dest_reg == 1 || dec.dest_reg == 5) {
-                ras[ras_sp] = pc_next;
-                ras_sp = (ras_sp + 1) % RAS_SIZE;
+                push_ras(pc_next);
             }
             pc_next = dec.jumpbranch_target;
             break;
@@ -496,22 +509,15 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
                 break;
 
             if (!rd_link && rs1_link) {
-                // pop
-                ras_sp = (ras_sp - 1) % RAS_SIZE;
-                pc_next = ras[ras_sp];
+                pc_next = pop_ras();
             } else if (rd_link && !rs1_link) {
-                // push
-                ras[ras_sp] = pc_next;
-                ras_sp = (ras_sp + 1) % RAS_SIZE;
+                push_ras(pc_next);
             } else if (dec.dest_reg != dec.source_reg_a) {
-                // pop, then push
-                uint64_t save = ras[ras_sp];
-                ras[ras_sp]   = pc_next;
-                pc_next       = save;
+                uint64_t save = pop_ras();
+                push_ras(pc_next);
+                pc_next = save;
             } else {
-                // push
-                ras[ras_sp] = pc_next;
-                ras_sp = (ras_sp + 1) % RAS_SIZE;
+                push_ras(pc_next);
             }
         }
 
