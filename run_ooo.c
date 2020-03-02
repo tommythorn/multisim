@@ -47,7 +47,7 @@
 // free, and in-RAS entries.  RAS_ENTRIES - RAS_MAX_SIZE will
 // constrain speculation.
 
-#define RAS_ENTRIES            20
+#define RAS_ENTRIES            32
 #define RAS_MAX_SIZE           (RAS_ENTRIES / 2)
 
 //////// Types
@@ -321,19 +321,19 @@ ras_invariants(const char *headline)
     assert(ras_free_wp < RAS_ENTRIES);
     assert(ras_free_rp < RAS_ENTRIES);
 
-    if (debug_ras) fprintf(stderr, "%-7s %5d => RAS ", headline, fetch_seqno);
+    if (debug_ras) printf("%-7s %5d => RAS ", headline, fetch_seqno);
 
     for (unsigned x = ras_top; x != ras_end; x = ras_older[x]) {
-        if (debug_ras) fprintf(stderr, " %d", x);
+        if (debug_ras) printf(" %d", x);
     }
 
-    if (debug_ras) fprintf(stderr, "\n                 Free");
+    if (debug_ras) printf("\n                 Free");
 
     for (unsigned i = ras_free_rp; i != ras_free_wp; i = (i + 1) % RAS_ENTRIES) {
-        if (debug_ras) fprintf(stderr, " %d", ras_free[i]);
+        if (debug_ras) printf(" %d", ras_free[i]);
     }
 
-    if (debug_ras) fprintf(stderr, "\n");
+    if (debug_ras) printf("\n");
 }
 
 static uint64_t
@@ -341,7 +341,7 @@ pop_ras(unsigned seqno, int *popped_entry)
 {
     if (ras_top == ras_end) {
          /* RAS empty, can't predict (we have no prediction) */
-        if (debug_ras) fprintf(stderr, "POP  %5d ON EMPTY RAS\n", seqno);
+        if (debug_ras) printf("POP  %5d ON EMPTY RAS\n", seqno);
         *popped_entry = -1;
         return 0;
     } else {
@@ -523,16 +523,24 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
             assert(rras_size > 0);
             assert(re.fp.ras_popped_entry == rras[rras_sp]);
 
+            if (debug_ras) printf("FREEING %d\n", rras[rras_sp]);
             ras_free[ras_free_wp] = rras[rras_sp];
-            if (debug_ras) fprintf(stderr, "FREEING %d\n", rras[rras_sp]);
             ras_free_wp   = (ras_free_wp + 1) % RAS_ENTRIES;
             rras_sp       = (rras_sp - 1)     % RAS_MAX_SIZE;
             rras_size    -= 1;
         }
 
         if (re.fp.ras_pushed_entry != -1) {
-            assert(rras_size < RAS_MAX_SIZE);
             rras_sp       = (rras_sp + 1)     % RAS_MAX_SIZE;
+
+            if (rras_size >= RAS_MAX_SIZE) {
+                if (debug_ras) printf("OVERFLOW FREEING %d\n", rras[rras_sp]);
+                ras_free[ras_free_wp] = rras[rras_sp];
+                ras_free_wp   = (ras_free_wp + 1) % RAS_ENTRIES;
+                rras_size    -= 1;
+                ras_end       = rras[rras_sp];
+            }
+
             rras[rras_sp] = re.fp.ras_pushed_entry;
             rras_size    += 1;
         }
@@ -636,7 +644,7 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
     while (fb_size < FETCH_BUFFER_SIZE && n++ < FETCH_WIDTH) {
 
         if (ras_free_rp == ras_free_wp) {
-            if (debug_ras) fprintf(stderr, "Block fetch as we have no free RAS entries\n");
+            if (debug_ras) printf("Block fetch as we have no free RAS entries\n");
             return;
         }
 
