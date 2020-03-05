@@ -31,7 +31,7 @@ OBJS=main.o arch.o \
 #VERB=-t
 #VERB=-d
 
-regress: test_philo
+regress: run_dhry
 
 all: multisim
 
@@ -55,6 +55,9 @@ test_ooo: multisim
 
 test_philo: multisim
 	./multisim $(VERB) --ooo workloads/zephyr/philosophers.elf
+
+run_dhry: multisim
+	./multisim $(VERB) --ooo --no-cosim workloads/dhrystone.riscv
 
 arewethereyet:
 	@bash -c 'printf "We are %3.1f%% there\n" $$(echo `./regress-rv32.sh --ooo|grep SUCCESS|wc -l` / 0.39|bc -l)'

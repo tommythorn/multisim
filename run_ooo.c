@@ -289,7 +289,8 @@ visualize_retirement(cpu_state_t *state, unsigned rob_index, rob_entry_t re)
         last_cycles = n_cycles;
         last_instret = fp.seqno;
 
-        printf("LSU stats: STA stall %ld/STD stall %ld/Reordered %ld/full bypass %ld/bypass missed %ld\n",
+        printf("LSU stats: STA stall %"PRIx64"/STD stall %"PRIx64"/Reordered "
+	       "%"PRIx64"/full bypass %"PRIx64"/bypass missed %"PRIx64"\n",
                n_cycles_waiting_on_uncommitted_store_addr,
                n_cycles_waiting_on_uncommitted_store_data,
                n_loads_reordred,
@@ -685,7 +686,7 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
         if (memcmp(state->msr, costate->msr, sizeof state->msr)) {
             for (unsigned csr = 0; csr < 0x1000; ++csr)
                 if (costate->msr[csr] != state->msr[csr])
-                    fprintf(stderr, "COSIM: CSR[0x%03x]: %08lx != %08lx\n",
+                    fprintf(stderr, "COSIM: CSR[0x%03x]: %08"PRIx64" != %08"PRIx64"\n",
                             csr, costate->msr[csr], state->msr[csr]);
             fflush(stdout);
             assert(0);
