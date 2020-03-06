@@ -289,8 +289,8 @@ visualize_retirement(cpu_state_t *state, unsigned rob_index, rob_entry_t re)
         last_cycles = n_cycles;
         last_instret = fp.seqno;
 
-        printf("LSU stats: STA stall %"PRIx64"/STD stall %"PRIx64"/Reordered "
-	       "%"PRIx64"/full bypass %"PRIx64"/bypass missed %"PRIx64"\n",
+        printf("LSU stats: STA stall %"PRId64"/STD stall %"PRId64"/Reordered "
+               "%"PRId64"/full bypass %"PRId64"/bypass missed %"PRId64"\n",
                n_cycles_waiting_on_uncommitted_store_addr,
                n_cycles_waiting_on_uncommitted_store_data,
                n_loads_reordred,
