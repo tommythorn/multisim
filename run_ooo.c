@@ -22,10 +22,10 @@
  * limit study so many things are completely unrealistic.  That's not
  * an issue [yet].
  *
- * STATUS: 11,763 Dhrystones/s = 6.7 DMIPS/MHz
+ * STATUS: 19,575 Dhrystones/s = 11.1 DMIPS/MHz
  *
  * TODO:
- * - [ipc] dynamic branch prediction
+ * - [ipc] better dynamic branch prediction
  * - [ipc] memory disambiguation
  * - [ipc] partial store forwards
  * - [ipc] dataflow shortcuts
@@ -63,7 +63,21 @@
 #define RAS_ENTRIES            64
 #define RAS_MAX_SIZE           (RAS_ENTRIES / 2)
 
+#define BP_TABLE_SIZE          1024
+
 //////// Types
+
+typedef enum bp_direction_e {
+    BP_DIR_STRONGLY_NOT_TAKEN = 0,
+    BP_DIR_WEAKLY_NOT_TAKEN   = 1,
+    BP_DIR_WEAKLY_TAKEN       = 2,
+    BP_DIR_STRONGLY_TAKEN     = 3,
+} bp_direction_t;
+
+typedef struct bp_e {
+    uint64_t            tag;
+    bp_direction_t      dir;
+} bp_t;
 
 typedef struct fetch_parcel_st {
     unsigned            seqno;
@@ -84,6 +98,8 @@ typedef struct fetch_parcel_st {
 
     int                 ras_popped_entry;
     int                 ras_pushed_entry;
+
+    bp_direction_t      br_predicted_dir;
 
     // For visualization
     uint64_t            fetch_ts;
@@ -139,6 +155,7 @@ typedef struct rob_entry_st {
 
 static const arch_t    *arch;
 
+static bp_t             bp_table[BP_TABLE_SIZE];
 static fetch_parcel_t   fb[FETCH_BUFFER_SIZE];
 static unsigned         fetch_seqno;
 static bool             allow_fetch = true;
@@ -220,6 +237,10 @@ static uint64_t         n_loads_reordred;
 static uint64_t         n_missed_store_forwardings;
 static uint64_t         n_full_store_forwards;
 
+static uint64_t         n_bp_hits;
+static uint64_t         n_bp_misses;
+static uint64_t         n_bp_mispredicts;
+
 ///////////////////////////////////////////////////////
 static bool
 is_serializing(isa_decoded_t dec)
@@ -296,12 +317,20 @@ visualize_retirement(cpu_state_t *state, unsigned rob_index, rob_entry_t re)
                n_loads_reordred,
                n_full_store_forwards,
                n_missed_store_forwardings);
-
         n_cycles_waiting_on_uncommitted_store_addr = 0;
         n_cycles_waiting_on_uncommitted_store_data = 0;
         n_loads_reordred                           = 0;
         n_missed_store_forwardings                 = 0;
         n_full_store_forwards                      = 0;
+
+        printf("BP stats: BP hits %"PRId64" misses %"PRId64" dyn mispredicts %"PRId64"\n",
+               n_bp_hits,
+               n_bp_misses,
+               n_bp_mispredicts);
+
+        n_bp_hits        = 0;
+        n_bp_misses      = 0;
+        n_bp_mispredicts = 0;
     }
 
     memset(line, '.', WIDTH);
@@ -333,7 +362,8 @@ visualize_retirement(cpu_state_t *state, unsigned rob_index, rob_entry_t re)
         putc('\n', stdout);
 }
 
-static bool debug_ras = false;
+static bool debug_ras      = false;
+static bool use_dynamic_bp = true;
 
 static void
 print_ras(unsigned x)
@@ -457,6 +487,27 @@ init_ras(void)
 
     ras_invariants("INIT");
 }
+
+static unsigned
+bp_hash(uint32_t pc)
+{
+    unsigned index = (pc >> 2);
+    return index & (BP_TABLE_SIZE - 1);
+}
+
+static bp_direction_t bp_dir_weaken[4] = {
+    [BP_DIR_STRONGLY_NOT_TAKEN] = BP_DIR_WEAKLY_NOT_TAKEN,
+    [BP_DIR_WEAKLY_NOT_TAKEN]   = BP_DIR_WEAKLY_TAKEN,
+    [BP_DIR_WEAKLY_TAKEN]       = BP_DIR_WEAKLY_NOT_TAKEN,
+    [BP_DIR_STRONGLY_TAKEN]     = BP_DIR_WEAKLY_TAKEN
+};
+
+static bp_direction_t bp_dir_strengthen[4] = {
+    [BP_DIR_STRONGLY_NOT_TAKEN] = BP_DIR_STRONGLY_NOT_TAKEN,
+    [BP_DIR_WEAKLY_NOT_TAKEN]   = BP_DIR_STRONGLY_NOT_TAKEN,
+    [BP_DIR_WEAKLY_TAKEN]       = BP_DIR_STRONGLY_TAKEN,
+    [BP_DIR_STRONGLY_TAKEN]     = BP_DIR_STRONGLY_TAKEN
+};
 
 static void
 restart(cpu_state_t *state, unsigned seqno, uint64_t new_pc, unsigned rob_index,
@@ -634,13 +685,35 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
         }
 
         if (re.restart) {
-            if (re.dec.class == isa_insn_class_compjump && re.fp.ras_popped_entry != -1) {
+            if (debug_ras && re.dec.class == isa_insn_class_compjump && re.fp.ras_popped_entry != -1) {
                 printf("%6d MISPREDICTED RETURN?! Entry %d predicted %08x\n",
                        re.fp.seqno, re.fp.ras_popped_entry,
                        (uint32_t) re.fp.addr_next_predicted);
             }
 
             resume();
+        }
+
+        if (use_dynamic_bp) {
+            if (re.dec.class == isa_insn_class_branch)  {
+
+                bp_t *bp = &bp_table[bp_hash(re.dec.insn_addr)];
+
+                if (bp->tag != re.dec.insn_addr) {
+                    bp->tag = re.dec.insn_addr;
+                    bp->dir = re.fp.br_predicted_dir;
+                    n_bp_misses++;
+                } else {
+                    n_bp_hits++;
+                    n_bp_mispredicts += re.restart;
+                }
+
+                if (re.restart) {
+                    bp->dir = bp_dir_weaken[bp->dir];
+                } else {
+                    bp->dir = bp_dir_strengthen[bp->dir];
+                }
+            }
         }
 
         ++n_retired;
@@ -741,7 +814,6 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
             insn = 0;
         }
 
-        /* XXX Cheating a bit here until I can get a real predictor */
         uint64_t pc_next = addr + 4;
         isa_decoded_t dec = arch->decode(addr, insn);
         int ras_popped_entry = -1;
@@ -749,11 +821,25 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
         const char *event = NULL;
         unsigned before_ras_top     = ras_top;
         unsigned before_ras_free_rp = ras_free_rp;
+        bp_direction_t br_predicted_dir = BP_DIR_WEAKLY_NOT_TAKEN;
 
         switch (dec.class) {
         case isa_insn_class_branch:
-            if (dec.jumpbranch_target < addr)
+            if (dec.jumpbranch_target < addr) {
+                br_predicted_dir = BP_DIR_WEAKLY_TAKEN;
+            }
+
+            unsigned bp_index = bp_hash(addr);
+
+            if (use_dynamic_bp && bp_table[bp_index].tag == addr) {
+                br_predicted_dir = bp_table[bp_index].dir;
+            }
+
+            if (br_predicted_dir == BP_DIR_WEAKLY_TAKEN ||
+                br_predicted_dir == BP_DIR_STRONGLY_TAKEN) {
+
                 pc_next = dec.jumpbranch_target;
+            }
             break;
 
         case isa_insn_class_jump:
@@ -768,6 +854,7 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
             // Table 2.1
             bool rd_link = dec.dest_reg == 1 || dec.dest_reg == 5;
             bool rs1_link = dec.source_reg_a == 1 || dec.source_reg_a == 5;
+
             if (!rd_link && !rs1_link)
                 break;
 
@@ -806,6 +893,7 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
             .after_ras_free_rp   = ras_free_rp,
             .ras_popped_entry    = ras_popped_entry,
             .ras_pushed_entry    = ras_pushed_entry,
+            .br_predicted_dir    = br_predicted_dir,
         };
 
         if (++fb_wp == FETCH_BUFFER_SIZE)
