@@ -343,7 +343,8 @@ visualize_retirement(cpu_state_t *state, unsigned rob_index, rob_entry_t re)
     line[fp.commit_ts  % WIDTH] = 'C';
     line[n_cycles      % WIDTH] = 'R';
 
-    printf("%5d ", fp.seqno);
+    printf("%6d ", n_cycles);
+    printf("%6d ", fp.seqno);
     printf("%s ",  line);
 
     uint64_t store_data;
