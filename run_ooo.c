@@ -85,14 +85,6 @@ typedef struct fetch_parcel_st {
     uint64_t            addr_next_predicted; // XXX crude and expensive
     uint32_t            insn;
 
-    /* This is awkward: missed branches need to restore the state to
-     * right after executing the branch and exceptions needs to
-     * restore the state from before.  Keeping both with each
-     * instruction seems a bit clumsy.  Having explicit checkpoints
-     * might have made this cleaner.
-     */
-    unsigned            before_ras_top;
-    unsigned            before_ras_free_rp;
     unsigned            after_ras_top;
     unsigned            after_ras_free_rp;
 
@@ -825,8 +817,6 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
         int ras_popped_entry = -1;
         int ras_pushed_entry = -1;
         const char *event = NULL;
-        unsigned before_ras_top     = ras_top;
-        unsigned before_ras_free_rp = ras_free_rp;
         bp_direction_t br_predicted_dir = BP_DIR_WEAKLY_NOT_TAKEN;
 
         switch (dec.class) {
@@ -893,8 +883,6 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
             .insn                = insn,
             .fetch_ts            = n_cycles,
 
-            .before_ras_top      = before_ras_top,
-            .before_ras_free_rp  = before_ras_free_rp,
             .after_ras_top       = ras_top,
             .after_ras_free_rp   = ras_free_rp,
             .ras_popped_entry    = ras_popped_entry,
