@@ -580,6 +580,8 @@ resume(void)
  * #6: LW       <--- most recent
  * #7:          <--- wp
  */
+static fetch_parcel_t recently_retired;
+
 static void
 ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
 {
@@ -624,10 +626,11 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
                         exception_info.code &  (1 << 31) ? "INTERRUPT" : "EXCEPTION",
                         exception_info.code & ~(1 << 31), exception_info.info);
 
-            restart(state, re.fp.seqno - 1,
+            restart(state, recently_retired.seqno,
                     arch->handle_exception(state, re.dec.insn_addr, exception_info),
                     rob_rp - 1,
-                    re.fp.before_ras_top, re.fp.before_ras_free_rp);
+                    recently_retired.after_ras_top,
+                    recently_retired.after_ras_free_rp);
             resume();
 
             costate->pc = arch->handle_exception(costate, costate->pc, exception_info);
@@ -716,6 +719,8 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
                 }
             }
         }
+
+        recently_retired = re.fp;
 
         ++n_retired;
 
