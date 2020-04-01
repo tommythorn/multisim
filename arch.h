@@ -175,7 +175,7 @@ typedef struct isa_st {
 
     const bool is_64bit;
 
-    void (*setup)(cpu_state_t *, elf_info_t *, verbosity_t);
+    void (*setup)(cpu_state_t *);
 
     isa_decoded_t (*decode)(uint64_t insn_addr, uint32_t insn);
 

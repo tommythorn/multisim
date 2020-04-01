@@ -145,8 +145,6 @@ typedef struct rob_entry_st {
 
 //////// State
 
-static const arch_t    *arch;
-
 static bp_t             bp_table[BP_TABLE_SIZE];
 static fetch_parcel_t   fb[FETCH_BUFFER_SIZE];
 static unsigned         fetch_seqno;
@@ -266,7 +264,7 @@ is_rob_full(void)
 
 
 static void
-dump_microarch_state(void)
+dump_microarch_state(cpu_state_t *state)
 {
     // FB
     printf("         FB size %d\n", fb_size);
@@ -278,7 +276,7 @@ dump_microarch_state(void)
         isa_decoded_t dec = re.dec;
 
         printf("         ROB[%02d] = %c", p, insn_state_to_char[re.insn_state]);
-        isa_disass(stdout, arch, dec, (isa_result_t) { .result = 0 });
+        isa_disass(stdout, state->arch, dec, (isa_result_t) { .result = 0 });
 
         if (++p == ROB_SIZE)
             p = 0;
@@ -343,7 +341,7 @@ visualize_retirement(cpu_state_t *state, unsigned rob_index, rob_entry_t re)
     bool ready = readreg(re.prs2, re.dec.source_reg_b, &store_data);
     assert(ready);
 
-    isa_disass(stdout, arch, dec,
+    isa_disass(stdout, state->arch, dec,
                (isa_result_t)
                { .result     = prf[re.prd],
                  .msr_result = re.msr_result,
@@ -587,7 +585,7 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
         // We can't interrupt a system instruction as it may already
         // have modified the state and cannot be restarted.
         if (!is_serializing(re.dec) &&
-            arch->get_interrupt_exception(state, &exception_info))
+            state->arch->get_interrupt_exception(state, &exception_info))
             goto exception;
 
         // Can't retire a committed store until the data is ready
@@ -603,7 +601,7 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
             uint64_t store_data;
             bool ready = readreg(re.prs2, re.dec.source_reg_b, &store_data);
             assert(ready);
-            arch->store(state, re.store_addr, store_data, re.dec.loadstore_size, &exc);
+            state->arch->store(state, re.store_addr, store_data, re.dec.loadstore_size, &exc);
 
             if (exc.raised) {
                 re.insn_state = IS_EXCEPTION;
@@ -619,13 +617,13 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
                         exception_info.code & ~(1 << 31), exception_info.info);
 
             restart(state, recently_retired.seqno,
-                    arch->handle_exception(state, re.dec.insn_addr, exception_info),
+                    state->arch->handle_exception(state, re.dec.insn_addr, exception_info),
                     rob_rp - 1,
                     recently_retired.after_ras_top,
                     recently_retired.after_ras_free_rp);
             resume();
 
-            costate->pc = arch->handle_exception(costate, costate->pc, exception_info);
+            costate->pc = state->arch->handle_exception(costate, costate->pc, exception_info);
             break;
         }
 
@@ -726,7 +724,7 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
          */
 
         uint64_t copc;
-        do copc = costate->pc; while (step_simple(arch, costate, state) == 0);
+        do copc = costate->pc; while (step_simple(costate, state) == 0);
 
         bool override = re.mmio ||
             re.dec.source_msr_a == CSR_MCYCLE ||
@@ -778,10 +776,10 @@ ooo_retire(cpu_state_t *state, cpu_state_t *costate, verbosity_t verbosity)
          */
 
         printf("%5d CONCERING LACK OF RETIREMENT\n", n_cycles);
-        dump_microarch_state();
+        dump_microarch_state(state);
     }
 
-    arch->tick(state, n_retired, NULL);
+    state->arch->tick(state, n_retired, NULL);
 }
 
 static void
@@ -804,7 +802,7 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
         }
 
         uint64_t addr = state->pc;
-        uint32_t insn = (uint32_t)arch->load(state, addr, 0 /* = ifetch */, &exc);
+        uint32_t insn = (uint32_t)state->arch->load(state, addr, 0 /* = ifetch */, &exc);
 
         if (exc.raised) {
             // XXX technically should tag this as an illegal address
@@ -813,7 +811,7 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
         }
 
         uint64_t pc_next = addr + 4;
-        isa_decoded_t dec = arch->decode(addr, insn);
+        isa_decoded_t dec = state->arch->decode(addr, insn);
         int ras_popped_entry = -1;
         int ras_pushed_entry = -1;
         const char *event = NULL;
@@ -924,7 +922,7 @@ ooo_decode_rename(cpu_state_t *state, verbosity_t verbosity)
     while (0 < fb_size && !is_rob_full()) {
 
         fetch_parcel_t fetched = fb[fb_rp];
-        isa_decoded_t dec      = arch->decode(fetched.addr, fetched.insn);
+        isa_decoded_t dec      = state->arch->decode(fetched.addr, fetched.insn);
 
         // Serialize system instruction; block issuing until all
         // previous instructions have retired and then only allow a
@@ -1081,7 +1079,7 @@ ooo_exec_load(cpu_state_t *state, verbosity_t verbosity, unsigned load_rob_index
 
     n_loads_reordred += reordered_load;
 
-    *res = arch->load(state, load_addr, load_type, exc);
+    *res = state->arch->load(state, load_addr, load_type, exc);
 
     return true;
 }
@@ -1097,7 +1095,7 @@ ooo_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
     isa_exception_t exc = { 0 };
     uint64_t msr_a =
         dec.source_msr_a != ISA_NO_REG
-        ? arch->read_msr(state, dec.source_msr_a, &exc)
+        ? state->arch->read_msr(state, dec.source_msr_a, &exc)
         : 0;
 
     uint64_t atomic_load_addr = op_a;
@@ -1120,15 +1118,15 @@ ooo_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
     isa_result_t res;
 
     if (!dec.system)
-        res = arch->insn_exec(dec, op_a, op_b, msr_a, &exc);
+        res = state->arch->insn_exec(dec, op_a, op_b, msr_a, &exc);
     else {
-        res = arch->insn_exec_system(state, dec, op_a, op_b, msr_a, &exc);
+        res = state->arch->insn_exec_system(state, dec, op_a, op_b, msr_a, &exc);
         if (!exc.raised && dec.dest_msr != ISA_NO_REG)
             // This works because this is the only active instruction in the pipeline now
-            arch->write_msr(state, re.dec.dest_msr, res.msr_result, &exc);
+            state->arch->write_msr(state, re.dec.dest_msr, res.msr_result, &exc);
     }
 
-    res.result = CANONICALIZE(res.result);
+    res.result = CANONICALIZE(state, res.result);
 
     if (exc.raised)
         goto exception;
@@ -1137,14 +1135,14 @@ ooo_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
 
     switch (dec.class) {
     case isa_insn_class_load:
-        rob[p].store_addr = res.load_addr = CANONICALIZE(res.load_addr);
+        rob[p].store_addr = res.load_addr = CANONICALIZE(state, res.load_addr);
         mmio = is_mmio_space(state, res.load_addr);
 
         if (!ooo_exec_load(state, verbosity, p, res.load_addr, dec.loadstore_size, &exc,
                            &res.result))
             return false;
 
-        res.result = CANONICALIZE(res.result);
+        res.result = CANONICALIZE(state, res.result);
 
         if (exc.raised)
             goto exception;
@@ -1153,13 +1151,13 @@ ooo_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
 
     case isa_insn_class_store:
         // XXX could check the address for exceptions
-        rob[p].store_addr = CANONICALIZE(res.store_addr);
+        rob[p].store_addr = CANONICALIZE(state, res.store_addr);
         break;
 
     case isa_insn_class_atomic:
         // XXX ??
-        res.load_addr = CANONICALIZE(res.load_addr);
-        arch->store(state, atomic_load_addr, res.result, dec.loadstore_size, &exc);
+        res.load_addr = CANONICALIZE(state, res.load_addr);
+        state->arch->store(state, atomic_load_addr, res.result, dec.loadstore_size, &exc);
 
         if (exc.raised)
             goto exception;
@@ -1294,31 +1292,10 @@ step_ooo(
 void
 run_ooo(int num_images, char *images[], verbosity_t verbosity)
 {
-    cpu_state_t *state = state_create();
-    cpu_state_t *costate = state_create();
-    elf_info_t info;
-    int M = 256;
+    cpu_state_t *state = state_create(num_images, images, verbosity);
+    cpu_state_t *costate = state_create(num_images, images, 0);
 
     init_ras();
-
-    memory_ensure_mapped_range(state->mem,
-                               0x80000000, 0x80000000 + M*1024-1);
-
-    memory_ensure_mapped_range(costate->mem,
-                               0x80000000, 0x80000000 + M*1024-1);
-
-    loadelfs(state->mem, num_images, images, &info);
-    loadelfs(costate->mem, num_images, images, &info);
-
-    arch = get_arch(info.machine, info.is_64bit);
-    arch->setup(state, &info, verbosity);
-    arch->setup(costate, &info, 0);
-
-    uint64_t tohost = 0;
-    getelfsym(&info, "tohost", &tohost);
-
-    uint64_t fromhost = 0;
-    getelfsym(&info, "fromhost", &fromhost);
 
     for (int r = 0; r < 32; ++r)
         map[r] = -1;
@@ -1327,11 +1304,9 @@ run_ooo(int num_images, char *images[], verbosity_t verbosity)
         if (step_ooo(state, costate, verbosity))
             break;
 
-        if (tohost && fromhost && simple_htif(arch, state, verbosity, tohost, fromhost))
+        if (simple_htif(state))
             break;
     }
-
-    //fprintf(stderr, "IPC = %.2f\n", (double) n_issue / n_cycles);
 
     state_destroy(state);
     state_destroy(costate);

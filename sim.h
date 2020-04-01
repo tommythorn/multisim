@@ -33,6 +33,10 @@
 struct cpu_state_st {
     verbosity_t     verbosity;
 
+    const arch_t   *arch;
+    uint64_t        tohost, fromhost;
+    elf_info_t      info;
+
     memory_t       *mem;
 
     uint64_t        pc;
@@ -65,10 +69,18 @@ void run_simple(int, char **, verbosity_t);
 void run_ooo(int, char **, verbosity_t);
 
 static inline cpu_state_t *
-state_create(void)
+state_create(int num_images, char *images[], verbosity_t verbosity)
 {
     cpu_state_t *state = calloc(1, sizeof *state);
     state->mem = memory_create();
+    state->verbosity = verbosity;
+
+    memory_ensure_mapped_range(state->mem, 0x80000000, 0x80000000 + 256*1024-1);
+
+    loadelfs(state->mem, num_images, images, &state->info);
+
+    state->arch = get_arch(state->info.machine, state->info.is_64bit);
+    state->arch->setup(state);
 
     return state;
 }
@@ -80,11 +92,11 @@ state_destroy(cpu_state_t *state)
     free(state);
 }
 
-bool simple_htif(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity, uint64_t tohost, uint64_t fromhost);
+bool simple_htif(cpu_state_t *state);
 
 /* Enforce that 32-bit architectures keep the register file in a
    canonical form, that is int32_t sign extended to int64_t/uint64_t */
-#define CANONICALIZE(v) (arch->is_64bit ? (v) : (int32_t)  (v))
+#define CANONICALIZE(state, v) ((state)->arch->is_64bit ? (v) : (int32_t) (v))
 
 // XXX hackish
 char *disk_image;

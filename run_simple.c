@@ -32,8 +32,9 @@
  * Step_simple returns the number of instructions executed
  */
 int
-step_simple(const arch_t *arch, cpu_state_t *state, cpu_state_t *cosimstate)
+step_simple(cpu_state_t *state, cpu_state_t *cosimstate)
 {
+    const arch_t *arch = state->arch;
     isa_exception_t exc = { 0 };
     uint64_t pc = state->pc;
     uint32_t insn;
@@ -54,7 +55,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, cpu_state_t *cosimstate)
     uint64_t msr_a    = dec.source_msr_a != ISA_NO_REG ?
         arch->read_msr(state, dec.source_msr_a, &exc) : 0;
 
-    uint64_t atomic_addr = CANONICALIZE(op_a);
+    uint64_t atomic_addr = CANONICALIZE(state, op_a);
 
     if (!cosimstate)
         arch->get_interrupt_exception(state, &exc);
@@ -74,16 +75,16 @@ step_simple(const arch_t *arch, cpu_state_t *state, cpu_state_t *cosimstate)
         res = arch->insn_exec(dec, op_a, op_b, msr_a, &exc);
     else
         res = arch->insn_exec_system(state, dec, op_a, op_b, msr_a, &exc);
-    res.result = CANONICALIZE(res.result);
+    res.result = CANONICALIZE(state, res.result);
 
     if (exc.raised)
         goto exception;
 
     switch (dec.class) {
     case isa_insn_class_load:
-        res.load_addr = CANONICALIZE(res.load_addr);
+        res.load_addr = CANONICALIZE(state, res.load_addr);
         res.result = arch->load(state, res.load_addr, dec.loadstore_size, &exc);
-        res.result = CANONICALIZE(res.result);
+        res.result = CANONICALIZE(state, res.result);
 
         if (exc.raised)
             goto exception;
@@ -92,8 +93,8 @@ step_simple(const arch_t *arch, cpu_state_t *state, cpu_state_t *cosimstate)
         break;
 
     case isa_insn_class_store:
-        res.store_addr = CANONICALIZE(res.store_addr);
-        res.store_value = CANONICALIZE(res.store_value);
+        res.store_addr = CANONICALIZE(state, res.store_addr);
+        res.store_value = CANONICALIZE(state, res.store_value);
         arch->store(state, res.store_addr, res.store_value, dec.loadstore_size, &exc);
 
         if (exc.raised)
@@ -114,23 +115,23 @@ step_simple(const arch_t *arch, cpu_state_t *state, cpu_state_t *cosimstate)
 
 
     case isa_insn_class_branch:
-        dec.jumpbranch_target = CANONICALIZE(dec.jumpbranch_target);
+        dec.jumpbranch_target = CANONICALIZE(state, dec.jumpbranch_target);
         state->pc = res.branch_taken ? dec.jumpbranch_target : state->pc + 4;
         break;
 
     case isa_insn_class_jump:
-        dec.jumpbranch_target = CANONICALIZE(dec.jumpbranch_target);
+        dec.jumpbranch_target = CANONICALIZE(state, dec.jumpbranch_target);
         state->pc = dec.jumpbranch_target;
         break;
 
     case isa_insn_class_compjump:
-        res.compjump_target = CANONICALIZE(res.compjump_target);
+        res.compjump_target = CANONICALIZE(state, res.compjump_target);
         state->pc = res.compjump_target;
         break;
 
     default:
         state->pc += 4;
-        state->pc = CANONICALIZE(state->pc);
+        state->pc = CANONICALIZE(state, state->pc);
         break;
     }
 
@@ -163,8 +164,16 @@ exception:
     return exc.raised ? 0 : 1;
 }
 
-bool simple_htif(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity, uint64_t tohost, uint64_t fromhost)
+bool simple_htif(cpu_state_t *state)
 {
+    const arch_t *arch = state->arch;
+    verbosity_t verbosity = state->verbosity;
+    uint64_t tohost = state->tohost;
+    uint64_t fromhost = state->fromhost;
+
+    if (!tohost || !fromhost)
+        return false;
+
     if (tohost && verbosity & VERBOSE_TOHOST)  {
         isa_exception_t exc = { 0 };
         uint32_t val = arch->load(state, tohost, 4, &exc);
@@ -225,31 +234,15 @@ bool simple_htif(const arch_t *arch, cpu_state_t *state, verbosity_t verbosity, 
     return false;
 }
 
-
 void run_simple(int num_images, char *images[], verbosity_t verbosity)
 {
-    cpu_state_t *state = state_create();
-    const arch_t *arch;
-    elf_info_t info;
-
-    memory_ensure_mapped_range(state->mem, 0x80000000, 0x80000000 + 256*1024-1);
-
-    loadelfs(state->mem, num_images, images, &info);
-
-    arch = get_arch(info.machine, info.is_64bit);
-    arch->setup(state, &info, verbosity);
-
-    uint64_t tohost = 0;
-    getelfsym(&info, "tohost", &tohost);
-
-    uint64_t fromhost = 0;
-    getelfsym(&info, "fromhost", &fromhost);
+    cpu_state_t *state = state_create(num_images, images, verbosity);
 
     for (;;) {
-        if (step_simple(arch, state, false) == 0)
+        if (step_simple(state, NULL))
             continue;
 
-        if (tohost && fromhost && simple_htif(arch, state, verbosity, tohost, fromhost))
+        if (simple_htif(state))
             break;
     }
 
@@ -261,10 +254,10 @@ void run_simple(int num_images, char *images[], verbosity_t verbosity)
         uint64_t begin_signature;
         uint64_t end_signature;
 
-        if (getelfsym(&info, "begin_signature", &begin_signature) &&
-            getelfsym(&info, "end_signature", &end_signature))
+        if (getelfsym(&state->info, "begin_signature", &begin_signature) &&
+            getelfsym(&state->info, "end_signature", &end_signature))
             for (uint32_t a = begin_signature; a < end_signature; a += 4)
-                printf("%08"PRId64"\n", arch->load(state, a, 4, &exc));
+                printf("%08"PRId64"\n", state->arch->load(state, a, 4, &exc));
     }
 
     state_destroy(state);

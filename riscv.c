@@ -1552,15 +1552,19 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, isa
 }
 
 static void
-setup(cpu_state_t *state, elf_info_t *info, verbosity_t verbosity)
+setup(cpu_state_t *state)
 {
     riscv_state_t *s = calloc(1, sizeof (riscv_state_t));
     state->arch_specific = s;
-    state->verbosity = verbosity;
     memset(state->r, 0, sizeof state->r);
-    state->pc = info->program_entry;
-    if (!info->is_64bit)
+    state->pc = state->info.program_entry;
+    if (!state->info.is_64bit)
         state->pc = (int32_t)state->pc;
+
+    state->tohost = 0;
+    state->fromhost = 0;
+    getelfsym(&state->info, "tohost", &state->tohost);
+    getelfsym(&state->info, "fromhost", &state->fromhost);
 
     state->priv = 3; // M
 
