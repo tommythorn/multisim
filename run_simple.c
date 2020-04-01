@@ -54,7 +54,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, cpu_state_t *cosimstate)
     uint64_t msr_a    = dec.source_msr_a != ISA_NO_REG ?
         arch->read_msr(state, dec.source_msr_a, &exc) : 0;
 
-    uint64_t atomic_load_addr = op_a;
+    uint64_t atomic_addr = CANONICALIZE(op_a);
 
     if (!cosimstate)
         arch->get_interrupt_exception(state, &exc);
@@ -63,7 +63,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, cpu_state_t *cosimstate)
         goto exception;
 
     if (dec.class == isa_insn_class_atomic)
-        op_a = arch->load(state, atomic_load_addr, dec.loadstore_size, &exc);
+        op_a = arch->load(state, atomic_addr, dec.loadstore_size, &exc);
 
     if (exc.raised)
         goto exception;
@@ -103,9 +103,7 @@ step_simple(const arch_t *arch, cpu_state_t *state, cpu_state_t *cosimstate)
         break;
 
     case isa_insn_class_atomic:
-        // XXX ??
-        res.load_addr = CANONICALIZE(res.load_addr);
-        arch->store(state, atomic_load_addr, res.result, dec.loadstore_size, &exc);
+        arch->store(state, atomic_addr, res.result, abs(dec.loadstore_size), &exc);
 
         if (exc.raised)
             goto exception;
