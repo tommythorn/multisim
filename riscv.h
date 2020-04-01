@@ -125,12 +125,13 @@ enum riscv_opcode_op_system_e {
 };
 
 enum riscv_subcode_trap_return_e {
-    ECALL  = 0x000,
-    EBREAK = 0x001,
-    URET   = 0x002,
-    SRET   = 0x102,
-    WFI    = 0x105,
-    MRET   = 0x302,
+    ECALL       = 0x000,
+    EBREAK      = 0x001,
+    URET        = 0x002,
+    SRET        = 0x102,
+    WFI         = 0x105,
+    SFENCE_VMA  = 0x120,
+    MRET        = 0x302,
 };
 
 enum riscv_opcode_op_div_e {

@@ -232,7 +232,6 @@ disass_insn(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
                  opcode_load_op_name[i.i.funct3], N[i.i.rd], i.i.imm11_0, N[i.i.rs1]);
         break;
 
-
     case MISC_MEM:
         snprintf(buf, buf_size, "%s", i.r.funct3 ? "fence.i" : "fence");
         break;
@@ -412,14 +411,14 @@ disass_insn(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
       switch (i.r.funct3) {
       case ECALLEBREAK:
           switch (i.i.imm11_0) {
-          case ECALL:  snprintf(buf, buf_size, "%s", "ecall"); return;
-          case EBREAK: snprintf(buf, buf_size, "%s", "ebreak"); return;
-          case URET:   snprintf(buf, buf_size, "%s", "uret"); return;
-          case SRET:   snprintf(buf, buf_size, "%s", "sret"); return;
-          case WFI:    snprintf(buf, buf_size, "%s", "wfi"); return;
-          case MRET:   snprintf(buf, buf_size, "%s", "mret"); return;
-          default:
-              goto unhandled;
+          case ECALL:      snprintf(buf, buf_size, "%s", "ecall"); return;
+          case EBREAK:     snprintf(buf, buf_size, "%s", "ebreak"); return;
+          case URET:       snprintf(buf, buf_size, "%s", "uret"); return;
+          case SRET:       snprintf(buf, buf_size, "%s", "sret"); return;
+          case WFI:        snprintf(buf, buf_size, "%s", "wfi"); return;
+          case MRET:       snprintf(buf, buf_size, "%s", "mret"); return;
+          case SFENCE_VMA: snprintf(buf, buf_size, "%s", "sfence.vma"); return;
+          default:         goto unhandled;
           }
           break;
 
@@ -1022,6 +1021,10 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
     return res;
 }
 
+static void
+insn_exec_sfence_vma(cpu_state_t *s)
+{
+}
 
 static isa_result_t
 insn_exec_system(cpu_state_t *s, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
@@ -1075,6 +1078,10 @@ insn_exec_system(cpu_state_t *s, isa_decoded_t dec, uint64_t op_a_u, uint64_t op
                  * Wait for interrupts.  Is semantically equivalent to
                  * a branch backwards to same OR nop, dealers choice.
                  */
+                break;
+
+            case SFENCE_VMA:
+                insn_exec_sfence_vma(s);
                 break;
 
             default:
