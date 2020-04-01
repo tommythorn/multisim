@@ -35,6 +35,9 @@ regress: run_dhry
 
 all: multisim
 
+fast:
+	$(MAKE) OPT=-O
+
 multisim: $(OBJS)
 	$(CC) $(LDFLAGS) $^ -o $@
 
