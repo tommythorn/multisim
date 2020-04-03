@@ -105,6 +105,7 @@ typedef enum isa_insn_class_e {
 typedef struct isa_decoded_st {
     uint64_t            insn_addr;
     uint32_t            insn;
+    int                 insn_len; // typically 4 or 2
     isa_reg_t           dest_reg, source_reg_a, source_reg_b;
     isa_msr_t           dest_msr, source_msr_a;
     isa_insn_class_t    class;

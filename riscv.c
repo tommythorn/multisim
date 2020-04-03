@@ -45,6 +45,7 @@
 #include "sim.h"
 #include "arch.h"
 #include "riscv.h"
+#include "rvc.h"
 
 static const bool debug_cache = false;
 
@@ -132,12 +133,19 @@ static const uint64_t csr_mask[0x1000] = {
 
 static const char *reg_name[32] = {
     //  0     1     2     3     4     5     6     7     8     9    10    11
-    "0",   "ra", "sp", "gp", "tp", "t0", "t1", "t2", "s0", "s1", "a0", "a1",
+    "zero", "ra", "sp", "gp", "tp", "t0", "t1", "t2", "s0", "s1", "a0", "a1",
     // 12    13    14    15    16    17    18    19    20    21    22    23
     "a2",   "a3", "a4", "a5", "a6", "a7", "s2", "s3", "s4", "s5", "s6", "s7",
     // 24    25    26    27    28    29    30    31
     "s8",   "s9","s10","s11", "t3", "t4", "t5", "t6"
 };
+
+const char *freg_name[32] = {
+    "ft0", "ft1", "ft2", "ft3", "ft4", "ft5", "ft6", "ft7",
+    "fs0", "fs1", "fa0", "fa1", "fa2", "fa3", "fa4", "fa5",
+    "fa6", "fa7", "fs2", "fs3", "fs4", "fs5", "fs6", "fs7",
+    "fs8", "fs9", "fs10", "fs11", "ft8", "ft9", "ft10", "ft11"
+ };
 
 static const char *opcode_name[32] = {
     "LOAD", "LOAD_FP", "CUSTOM0", "MISC_MEM", "OP_IMM", "AUIPC", "OP_IMM_32", "EXT0",
@@ -221,86 +229,134 @@ csr_fmt(unsigned csrno)
 }
 
 static void
-disass_insn(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
+disass_insn(uint64_t pc, uint32_t insn, char *buf, size_t buf_size, int xlen)
 {
-    insn_t i = {.raw = insn };
+    insn_t i = {.raw = rvcdecoder(insn, xlen) };
     const char **N = reg_name;
+    // To completely match binutils' inconsistencies, we'd have to
+    // include a bunch of special cases
+    const bool match_binutils = true;
 
     switch (i.r.opcode) {
     case LOAD:
-        snprintf(buf, buf_size, "%-11s%s,%d(%s)",
+        snprintf(buf, buf_size, "%-8s%s,%d(%s)",
                  opcode_load_op_name[i.i.funct3], N[i.i.rd], i.i.imm11_0, N[i.i.rs1]);
         break;
 
     case MISC_MEM:
+        // XXX There's a lot of stuff that's not handled here
         snprintf(buf, buf_size, "%s", i.r.funct3 ? "fence.i" : "fence");
         break;
 
     case LOAD_FP: {
-        char *name =
-            i.s.funct3 == FLW ? "lsw" :
-            i.s.funct3 == FLD ? "lsd" :
-            "??? load_fp ???";
-        int imm = i.s.imm4_0 | i.s.imm11_5 << 5;
-        snprintf(buf, buf_size, "%-11s%s,%d(%s)", name, N[i.s.rs2], imm, N[i.s.rs1]);
+        if (i.i.funct3 != FLW && i.i.funct3 != FLD)
+            goto unhandled;
+
+        const char *rd = freg_name[i.i.rd];
+        char *name = i.i.funct3 == FLW ? "flw" :"fld";
+        snprintf(buf, buf_size, "%-8s%s,%d(%s)", name, rd, i.i.imm11_0, N[i.i.rs1]);
         break;
     }
 
-//  case CUSTOM0:
     case OP_IMM:
-        if (i.i.funct3 == ADDI && i.i.rs1 == 0 && i.i.rd == 0 && i.i.imm11_0 == 0)
+        /* Hints (don't mutate state), but get special disassembly  */
+        if (match_binutils && (insn & 3) != 3) {
+            if ((insn & 0xEF83) == 1 && i.i.imm11_0 != 0) {
+                snprintf(buf, buf_size, "%-8s%d", "c.nop", i.i.imm11_0);
+                return;
+            }
+
+            if ((insn & 0xEF83) == 0x4001) { // ?? Why are these treated differently?
+                snprintf(buf, buf_size, "%-8s%s,%d", "c.li", N[i.i.rd], i.i.imm11_0);
+                return;
+            }
+
+            // NB: p.69 requires: rd != {0,2}, but binutils displays the rd == 0 case
+            if ((insn & 0xE003) == 0x6001 && (insn & 0x107C) && (insn & 0x0F80) != 0x100) {
+                snprintf(buf, buf_size, "%-8s%s,%#x", "c.lui", N[i.i.rd],
+                         insn >> 2 & 31 | (int32_t)insn << (31-12) >> (31-5) & 0xFFFE0);
+                return;
+            }
+
+            // XXX c.mv c.add ?
+            if ((insn & 0xf07f) == 0x0002) {
+                snprintf(buf, buf_size, "%-8s %s", "c.slli64", N[i.i.rd]);
+                return;
+            }
+
+            if ((insn & 0xEF83) == 0x0002) {
+                snprintf(buf, buf_size, "%-8s%s,0x%x", "c.slli", N[i.i.rd], i.i.imm11_0);
+                return;
+            }
+
+            if ((insn & 0xF87F) == 0x8001) {
+                const char *op = (insn & 0xFC7F) == 0x8001 ? "c.srli64" : "c.srai64";
+                snprintf(buf, buf_size, "%-8s %s", op, N[i.i.rd]);
+                return;
+            }
+        }
+
+        if (i.i.funct3 == ADDI && i.i.rd == 0 && i.i.imm11_0 == 0)
             // nop pseudo instruction
             snprintf(buf, buf_size, "nop");
-        else if (i.i.funct3 == ADDI && i.i.imm11_0 == 0)
-            // mv pseudo instruction
-            snprintf(buf, buf_size, "%-11s%s,%s",
-                     "mv", N[i.i.rd], N[i.i.rs1]);
         else if (i.i.funct3 == ADDI && i.i.rs1 == 0)
             // li pseudo instruction
-            snprintf(buf, buf_size, "%-11s%s,%d",
-                     "li", N[i.i.rd], i.i.imm11_0);
+            snprintf(buf, buf_size, "%-8s%s,%d", "li", N[i.i.rd], i.i.imm11_0);
+/*
+        else if (i.i.funct3 == ADDI && i.i.imm11_0 == 0 && i.i.rd != i.i.rs1)
+            // mv pseudo instruction
+            snprintf(buf, buf_size, "%-8s%s,%s", "mv", N[i.i.rd], N[i.i.rs1]);
+*/
         else if (i.i.funct3 == SR_I) {
             const char *opcode = i.i.imm11_0 & 1 << 10 ? "srai" : "srli";
-            snprintf(buf, buf_size, "%-11s%s,%s,%d",
+            snprintf(buf, buf_size, "%-8s%s,%s,%#x", // 0x to match binutils :(
                      opcode, N[i.i.rd], N[i.i.rs1],
                      i.i.imm11_0 & 63); // XXX XLEN-1
-        } else
-            snprintf(buf, buf_size, "%-11s%s,%s,%d",
+        } else if (i.i.funct3 == SLLI)
+            snprintf(buf, buf_size, "%-8s%s,%s,%#x", // To match binutils :(
+                     opcode_imm_name[i.i.funct3], N[i.i.rd], N[i.i.rs1], i.i.imm11_0);
+        else
+            snprintf(buf, buf_size, "%-8s%s,%s,%d",
                      opcode_imm_name[i.i.funct3], N[i.i.rd], N[i.i.rs1], i.i.imm11_0);
         break;
 
     case AUIPC:
-        snprintf(buf, buf_size, "%-11s%s,0x%x",
+        snprintf(buf, buf_size, "%-8s%s,0x%x",
                  "auipc", N[i.u.rd], i.u.imm31_12);
         break;
 
     case OP_IMM_32: {
         char op[16];
-        snprintf(op, sizeof op, "%sw",opcode_imm_name[i.r.funct3]);
+        if (i.i.funct3 == 0 & i.i.imm11_0 == 0) {
+            snprintf(buf, buf_size, "%-8s%s,%s", "sext.w", N[i.i.rd], N[i.i.rs1]);
+            return;
+        } else if (i.i.funct3 != 2 && i.i.funct3 != 3)
+            snprintf(op, sizeof op, "%sw", opcode_imm_name[i.i.funct3]);
+        else
+            goto unhandled;
 
-        snprintf(buf, buf_size, "%-11s%s,%s,%d", op, N[i.r.rd], N[i.r.rs1], i.i.imm11_0);
+        snprintf(buf, buf_size, "%-8s%s,%s,%d", op, N[i.i.rd], N[i.i.rs1], i.i.imm11_0);
         break;
     }
 
-//  case EXT0:
     case STORE: {
         int imm = i.s.imm4_0 | i.s.imm11_5 << 5;
-        snprintf(buf, buf_size, "s%-10s%s,%d(%s)",
+        snprintf(buf, buf_size, "s%-7s%s,%d(%s)",
                  1 + opcode_load_op_name[i.s.funct3], N[i.s.rs2], imm, N[i.s.rs1]);
         break;
     }
 
     case STORE_FP: {
-        char *name =
-            i.s.funct3 == FLW ? "fsw" :
-            i.s.funct3 == FLD ? "fsd" :
-            "??? store_fp ???";
+        if (i.s.funct3 != FLW && i.s.funct3 != FLD)
+            goto unhandled;
+
+        const char *rs2 = freg_name[i.s.rs2];
+        char *name = i.s.funct3 == FLW ? "fsw" :"fsd";
         int imm = i.s.imm4_0 | i.s.imm11_5 << 5;
-        snprintf(buf, buf_size, "%-11s%s,%d(%s)", name, N[i.s.rs2], imm, N[i.s.rs1]);
+        snprintf(buf, buf_size, "%-8s%s,%d(%s)", name, rs2, imm, N[i.s.rs1]);
         break;
     }
 
-//  case CUSTOM1:
     case AMO: {
         char insn[16];
         char *suffix = i.r.funct3 & 1 ? ".d" : ".w";
@@ -310,7 +366,7 @@ disass_insn(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
         switch (i.r.funct7 >> 2) {
         case LR:
             snprintf(insn, sizeof insn, "lr%s%s%s", suffix, aq, rl);
-            snprintf(buf, buf_size, "%-11s%s,(%s)", insn,
+            snprintf(buf, buf_size, "%-8s%s,(%s)", insn,
                      N[i.r.rd], N[i.r.rs1]);
             break;
         case SC:
@@ -325,7 +381,7 @@ disass_insn(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
         case AMOMAXU:
             snprintf(insn, sizeof insn, "%s%s%s%s",
                      opcode_amo_name[i.r.funct7 >> 2], suffix, aq, rl);
-            snprintf(buf, buf_size, "%-11s%s,%s,(%s)", insn,
+            snprintf(buf, buf_size, "%-8s%s,%s,(%s)", insn,
                      N[i.r.rd], N[i.r.rs2], N[i.r.rs1]);
             break;
         }
@@ -333,18 +389,39 @@ disass_insn(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
         break;
 
     case OP:
-        if (i.r.funct7 == 1)
-            snprintf(buf, buf_size, "%-11s%s,%s,%s",
+        if (match_binutils) {
+            if (insn == 0x8002)
+                goto unhandled;
+
+            if ((insn & 0xFF83) == 0x9002) {
+                snprintf(buf, buf_size, "c.add   zero,%s", N[i.r.rs2]);
+                return;
+            }
+
+            if ((insn & 0xFF03) == 0x8002) {
+                if (i.r.rd == 0)
+                    snprintf(buf, buf_size, "c.mv    zero,%s", N[i.r.rs2]);
+                else
+                    snprintf(buf, buf_size, "mv      %s,%s", N[i.r.rd], N[i.r.rs2]);
+                return;
+            }
+        }
+
+        if (i.r.funct3 == ADDSUB && !(i.i.imm11_0 >> 10 & 1) && i.r.rd && i.r.rs1 == 0)
+            // mv pseudo instruction
+            snprintf(buf, buf_size, "%-8s%s,%s", "mv", N[i.r.rd], N[i.r.rs2]);
+        else if (i.r.funct7 == 1)
+            snprintf(buf, buf_size, "%-8s%s,%s,%s",
                      opcode_op_div_name[i.r.funct3],
                      N[i.r.rd], N[i.r.rs1], N[i.r.rs2]);
         else
-            snprintf(buf, buf_size, "%-11s%s,%s,%s",
-                     opcode_op_op_name[i.r.funct3 + 8 * (i.i.imm11_0 >> 10 & 1)],
+            snprintf(buf, buf_size, "%-8s%s,%s,%s",
+                     opcode_op_op_name[i.r.funct3 + 8 * (i.r.funct7 >> 5 & 1)],
                      N[i.r.rd], N[i.r.rs1], N[i.r.rs2]);
         break;
+
     case LUI:
-        snprintf(buf, buf_size, "%-11s%s,0x%x",
-                 "lui", N[i.u.rd], i.u.imm31_12);
+        snprintf(buf, buf_size, "%-8s%s,0x%x", "lui", N[i.u.rd], i.u.imm31_12 & 0xFFFFF);
         break;
 
   case OP_32: {
@@ -352,21 +429,31 @@ disass_insn(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
         snprintf(op, sizeof op, "%sw",
                  i.r.funct7 == 1
                  ? opcode_op_div_name[i.r.funct3]
-                 : opcode_op_op_name[i.r.funct3 + 8 * (i.i.imm11_0 >> 10 & 1)]);
+                 : opcode_op_op_name[i.r.funct3 + 8 * (i.r.funct7 >> 5 & 1)]);
 
-        snprintf(buf, buf_size, "%-11s%s,%s,%s", op, N[i.r.rd], N[i.r.rs1], N[i.r.rs2]);
+        if (i.r.funct3 == 2 || i.r.funct3 == 3)
+            goto unhandled;
+
+        snprintf(buf, buf_size, "%-8s%s,%s,%s", op, N[i.r.rd], N[i.r.rs1], N[i.r.rs2]);
         break;
     }
 
-//  ..
     case BRANCH: {
+        if (i.r.funct3 == 2 || i.r.funct3 == 3)
+            goto unhandled;
+
         int imm =
             i.sb.imm12 << 12 | i.sb.imm11 << 11 |
             i.sb.imm10_5 << 5 | i.sb.imm4_1 << 1;
 
-        snprintf(buf, buf_size, "%-11s%s,%s,0x%08"PRIx32,
-                 opcode_op_branch_name[i.r.funct3],
-                 N[i.r.rs1], N[i.r.rs2], (uint32_t)(pc + imm));
+        if (i.r.rs2 == 0)
+            snprintf(buf, buf_size, "%sz    %s,%" PRIx64,
+                     opcode_op_branch_name[i.r.funct3],
+                     N[i.r.rs1], pc + imm);
+        else
+            snprintf(buf, buf_size, "%-8s%s,%s,%" PRIx64,
+                     opcode_op_branch_name[i.r.funct3],
+                     N[i.r.rs1], N[i.r.rs2], pc + imm);
         break;
     }
 
@@ -374,12 +461,15 @@ disass_insn(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
         if (i.i.rd == 0 && i.i.imm11_0 == 0 && i.i.rs1 == 1)
             // ret pseudo instruction
             snprintf(buf, buf_size, "ret");
+        else if (i.i.rd == 0 && i.i.imm11_0 == 0)
+            snprintf(buf, buf_size, "%-8s%s", "jr", N[i.i.rs1]);
+        else if (i.i.rd == 1 && i.i.imm11_0 == 0)
+            snprintf(buf, buf_size, "%-8s%s", "jalr", N[i.i.rs1]);
         else
-            snprintf(buf, buf_size, "%-11s%s,%s,%d",
-                     "jalr", N[i.i.rd], N[i.i.rs1], i.i.imm11_0);
+            snprintf(buf, buf_size, "%-8s%s,%s,%d", "jalr", N[i.i.rd],
+                     N[i.i.rs1], i.i.imm11_0);
         break;
 
-//  case RES0:
     case JAL: {
         int imm =
             i.uj.imm20    << 20 |
@@ -394,21 +484,18 @@ disass_insn(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
 
         if (i.uj.rd == 0)
             // Pseudo "j" instruction
-            snprintf(buf, buf_size, "%-11s0x%08"PRIx32,
-                     "j", (uint32_t)addr);
+            snprintf(buf, buf_size, "%-8s%" PRIx64, "j", addr);
         else if (i.uj.rd == 1)
             // Pseudo "jal" instruction (without destination)
-            snprintf(buf, buf_size, "%-11s0x%08"PRIx32,
-                     "jal", (uint32_t)addr);
+            snprintf(buf, buf_size, "%-8s%" PRIx64, "jal", addr);
         else
-            snprintf(buf, buf_size, "%-11s%s,0x%08"PRIx32,
-                     "jal", N[i.uj.rd], (uint32_t)addr);
+            snprintf(buf, buf_size, "%-8s%s,%" PRIx64, "jal", N[i.uj.rd], addr);
 
         break;
     }
 
   case SYSTEM:
-      switch (i.r.funct3) {
+      switch (i.i.funct3) {
       case ECALLEBREAK:
           switch (i.i.imm11_0) {
           case ECALL:      snprintf(buf, buf_size, "%s", "ecall"); return;
@@ -425,20 +512,20 @@ disass_insn(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
       case CSRRS:
           if (i.i.rs1 == 0) {
               switch ((unsigned)i.i.imm11_0) {
-              case 0xC00: snprintf(buf, buf_size, "%-11s%s", "rdcycle",   N[i.i.rd]); return;
-              case 0xC01: snprintf(buf, buf_size, "%-11s%s", "rdtime",    N[i.i.rd]); return;
-              case 0xC02: snprintf(buf, buf_size, "%-11s%s", "rdinstret", N[i.i.rd]); return;
-              default:    snprintf(buf, buf_size, "%-11s%s,%s", "csrr",  N[i.i.rd], csr_fmt(i.i.imm11_0 & 0xFFFU)); return;
+              case 0xC00: snprintf(buf, buf_size, "%-8s%s", "rdcycle",   N[i.i.rd]); return;
+              case 0xC01: snprintf(buf, buf_size, "%-8s%s", "rdtime",    N[i.i.rd]); return;
+              case 0xC02: snprintf(buf, buf_size, "%-8s%s", "rdinstret", N[i.i.rd]); return;
+              default:    snprintf(buf, buf_size, "%-8s%s,%s", "csrr",  N[i.i.rd], csr_fmt(i.i.imm11_0 & 0xFFFU)); return;
               }
           } else
-              snprintf(buf, buf_size, "%-11s%s,%s,%s",  "csrrs", N[i.i.rd], csr_name[i.i.imm11_0 & 0xFFFU], N[i.i.rs1]);
+              snprintf(buf, buf_size, "%-8s%s,%s,%s",  "csrrs", N[i.i.rd], csr_name[i.i.imm11_0 & 0xFFFU], N[i.i.rs1]);
           return;
 
-      case CSRRSI: snprintf(buf, buf_size, "%-11s%s,%s,%d", "csrrsi", N[i.i.rd], csr_fmt(i.i.imm11_0 & 0xFFFU), i.i.rs1); return;
-      case CSRRC:  snprintf(buf, buf_size, "%-11s%s,%s,%s", "csrrc",  N[i.i.rd], csr_fmt(i.i.imm11_0 & 0xFFFU), N[i.i.rs1]); return;
-      case CSRRCI: snprintf(buf, buf_size, "%-11s%s,%s,%d", "csrrci", N[i.i.rd], csr_fmt(i.i.imm11_0 & 0xFFFU), i.i.rs1); return;
-      case CSRRW:  snprintf(buf, buf_size, "%-11s%s,%s,%s", "csrrw",  N[i.i.rd], csr_fmt(i.i.imm11_0 & 0xFFFU), N[i.i.rs1]); return;
-      case CSRRWI: snprintf(buf, buf_size, "%-11s%s,%s,%d", "csrrwi", N[i.i.rd], csr_fmt(i.i.imm11_0 & 0xFFFU), i.i.rs1); return;
+      case CSRRSI: snprintf(buf, buf_size, "%-8s%s,%s,%d", "csrrsi", N[i.i.rd], csr_fmt(i.i.imm11_0 & 0xFFFU), i.i.rs1); return;
+      case CSRRC:  snprintf(buf, buf_size, "%-8s%s,%s,%s", "csrrc",  N[i.i.rd], csr_fmt(i.i.imm11_0 & 0xFFFU), N[i.i.rs1]); return;
+      case CSRRCI: snprintf(buf, buf_size, "%-8s%s,%s,%d", "csrrci", N[i.i.rd], csr_fmt(i.i.imm11_0 & 0xFFFU), i.i.rs1); return;
+      case CSRRW:  snprintf(buf, buf_size, "%-8s%s,%s,%s", "csrrw",  N[i.i.rd], csr_fmt(i.i.imm11_0 & 0xFFFU), N[i.i.rs1]); return;
+      case CSRRWI: snprintf(buf, buf_size, "%-8s%s,%s,%d", "csrrwi", N[i.i.rd], csr_fmt(i.i.imm11_0 & 0xFFFU), i.i.rs1); return;
 
       default:
           goto unhandled;
@@ -448,28 +535,43 @@ disass_insn(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
     case OP_FP:
         switch (i.r.funct7) {
         case FMV_D_X:
-            snprintf(buf, buf_size, "%-11sf%s,f%s",
+            snprintf(buf, buf_size, "%-8sf%s,f%s",
                      "fmv.d.x", N[i.r.rd], N[i.r.rs1]); break;
         default: goto unhandled;
         }
         break;
 
-//  ...
-
     default:
 unhandled:
-        warn("Opcode %s isn't handled, insn 0x%08x\n", opcode_name[i.r.opcode], insn);
-        *buf = 0;
+        if ((insn & 0xFFFF) == 0) {
+            snprintf(buf, buf_size, "unimp");
+        } else {
+            snprintf(buf, buf_size, "0x%x", insn);
+        }
         return;
     }
 }
 
-static isa_decoded_t
-decode(uint64_t insn_addr, uint32_t insn)
+static void
+disass_insn32(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
 {
-    insn_t i = { .raw = insn };
-    isa_decoded_t dec = { .insn_addr = insn_addr, .insn = insn };
+    disass_insn(pc, insn, buf, buf_size, 32);
+}
 
+static void
+disass_insn64(uint64_t pc, uint32_t insn, char *buf, size_t buf_size)
+{
+    disass_insn(pc, insn, buf, buf_size, 64);
+}
+
+static isa_decoded_t
+decode(uint64_t insn_addr, uint32_t orig_insn, int xlen)
+{
+    uint32_t insn = rvcdecoder(orig_insn, xlen);
+    insn_t i = { .raw = insn };
+    isa_decoded_t dec = { .insn_addr = insn_addr, .insn = i.raw };
+
+    dec.insn_len     = (orig_insn & 3) == 3 ? 4 : 2;
     dec.dest_reg     = ISA_NO_REG;
     dec.source_reg_a = 0;
     dec.source_reg_b = 0;
@@ -568,9 +670,9 @@ decode(uint64_t insn_addr, uint32_t insn)
         case AMOXOR:
             dec.class          = isa_insn_class_atomic;
             dec.loadstore_size = i.r.funct3 & 1 ? 8 : -4;
-            dec.source_reg_a   = i.s.rs1;
-            dec.source_reg_b   = i.s.rs2;
-            dec.dest_reg       = i.i.rd;
+            dec.source_reg_a   = i.r.rs1;
+            dec.source_reg_b   = i.r.rs2;
+            dec.dest_reg       = i.r.rd;
             break;
         };
         break;
@@ -702,6 +804,17 @@ decode(uint64_t insn_addr, uint32_t insn)
     return dec;
 }
 
+static isa_decoded_t
+decode32(uint64_t insn_addr, uint32_t insn)
+{
+    return decode(insn_addr, insn, 32);
+}
+
+static isa_decoded_t
+decode64(uint64_t insn_addr, uint32_t insn)
+{
+    return decode(insn_addr, insn, 64);
+}
 
 static isa_result_t
 raise_exception(int cause, uint64_t info, isa_exception_t *exc)
@@ -989,7 +1102,7 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
         return res;
 
     case JALR:
-        res.result = dec.insn_addr + 4;
+        res.result = dec.insn_addr + dec.insn_len;
         res.compjump_target = (op_a + dec.imm) & -2LL;
 
         if (res.compjump_target & 3)
@@ -998,7 +1111,7 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
         return res;
 
     case JAL:
-        res.result = dec.insn_addr + 4;
+        res.result = dec.insn_addr + dec.insn_len;
 
         if (dec.jumpbranch_target & 3)
             return raise_exception(EXCP_INSN_MISALIGN, dec.jumpbranch_target, exc);
@@ -1006,13 +1119,6 @@ insn_exec(int xlen, isa_decoded_t dec, uint64_t op_a_u, uint64_t op_b_u,
         return res;
 
     default:
-        if (0)
-        warn("Opcode %s exec not implemented, insn %08"PRIx32":%08x "
-             "i{%x,%s,%x,%s,%s,%x}\n",
-             opcode_name[i.r.opcode], (uint32_t)dec.insn_addr, i.raw,
-             i.i.imm11_0, reg_name[i.r.rs1], i.r.funct3,
-             reg_name[i.r.rd],
-             opcode_name[i.r.opcode], i.r.opext);
     illegal_insn:
         return raise_exception(EXCP_INSN_ILLEGAL, 0, exc);
     }
@@ -1598,10 +1704,10 @@ const arch_t arch_riscv32 = {
     .reg_name = reg_name,
     .is_64bit = false,
     .setup = setup,
-    .decode = decode,
+    .decode = decode32,
     .insn_exec = insn_exec32,
     .insn_exec_system = insn_exec_system,
-    .disass_insn = disass_insn,
+    .disass_insn = disass_insn32,
     .tick = tick,
     .read_msr = read_msr,
     .write_msr = write_msr,
@@ -1617,10 +1723,10 @@ const arch_t arch_riscv64 = {
     .reg_name = reg_name,
     .is_64bit = true,
     .setup = setup,
-    .decode = decode,
+    .decode = decode64,
     .insn_exec = insn_exec64,
     .insn_exec_system = insn_exec_system,
-    .disass_insn = disass_insn,
+    .disass_insn = disass_insn64,
     .tick = tick,
     .read_msr = read_msr,
     .write_msr = write_msr,

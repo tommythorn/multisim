@@ -157,6 +157,54 @@ enum riscv_opcode_amo_e {
     AMOMAXU     =28,
 };
 
+
+/* Compressed opcodes */
+enum riscv_opcode_c0_e {
+    C0_ADDI4SPN = 0,
+    C0_FLD      = 1,
+    C0_LW       = 2,
+    C0_FLW      = 3, // RV64: c.ld
+    C0_FSD      = 5,
+    C0_SW       = 6,
+    C0_FSW      = 7, // RV64: c.sd
+};
+
+enum riscv_opcode_c1_e {
+    C1_ADDI     = 0, // + nop
+    C1_JAL      = 1,
+    C1_LI       = 2,
+    C1_LUI      = 3, // + c.addi16sp
+    C1_MISCALU  = 4, // srli, srai, andi, sub, xor, or, and
+    C1_J        = 5,
+    C1_BEQZ     = 6,
+    C1_BNEZ     = 7,
+};
+
+enum riscv_opcode_c1_miscalu_e {
+    C1_MISCALU_SRLI = 0,
+    C1_MISCALU_SRAI = 1,
+    C1_MISCALU_ANDI = 2,
+    C1_MISCALU_EXT  = 3,
+};
+
+enum riscv_opcode_c1_miscalu_ext_e {
+    C1_MISCALU_EXT_SUB = 0,
+    C1_MISCALU_EXT_XOR = 1,
+    C1_MISCALU_EXT_OR  = 2,
+    C1_MISCALU_EXT_AND = 3,
+};
+
+enum riscv_opcode_c2_e {
+    C2_SLLI     = 0,
+    C2_FLDSP    = 1,
+    C2_LWSP     = 2,
+    C2_FLWSP    = 3,
+    C2_ADD      = 4, // + c.mv c.jr c.ebreak c.jalr
+    C2_FSDSP    = 5,
+    C2_SWSP     = 6,
+    C2_FSWSP    = 7,
+};
+
 /* CSRs */
 
 enum riscv_csr_e {
