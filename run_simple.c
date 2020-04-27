@@ -239,7 +239,7 @@ void run_simple(int num_images, char *images[], verbosity_t verbosity)
     cpu_state_t *state = state_create(num_images, images, verbosity);
 
     for (;;) {
-        if (step_simple(state, NULL))
+        if (!step_simple(state, NULL))
             continue;
 
         if (simple_htif(state))
