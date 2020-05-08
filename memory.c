@@ -26,6 +26,7 @@
 #include <stdint.h>
 #include <inttypes.h>
 #include <arpa/inet.h>
+#include "safe_alloc.h"
 
 /*
   The simulation space address to physical address translation is a
@@ -72,7 +73,7 @@ void *memory_physical(memory_t *m, uint64_t addr, uint64_t size)
 
 memory_t *memory_create(void)
 {
-    memory_t *m = calloc(sizeof (memory_t), 1);
+    memory_t *m = safe_calloc(sizeof (memory_t), 1);
     m->addr_mask = ~0ULL;
     return m;
 }
@@ -112,7 +113,7 @@ uint16_t memory_endian_fix16(memory_t *m, uint16_t v)
 static struct entry
 mk_entry(uint64_t start, uint64_t end)
 {
-    return (struct entry) {calloc(end - start, 1), start, end};
+    return (struct entry) {safe_calloc(end - start, 1), start, end};
 }
 
 

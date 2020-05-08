@@ -26,6 +26,7 @@
 #include <arpa/inet.h>
 #include <inttypes.h>
 #include <alloca.h>
+#include "safe_alloc.h"
 
 static const bool enable_verb_prog_sec = false;
 static const bool enable_verb_elf      = false;

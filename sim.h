@@ -28,6 +28,7 @@
 #include <assert.h>
 #include "memory.h"
 #include "arch.h"
+#include "safe_alloc.h"
 
 /* All the common architectual state */
 struct cpu_state_st {
@@ -71,7 +72,7 @@ void run_ooo(int, char **, verbosity_t);
 static inline cpu_state_t *
 state_create(int num_images, char *images[], verbosity_t verbosity)
 {
-    cpu_state_t *state = calloc(1, sizeof *state);
+    cpu_state_t *state = safe_calloc(1, sizeof *state);
     state->mem = memory_create();
     state->verbosity = verbosity;
 

@@ -1660,7 +1660,7 @@ store(cpu_state_t *s, uint64_t address, uint64_t value, int mem_access_size, isa
 static void
 setup(cpu_state_t *state)
 {
-    riscv_state_t *s = calloc(1, sizeof (riscv_state_t));
+    riscv_state_t *s = safe_calloc(1, sizeof (riscv_state_t));
     state->arch_specific = s;
     memset(state->r, 0, sizeof state->r);
     state->pc = state->info.program_entry;

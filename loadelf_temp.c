@@ -181,13 +181,13 @@ int SZ(loadelf,)(memory_t *m, char *name, FILE *f, elf_info_t *elf_info)
 
         for (int i = 0; i < ehdr.e_shnum; ++i) {
             if (sh[i].sh_type == SHT_STRTAB && i != ehdr.e_shstrndx && !elf_info->strtab) {
-                elf_info->strtab = malloc(sh[i].sh_size);
+                elf_info->strtab = safe_malloc(sh[i].sh_size);
                 fseek(f, sh[i].sh_offset, SEEK_SET);
                 if (fread(elf_info->strtab, sh[i].sh_size, 1, f) != 1) break;
             }
 
             if (sh[i].sh_type == SHT_SYMTAB && !elf_info->symtab) {
-                elf_info->symtab = malloc(sh[i].sh_size);
+                elf_info->symtab = safe_malloc(sh[i].sh_size);
                 fseek(f, sh[i].sh_offset, SEEK_SET);
                 if (fread(elf_info->symtab, sh[i].sh_size, 1, f) != 1) break;
                 elf_info->symtab_len = sh[i].sh_size / sizeof(SZ(Elf,_Sym));
