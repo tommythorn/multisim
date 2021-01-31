@@ -164,27 +164,27 @@ static int              fb_rp = 0, fb_wp = 0, fb_size = 0;
  * We instead use a highly unusual solution that scales much better.
  *
  * RAS entries are always split between a set of free elements from
- * retired pops, a singly linked RAS, and elements in flight in the
- * ROB.
+ * retired pops, a singly linked list representing the current RAS,
+ * and elements in flight in the ROB.
  *
- * If the free set is empty then fetch blocks.
+ * If the free set is empty then fetcher blocks.
  *
- * Push pulls a fresh free RAS entry from the free sets and links it
- * into the RAS, replacing the top.  If we need to restart, restoring
+ * "Push" grabs a fresh free RAS entry from the free sets and links it
+ * into the RAS, making it the new the top.  If we need to restart, restoring
  * the top pointer will undo the push (and the free sets is restored).
  *
- * Pop unlinks the top element and signals that should this
- * instruction retire, then the unlinked element can be reused.  If we
- * restart the the top element change is undone and the element is of
+ * "Pop" unlinks the top element and signals that, if this
+ * instruction retires, then the unlinked element can be reused.  If we
+ * restart then the top element change is undone and the element is of
  * course never reused.
  *
  * Since restarts only adjust the RAS pointer and the free list read
  * pointer, we will return both the RAS and the free set to the
  * original state (Proof pending).
  *
- * Complication: eventually the RAS will consume all free entries and
- * the fetch will deadlock.  To avoid this, we maintain a shadow RAS
- * at retirement and when it reaches a certain size, the oldest
+ * Complication: if the RAS was allowed to consume all free entries then
+ * the fetcher would deadlock.  To avoid this, we maintain a non-speculative,
+ * true, RAS at retirement and when it grows beyond a threshold, the oldest
  * element is freed.  For this to work, we need to block the frontend
  * from accessing this element.  One way to do this is to maintain the
  * RAS end-element in at retirement.
