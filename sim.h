@@ -100,8 +100,8 @@ bool simple_htif(cpu_state_t *state);
 #define CANONICALIZE(state, v) ((state)->arch->is_64bit ? (v) : (int32_t) (v))
 
 // XXX hackish
-char *disk_image;
-bool CONFIG_EARLY_RELEASE;
+extern char *disk_image;
+extern bool CONFIG_EARLY_RELEASE;
 
 #endif
 

@@ -36,6 +36,8 @@
 
 static int run = '1';
 
+char *disk_image;
+bool CONFIG_EARLY_RELEASE = false;
 
 static struct option long_options[] = {
     {"simple",         0, NULL, '1'},
