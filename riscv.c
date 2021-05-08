@@ -1537,7 +1537,8 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, isa_exception_t *exc
     if (mem_access_size == 0)
         mem_access_size = 4, ifetch = true;
 
-    if (address & (abs(mem_access_size) - 1)) {
+    // Unaligned ifetch is allowed when supporting compressed instructions
+    if (!ifetch && address & (abs(mem_access_size) - 1)) {
         raise_exception(EXCP_LOAD_MISALIGN, address, exc);
         return 0;
     }
@@ -1596,7 +1597,7 @@ load(cpu_state_t *s, uint64_t address, int mem_access_size, isa_exception_t *exc
     case -2: return *( int16_t *)p;
     case  2: return *(uint16_t *)p;
     case -4: return *( int32_t *)p;
-    case  4: return *(uint32_t *)p;
+    case  4: return *(uint32_t *)p; // XXX Might be unaligned!
     case -8:
     case  8: return *(uint64_t *)p;
     default: assert(mem_access_size == mem_access_size + 1);

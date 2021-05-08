@@ -89,7 +89,7 @@ step_simple(cpu_state_t *state, cpu_state_t *cosimstate)
         if (exc.raised)
             goto exception;
 
-        state->pc += 4;
+        state->pc += dec.insn_len;
         break;
 
     case isa_insn_class_store:
@@ -100,7 +100,7 @@ step_simple(cpu_state_t *state, cpu_state_t *cosimstate)
         if (exc.raised)
             goto exception;
 
-        state->pc += 4;
+        state->pc += dec.insn_len;
         break;
 
     case isa_insn_class_atomic:
@@ -110,13 +110,13 @@ step_simple(cpu_state_t *state, cpu_state_t *cosimstate)
             goto exception;
 
         res.result = op_a;
-        state->pc += 4;
+        state->pc += dec.insn_len;
         break;
 
 
     case isa_insn_class_branch:
         dec.jumpbranch_target = CANONICALIZE(state, dec.jumpbranch_target);
-        state->pc = res.branch_taken ? dec.jumpbranch_target : state->pc + 4;
+        state->pc = res.branch_taken ? dec.jumpbranch_target : state->pc + dec.insn_len;
         break;
 
     case isa_insn_class_jump:
@@ -130,7 +130,7 @@ step_simple(cpu_state_t *state, cpu_state_t *cosimstate)
         break;
 
     default:
-        state->pc += 4;
+        state->pc += dec.insn_len;
         state->pc = CANONICALIZE(state, state->pc);
         break;
     }

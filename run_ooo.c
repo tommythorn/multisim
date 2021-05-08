@@ -810,8 +810,8 @@ ooo_fetch(cpu_state_t *state, verbosity_t verbosity)
             insn = 0;
         }
 
-        uint64_t pc_next = addr + 4;
         isa_decoded_t dec = state->arch->decode(addr, insn);
+        uint64_t pc_next = addr + dec.insn_len;
         int ras_popped_entry = -1;
         int ras_pushed_entry = -1;
         const char *event = NULL;
@@ -1131,7 +1131,7 @@ ooo_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
     if (exc.raised)
         goto exception;
 
-    uint64_t pc_next = dec.insn_addr + 4;
+    uint64_t pc_next = dec.insn_addr + dec.insn_len;
 
     switch (dec.class) {
     case isa_insn_class_load:
@@ -1211,7 +1211,7 @@ ooo_exec1(cpu_state_t *state, verbosity_t verbosity, unsigned p,
 
     // Flush the pipe on system instructions unless is a compjump
     if (!rob[p].restart && is_serializing(dec)) {
-        pc_next = dec.insn_addr + 4;
+        pc_next = dec.insn_addr + dec.insn_len;
         rob[p].restart = true;
         rob[p].restart_pc = pc_next;
     }

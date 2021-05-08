@@ -272,7 +272,7 @@ static bool step_sscalar(
             fetch_next.predicted_branch_target = fetch.bp.branch_target;
             fetch_next.predicted_taken_branch  = true;
         } else {
-            fetch_next.pc = CANONICALIZE(fetch.pc + 4);
+            fetch_next.pc = CANONICALIZE(fetch.pc + decode.insn_len);
             fetch_next.predicted_taken_branch = false;
         }
     }
@@ -322,7 +322,7 @@ static bool step_sscalar(
                 return true;
 
             execute_next.res = arch->insn_exec_system(state, decode.dec, decode.op_a, decode.op_b, decode.msr_a);
-            flush_pipe_and_restart_from(decode.dec.insn_addr + 4); // XXX wrong for at least ECALL
+            flush_pipe_and_restart_from(decode.dec.insn_addr + decode.dec.insn_len); // XXX wrong for at least ECALL
         }
         else
             execute_next.res = arch->insn_exec(decode.dec, decode.op_a, decode.op_b, decode.msr_a);
@@ -366,8 +366,8 @@ static bool step_sscalar(
                     fprintf(stderr, "  Restarting from %08lx\n", execute_next.dec.jumpbranch_target);
                 } else {
                     fetch_next.bp.is_taken_branch = 0;
-                    flush_pipe_and_restart_from(decode.dec.insn_addr + 4);
-                    fprintf(stderr, "  Restarting to  %08lx\n", decode.dec.insn_addr + 4);
+                    flush_pipe_and_restart_from(decode.dec.insn_addr + decode.dec.insn_len);
+                    fprintf(stderr, "  Restarting to  %08lx\n", decode.dec.insn_addr + decode.dec.insn_len);
                 }
             } else {
                 fprintf(stderr, "Good predicted: %08lx: predicted %staken, target %08x, was %staken, target %08lx\n",
