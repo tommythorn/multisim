@@ -6,7 +6,7 @@ Copyright (c) 2013,2019 Tommy Thorn
 MultiSim
 ~~~~~~~~
 
-MultiSim is Yet Another CPU Simulator which purpose in life is to
+MultiSim is Yet Another CPU Simulator whose purpose is to
 allow easy experimentation with various implementation strategies,
 such as superscalar in-order, sscalar out-of-order, speculative
 sscalar out-of-order, etc etc.
